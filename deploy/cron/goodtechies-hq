@@ -1,0 +1,6 @@
+# GoodTechies HQ: Laravel scheduler. install.sh replaces __APP_DIR__ and installs
+# this as /etc/cron.d/goodtechies-hq (root-owned, mode 644).
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+* * * * * www-data cd __APP_DIR__ && php artisan schedule:run >> /dev/null 2>&1

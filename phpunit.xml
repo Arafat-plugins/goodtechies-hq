@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+        <testsuite name="Permissions">
+            <directory>tests/Permissions</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="BACKUP_DISK" value="backups"/>
+        <env name="BACKUP_ARCHIVE_PASSWORD" value="backup-password-for-tests-only"/>
+        <env name="BROADCAST_CONNECTION" value="null"/>
+        <env name="CACHE_STORE" value="array"/>
+        <env name="DB_CONNECTION" value="pgsql"/>
+        <env name="DB_DATABASE" value="goodtechies_hq_test"/>
+        <env name="DB_USERNAME" value="hq_app"/>
+        <env name="DB_PASSWORD" value=""/>
+        <env name="DB_MIGRATOR_USERNAME" value="hq_migrator"/>
+        <env name="DB_MIGRATOR_PASSWORD" value=""/>
+        <env name="DB_RO_USERNAME" value="hq_ro"/>
+        <env name="DB_RO_PASSWORD" value=""/>
+        <env name="DB_URL" value=""/>
+        <env name="SEED_PASSWORD" value="password-for-tests-only"/>
+        <env name="SEED_TWO_FACTOR_SECRET" value="SSDS4NSGDATIE52QCAQQJU7OONUKLRL4"/>
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <env name="PULSE_ENABLED" value="false"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="NIGHTWATCH_ENABLED" value="false"/>
+    </php>
+</phpunit>

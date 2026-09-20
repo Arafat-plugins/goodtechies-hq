@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "dispatch": {
+      "source": "Arafat-plugins/dispatch",
+      "sourceType": "github",
+      "skillPath": "skills/dispatch/SKILL.md",
+      "computedHash": "a6ad141154d7157a868db38e04583082d85799fbb648dbac58022e74e0ff421a"
+    }
+  }
+}

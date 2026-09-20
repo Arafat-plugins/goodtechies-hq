@@ -1,0 +1,102 @@
+import {
+    AlarmClock,
+    Bell,
+    BriefcaseBusiness,
+    Building2,
+    CalendarCheck,
+    CalendarClock,
+    CalendarDays,
+    CalendarOff,
+    ChartPie,
+    CircleAlert,
+    ClipboardCheck,
+    Clock,
+    FolderKanban,
+    Gauge,
+    HandCoins,
+    LayoutDashboard,
+    ListChecks,
+    ListTodo,
+    MessagesSquare,
+    Receipt,
+    ScrollText,
+    Settings,
+    ShieldCheck,
+    Timer,
+    TrendingUp,
+    UserCheck,
+    Users,
+    UsersRound,
+    Video,
+    Weight,
+} from '@lucide/vue';
+import type { NavGroup } from './types';
+
+export const adminNav: NavGroup[] = [
+    {
+        label: 'My work',
+        items: [
+            { label: 'My Tasks', icon: ListTodo, phase: 2 },
+            { label: 'Due Today', icon: CalendarClock, phase: 2 },
+            { label: 'Overdue', icon: CircleAlert, phase: 2 },
+            { label: 'My Attendance', icon: UserCheck, phase: 4 },
+            { label: 'My Leave', icon: CalendarOff, phase: 5 },
+        ],
+    },
+    {
+        label: 'Company',
+        items: [{ label: 'Company Dashboard', href: '/admin/dashboard', icon: LayoutDashboard }],
+    },
+    {
+        label: 'Work',
+        items: [
+            { label: 'Clients', icon: Building2, phase: 1 },
+            { label: 'Projects', icon: FolderKanban, phase: 1 },
+            { label: 'Tasks', icon: ListChecks, phase: 2 },
+            { label: 'Calendar', icon: CalendarDays, phase: 2 },
+            { label: 'Meetings', icon: Video, phase: 7 },
+            { label: 'Team', icon: UsersRound, phase: 6 },
+            { label: 'Messages', icon: MessagesSquare, phase: 6 },
+        ],
+    },
+    {
+        label: 'Workforce',
+        items: [
+            { label: 'Employees', icon: Users, phase: 12 },
+            { label: 'Attendance', icon: CalendarCheck, phase: 4 },
+            { label: 'Time', icon: Timer, phase: 4 },
+            { label: 'Workload', icon: Weight, phase: 4 },
+            { label: 'Leave', icon: CalendarOff, phase: 5 },
+            { label: 'Work Schedule', icon: AlarmClock, phase: 4 },
+        ],
+    },
+    {
+        label: 'Reports',
+        items: [
+            { label: 'Task', icon: ClipboardCheck, phase: 10 },
+            { label: 'Employee', icon: BriefcaseBusiness, phase: 10 },
+            { label: 'Project', icon: FolderKanban, phase: 10 },
+            { label: 'Time', icon: Clock, phase: 10 },
+            { label: 'Attendance', icon: CalendarCheck, phase: 10 },
+            { label: 'Performance', icon: Gauge, phase: 10 },
+        ],
+    },
+    {
+        label: 'Finance',
+        items: [
+            { label: 'Income', icon: TrendingUp, phase: 8 },
+            { label: 'Expenses', icon: Receipt, phase: 8 },
+            { label: 'Payroll', icon: HandCoins, phase: 9 },
+            { label: 'Financial Reports', icon: ChartPie, phase: 8 },
+        ],
+    },
+    {
+        label: 'Admin',
+        items: [
+            { label: 'Users & Roles', icon: ShieldCheck, phase: 12 },
+            { label: 'Notifications', icon: Bell, phase: 12 },
+            { label: 'Settings', href: '/admin/settings', icon: Settings },
+            { label: 'Audit Log', icon: ScrollText, phase: 12 },
+        ],
+    },
+];

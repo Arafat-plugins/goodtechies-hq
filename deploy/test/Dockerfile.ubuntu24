@@ -1,0 +1,15 @@
+# Fresh Ubuntu 24.04 for testing deploy/install.sh (see run-install-test.sh).
+# No systemd: install.sh falls back to `service`.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Extra CA certificates (e.g. a TLS-intercepting egress proxy). The directory may be empty.
+COPY extra-ca/ /usr/local/share/ca-certificates/extra/
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl git sudo \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+CMD ["sleep", "infinity"]
