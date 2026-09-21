@@ -55,9 +55,16 @@ class AppServiceProvider extends ServiceProvider
 
     private function defineRateLimiters(): void
     {
-        RateLimiter::for('login', fn (Request $request): Limit => Limit::perMinute(5)->by(
-            Str::lower((string) $request->input('email')).'|'.$request->ip(),
-        ));
+        // Two limits: the per-minute one stops a burst, the hourly one by address alone stops
+        // the same account being ground down from a rotating set of IPs.
+        RateLimiter::for('login', function (Request $request): array {
+            $email = Str::lower((string) $request->input('email'));
+
+            return [
+                Limit::perMinute(5)->by($email.'|'.$request->ip()),
+                Limit::perHour(20)->by($email),
+            ];
+        });
 
         RateLimiter::for('two-factor', fn (Request $request): Limit => Limit::perMinute(5)->by(
             ($request->hasSession() ? (string) $request->session()->get(TwoFactorService::PENDING_LOGIN_SESSION_KEY) : '').'|'.$request->ip(),

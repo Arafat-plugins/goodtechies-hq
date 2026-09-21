@@ -12,6 +12,7 @@ use App\Support\RoleName;
 use App\Support\UserStatus;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Role changes and deactivation. Nobody may change their own role or deactivate themselves.
@@ -76,7 +77,12 @@ class EmployeeAdministrationService
             $employee->update(['status' => UserStatus::Inactive]);
             $user->update(['status' => UserStatus::Inactive]);
 
+            // Ends the stored sessions, then kills the remember-me cookies that would
+            // otherwise sign them straight back in.
             DB::table('sessions')->where('user_id', $user->id)->delete();
+
+            $user->setRememberToken(Str::random(60));
+            $user->save();
 
             $this->audit->record(
                 AuditEvent::EmployeeDeactivated,

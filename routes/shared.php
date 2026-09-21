@@ -6,7 +6,7 @@ use App\Http\Controllers\Shared\ProfileSessionController;
 use App\Http\Controllers\Shared\ProfileTwoFactorController;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware(['auth', 'two-factor'])->group(function () {
+Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::put('/profile/password', ProfilePasswordController::class)->name('profile.password.update');

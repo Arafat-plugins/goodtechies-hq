@@ -43,16 +43,7 @@ it('forbids a user without an employee record', function () {
     $this->actingAs(User::factory()->create())->get('/_test/employee')->assertForbidden();
 })->group('phase0');
 
-it('logs out an inactive user and redirects to login', function () {
-    $user = surfaceUser(RoleName::ADMIN, UserStatus::Inactive);
-
-    $this->actingAs($user)
-        ->get('/_test/admin')
-        ->assertRedirect('/login')
-        ->assertSessionHas('error');
-
-    $this->assertGuest();
-})->group('phase0');
+// Inactive users are `EnsureActiveUser`'s job now; see EnsureActiveUserTest.
 
 it('does not let a guest through', function () {
     // The HTML redirect needs the `login` route, which arrives with the auth routes.

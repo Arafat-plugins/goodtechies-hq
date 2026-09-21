@@ -87,8 +87,29 @@ it('throttles the sixth login attempt within a minute', function () {
         ->assertTooManyRequests();
 })->group('phase0');
 
+it('throttles the twenty-first hourly attempt even from fresh addresses', function () {
+    // One attempt per address, so only the hourly limit keyed by the address can fire.
+    foreach (range(1, 20) as $attempt) {
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.'.$attempt])
+            ->post('/login', ['email' => 'yaseen@goodtechies.test', 'password' => 'wrong-password'])
+            ->assertRedirect();
+    }
+
+    $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.21'])
+        ->post('/login', ['email' => 'yaseen@goodtechies.test', 'password' => 'wrong-password'])
+        ->assertTooManyRequests();
+
+    // A different address is only throttled together with its own account.
+    $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.21'])
+        ->post('/login', ['email' => 'tapu@goodtechies.test', 'password' => 'wrong-password'])
+        ->assertRedirect();
+})->group('phase0');
+
 it('sends an admin with 2FA to the challenge without logging them in', function () {
     $admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
+
+    $this->startSession();
+    $preAuthSessionId = session()->getId();
 
     $this->post('/login', ['email' => 'shahadat@goodtechies.test', 'password' => $this->password, 'remember' => true])
         ->assertRedirect('/two-factor/challenge')
@@ -96,7 +117,9 @@ it('sends an admin with 2FA to the challenge without logging them in', function 
         ->assertSessionHas('login.remember', true);
 
     $this->assertGuest();
-    expect(LoginHistory::count())->toBe(0);
+    // The pending keys must not sit on the session id the password step arrived with.
+    expect(session()->getId())->not->toBe($preAuthSessionId)
+        ->and(LoginHistory::count())->toBe(0);
 })->group('phase0');
 
 it('logs the user out', function () {

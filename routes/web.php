@@ -3,7 +3,8 @@
 use App\Http\Controllers\HomeController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', HomeController::class)->name('home');
+// `active` passes guests through; it only bounces a signed-in but deactivated user.
+Route::get('/', HomeController::class)->middleware('active')->name('home');
 
 require __DIR__.'/auth.php';
 require __DIR__.'/admin.php';

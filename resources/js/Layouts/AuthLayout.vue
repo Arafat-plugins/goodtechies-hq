@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import AppWordmark from '@/Components/AppWordmark.vue';
 import FlashMessage from '@/Components/FlashMessage.vue';
+import Toaster from '@/Components/Toaster.vue';
 import { Card } from '@/Components/ui/card';
 </script>
 
 <template>
     <div class="flex min-h-svh flex-col items-center justify-center bg-muted p-4 md:p-6">
         <main class="flex w-full max-w-sm flex-col gap-6">
-            <AppWordmark class="self-center" />
+            <AppWordmark variant="lockup" surface="light" :size="32" class="self-center" />
             <FlashMessage />
             <Card class="w-full shadow-xs">
                 <slot />
@@ -16,5 +17,6 @@ import { Card } from '@/Components/ui/card';
                 Internal system — authorised staff only
             </p>
         </main>
+        <Toaster />
     </div>
 </template>

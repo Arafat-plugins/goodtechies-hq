@@ -9,8 +9,10 @@ use App\Support\RoleName;
 use App\Support\TrackingMode;
 use App\Support\UserStatus;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 
 beforeEach(function () {
     $this->seed();
@@ -97,6 +99,26 @@ it('deactivates employee and user, ends their sessions and keeps the user row', 
         ->and(DB::table('sessions')->where('user_id', $this->tapu->id)->count())->toBe(0)
         ->and(DB::table('sessions')->where('user_id', $this->admin->id)->count())->toBe(1)
         ->and(AuditLog::where('event', 'employee.deactivated')->sole()->target_id)->toBe($this->tapu->employee->id);
+})->group('phase0');
+
+it('kills the remember-me cookies of the user it deactivates', function () {
+    $this->tapu->setRememberToken(Str::random(60));
+    $this->tapu->save();
+
+    $recaller = Auth::guard('web')->getRecallerName();
+    $stale = $this->tapu->id.'|'.$this->tapu->getRememberToken().'|'.$this->tapu->password;
+
+    // The cookie works right up to the moment they are deactivated.
+    $this->withCookie($recaller, $stale)->get('/profile')->assertOk();
+    $this->app['auth']->forgetGuards();
+    $this->flushSession();
+
+    $this->service->deactivate($this->admin, $this->tapu->employee);
+
+    expect(User::find($this->tapu->id)->getRememberToken())->not->toBe($this->tapu->getRememberToken());
+
+    $this->withCookie($recaller, $stale)->get('/profile')->assertRedirect('/login');
+    $this->assertGuest();
 })->group('phase0');
 
 it('answers the employee policy for the same cases', function () {

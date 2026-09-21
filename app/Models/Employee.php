@@ -9,6 +9,8 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
@@ -71,5 +73,27 @@ class Employee extends Model
     public function schedule(): HasOne
     {
         return $this->hasOne(Schedule::class);
+    }
+
+    /**
+     * Projects the employee is a member of.
+     *
+     * @return BelongsToMany<Project, $this, ProjectMember>
+     */
+    public function projects(): BelongsToMany
+    {
+        return $this->belongsToMany(Project::class, 'project_members')
+            ->withPivot('role_on_project')
+            ->withTimestamps();
+    }
+
+    /**
+     * Projects the employee is the PM for.
+     *
+     * @return HasMany<Project, $this>
+     */
+    public function managedProjects(): HasMany
+    {
+        return $this->hasMany(Project::class, 'pm_id');
     }
 }

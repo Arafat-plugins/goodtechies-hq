@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head } from '@inertiajs/vue3';
-import PageHeader from '@/Components/PageHeader.vue';
+import PageShell from '@/Components/PageShell.vue';
 import LoginHistoryCard, { type LoginAttempt } from '@/Components/Profile/LoginHistoryCard.vue';
 import PasswordForm from '@/Components/Profile/PasswordForm.vue';
 import ProfileDetailsForm, { type ProfileDetails } from '@/Components/Profile/ProfileDetailsForm.vue';
@@ -36,11 +36,9 @@ defineProps<{
 <template>
     <Head title="Profile" />
 
-    <div class="flex flex-col gap-6">
-        <PageHeader title="Profile" description="Your account, security and sign-in activity." />
-
+    <PageShell title="Profile" description="Your account, security and sign-in activity.">
         <!-- Below lg the two column wrappers are `contents`, so the order utilities interleave the cards. -->
-        <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+        <div class="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-3">
             <div class="contents lg:col-span-2 lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
                 <ProfileDetailsForm class="order-1" :profile="profile" :timezones="timezones" />
                 <PasswordForm class="order-3" />
@@ -51,5 +49,5 @@ defineProps<{
                 <TwoFactorCard class="order-2" :two-factor="twoFactor" />
             </div>
         </div>
-    </div>
+    </PageShell>
 </template>

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureActiveUser;
 use App\Http\Middleware\EnsureSurface;
 use App\Http\Middleware\EnsureTwoFactorEnrolled;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -25,6 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->redirectUsersTo(fn () => route('home'));
 
         $middleware->alias([
+            'active' => EnsureActiveUser::class,
             'surface' => EnsureSurface::class,
             'two-factor' => EnsureTwoFactorEnrolled::class,
         ]);

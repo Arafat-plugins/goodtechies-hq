@@ -3,11 +3,17 @@ import { CircleAlert, CircleCheck } from '@lucide/vue';
 import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import { Alert, AlertDescription } from '@/Components/ui/alert';
+import { flashClaimed } from '@/lib/flashChannel';
 
 const page = usePage();
 
-const success = computed(() => page.props.flash?.success ?? null);
-const error = computed(() => page.props.flash?.error ?? null);
+/**
+ * A screen that announces its own writes takes the flash to the toaster instead
+ * (`useFlashAsToast`). While one is mounted this renders nothing, so the same sentence is
+ * never said twice — DESIGN.md §5.19.
+ */
+const success = computed(() => (flashClaimed.value ? null : (page.props.flash?.success ?? null)));
+const error = computed(() => (flashClaimed.value ? null : (page.props.flash?.error ?? null)));
 </script>
 
 <template>

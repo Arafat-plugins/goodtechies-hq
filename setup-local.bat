@@ -97,6 +97,20 @@ if not exist ".env" (
 )
 echo.
 
+REM ---------- 2b. Read secrets from .env (never hard-code them here) ----------
+echo [2b/6] Reading credentials from .env...
+for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"DB_PASSWORD=" .env')            do set "ENV_APP_PW=%%b"
+for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"DB_MIGRATOR_PASSWORD=" .env')   do set "ENV_MIG_PW=%%b"
+for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"DB_RO_PASSWORD=" .env')         do set "ENV_RO_PW=%%b"
+for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_PASSWORD=" .env')          do set "ENV_SEED_PW=%%b"
+for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_TWO_FACTOR_SECRET=" .env') do set "ENV_SEED_2FA=%%b"
+
+if not defined ENV_APP_PW  goto :envfail
+if not defined ENV_MIG_PW  goto :envfail
+if not defined ENV_RO_PW   goto :envfail
+if not defined ENV_SEED_PW goto :envfail
+echo    [ok] credentials loaded from .env
+echo.
 REM ---------- 3. Composer ----------
 echo [3/6] Installing PHP dependencies ^(this takes a few minutes the first time^)...
 call composer install --no-interaction
@@ -125,9 +139,9 @@ echo    Creating roles and grants ^(hq_migrator / hq_app / hq_ro^)...
 for %%d in (goodtechies_hq goodtechies_hq_test) do (
     psql -h 127.0.0.1 -U postgres -d postgres -q ^
         -v db=%%d ^
-        -v migrator_password=hqlocal2026 ^
-        -v app_password=hqlocal2026 ^
-        -v ro_password=hqlocal2026 ^
+        -v migrator_password=!ENV_MIG_PW! ^
+        -v app_password=!ENV_APP_PW! ^
+        -v ro_password=!ENV_RO_PW! ^
         -f deploy/sql/roles.sql
     if errorlevel 1 goto :dbfail
 )
@@ -144,7 +158,7 @@ echo.
 echo ============================================================
 echo   Open  http://localhost:8000
 echo.
-echo   Seeded logins ^(password: hqlocal2026^)
+echo   Seeded logins ^(password: !ENV_SEED_PW!^)
 echo     yaseen@goodtechies.test       Employee        - no 2FA, fastest way in
 echo     tapu@goodtechies.test         Remote employee - no 2FA
 echo     shahadat@goodtechies.test     Admin           - needs a 2FA code
@@ -152,13 +166,22 @@ echo     faruk@goodtechies.test        Admin           - needs a 2FA code
 echo     accountant@goodtechies.test   Accountant      - needs a 2FA code
 echo.
 echo   2FA secret for the admin accounts ^(add to Google Authenticator^):
-echo     JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+echo     !ENV_SEED_2FA!
 echo.
 echo   Press Ctrl+C in this window to stop the server.
 echo ============================================================
 echo.
 call composer run dev
 goto :eof
+
+:envfail
+echo.
+echo   Could not read the DB passwords from .env.
+echo   Required keys: DB_PASSWORD, DB_MIGRATOR_PASSWORD, DB_RO_PASSWORD, SEED_PASSWORD
+echo   Fill them in, then run this script again.
+echo.
+pause
+exit /b 1
 
 :dbfail
 set "PGPASSWORD="

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import PageHeader from '@/Components/PageHeader.vue';
+import PageShell from '@/Components/PageShell.vue';
 import { Badge } from '@/Components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
@@ -88,10 +88,8 @@ const rowClass = 'flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justif
 <template>
     <Head title="Settings" />
 
-    <div class="flex flex-col gap-6">
-        <PageHeader title="Settings" description="Read-only for now — editing arrives in Phase 12." />
-
-        <div class="grid items-start gap-4 lg:grid-cols-2">
+    <PageShell title="Settings" description="Read-only for now — editing arrives in Phase 12.">
+        <div class="grid min-w-0 items-start gap-4 lg:grid-cols-2">
             <Card v-for="section in sections" :key="section.title" class="gap-2 shadow-xs">
                 <CardHeader>
                     <CardTitle class="text-sm font-medium">{{ section.title }}</CardTitle>
@@ -144,5 +142,5 @@ const rowClass = 'flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justif
                 </CardContent>
             </Card>
         </div>
-    </div>
+    </PageShell>
 </template>

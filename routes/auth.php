@@ -18,7 +18,9 @@ Route::middleware('guest')->group(function () {
         ->name('two-factor.challenge.store');
 });
 
-Route::middleware('auth')->group(function () {
+// `logout` keeps `active` too: an inactive user posting it is signed out by the middleware and
+// lands on /login all the same, so no separate group is needed to let them leave.
+Route::middleware(['auth', 'active'])->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
 
     Route::get('/two-factor/enrol', [TwoFactorEnrolmentController::class, 'create'])

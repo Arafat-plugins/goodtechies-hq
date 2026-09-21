@@ -14,6 +14,12 @@ use Inertia\Response;
 /**
  * Enrolment is forced for Admin and Accountant (the `two-factor` middleware) and optional for others.
  * The secret and the recovery codes reach only these two pages.
+ *
+ * The page stays open and fully usable when enforcement is switched off for local development:
+ * anyone may still enrol on purpose. Only the "your role requires this before you can continue"
+ * banner is suppressed then, because with the middleware standing down it would be untrue —
+ * nothing is holding the user on this page. Profile's own `required` flag is a different claim
+ * ("your role may not turn this off") and is deliberately left alone.
  */
 class TwoFactorEnrolmentController extends Controller
 {
@@ -32,7 +38,7 @@ class TwoFactorEnrolmentController extends Controller
         return Inertia::render('Auth/TwoFactorEnrol', [
             'qrSvg' => $this->twoFactor->qrCodeSvg($user, $secret),
             'secret' => $secret,
-            'required' => $user->requiresTwoFactor(),
+            'required' => TwoFactorService::isEnforced() && $user->requiresTwoFactor(),
         ]);
     }
 

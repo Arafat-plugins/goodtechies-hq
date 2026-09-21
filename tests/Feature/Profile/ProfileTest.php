@@ -198,7 +198,7 @@ it('regenerates recovery codes only with the password', function () {
 
     $codes = $this->get('/two-factor/recovery-codes')
         ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page->component('Auth/RecoveryCodes', false)->has('codes', 8))
+        ->assertInertia(fn (Assert $page) => $page->component('Auth/RecoveryCodes')->has('codes', 8))
         ->inertiaProps('codes');
 
     $hashes = $user->fresh()->two_factor_recovery_codes;

@@ -17,7 +17,7 @@ If these two disagree with anything you assume, they win. If they are silent, pi
 - **Execution method: the `dispatch` skill** (`.claude/skills/dispatch`, from `Arafat-plugins/dispatch`). Sub-agents: read `AGENTS.md` first. Main session: plan → brief per Part J.2 → accept from the diff → `/dispatch verify`. Never build ahead of the current phase.
 - **Stop at every GATE** listed in Part E and wait for the user.
 - **Privacy is tested, not assumed:** every phase that touches projects, payroll, clients or finance ships negative permission tests in the same phase (Part C §1, Part F §2).
-- **Design tokens come from the `shadcn-tokens` MCP** (`get_theme`, `get_spacing`, `px_to_tailwind`, `get_typography`, `get_component_styles`). Call it before writing any Tailwind class; never hard-code a colour or an off-scale spacing. Components are installed through the `shadcn-vue` MCP. Visual references: `docs/design-refs/` (Part I says what to take and what to leave).
+- **Design tokens come from `DESIGN.md`**, which Phase 0.5 generated from `resources/css/app.css` and which carries every token's light and dark value, every shared component's real signature, 52 measured contrast ratios and the list of things that are never allowed. Read it before writing any Tailwind class; never hard-code a colour or an off-scale spacing. The `shadcn-tokens` MCP this file used to name is **not reachable in this environment** — the tokens were hand-derived from the client's logo instead (decisions 0.5-21…0.5-27), and `app.css` is the source of truth that `DESIGN.md` is generated from. New shadcn-vue primitives are installed with `npx shadcn-vue@latest add <name>`. Visual references: `docs/design-refs/` (Part I says what to take and what to leave).
 - **Do not add** anything in Part H §1 (no screenshots, no productivity scores, no CRM, no push/email in MVP, …).
 - **Commit** at the end of a phase with `Phase N: <slice name>`; update `PROGRESS.md` before committing.
 
@@ -27,6 +27,25 @@ If these two disagree with anything you assume, they win. If they are silent, pi
 - Run: `npm run dev` + `php artisan serve`
 - Test: `php artisan test` (all) · `php artisan test --group=permissions`
 - Deploy: `deploy/deploy.sh` (see Part B §4)
+
+## Keep the user's machine in sync — every time
+
+The user tests this app **in a browser on their own machine** (`D:\goodtechies-hq`).
+Work that is committed here but not copied there does not exist as far as they are
+concerned. That has already gone wrong once: a whole phase was reported as done while
+their copy sat a phase behind, because the sync relied on someone remembering.
+
+So: **after every slice that changes a tracked file, sync before saying it is done.**
+
+    tools/device-sync.sh          # stages what is missing, prints the batches
+    # call device_commit_files once per batch
+    # verify with device_list_dir — a "written" reply has lied before
+    tools/device-sync.sh --mark   # then commit .device-synced
+
+`.device-synced` is tracked, so a session that loses its context can still work out
+what the machine is missing. If a phase added migrations, tell the user to restart
+`start-hq.bat` — it applies them, and without that the new screen 500s on a missing
+table, which reads as a broken build.
 
 ## Tools folder
 

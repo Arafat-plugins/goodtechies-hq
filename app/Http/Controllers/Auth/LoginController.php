@@ -17,6 +17,12 @@ use Inertia\Response;
 
 class LoginController extends Controller
 {
+    /**
+     * Checked against when the address is unknown, so the reply costs the same time either way
+     * and does not disclose which addresses exist. Bcrypt of a random value nobody holds.
+     */
+    private const DUMMY_PASSWORD_HASH = '$2y$12$K6rvPTM/XfY0KBBTgf.8jeEc9f15sBJZSTBNEmRByAiPWLxe8pC8q';
+
     public function create(Request $request): Response
     {
         return Inertia::render('Auth/Login', [
@@ -35,6 +41,11 @@ class LoginController extends Controller
 
         $user = User::whereRaw('lower(email) = ?', [$email])->first();
 
+        if ($user === null) {
+            // Hash anyway, so an unknown address does not answer faster than a known one.
+            Hash::check($password, self::DUMMY_PASSWORD_HASH);
+        }
+
         if ($user === null || ! Hash::check($password, $user->password)) {
             // The Failed listener writes the login_history row; the password is never passed on.
             event(new Failed('web', $user, ['email' => $request->validated('email')]));
@@ -52,7 +63,14 @@ class LoginController extends Controller
             ]);
         }
 
-        if ($user->hasConfirmedTwoFactor()) {
+        // TwoFactorService::isEnforced() is the single predicate behind the local-development
+        // switch; it is true in production regardless of AUTH_TWO_FACTOR_ENFORCED. When it is
+        // false the confirmed secret is left exactly as it is, just not asked for.
+        if (TwoFactorService::isEnforced() && $user->hasConfirmedTwoFactor()) {
+            // A fresh id before the pending keys are written, so the pre-auth session that
+            // carried the password step is not the one the challenge runs on.
+            $request->session()->regenerate();
+
             $request->session()->put(TwoFactorService::PENDING_LOGIN_SESSION_KEY, $user->id);
             $request->session()->put('login.remember', $remember);
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { nextTick, ref, useTemplateRef } from 'vue';
+import { nextTick, onMounted, ref, useTemplateRef } from 'vue';
 import AuthLayout from '@/Layouts/AuthLayout.vue';
 import { Button } from '@/Components/ui/button';
 import { CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/Components/ui/card';
@@ -38,6 +38,19 @@ function onDigitsComplete(value: number[]): void {
     submit();
 }
 
+function focusFirstSlot(): void {
+    document.querySelector<HTMLInputElement>('[data-slot="pin-input-slot"]')?.focus();
+}
+
+/**
+ * `autofocus` is only honoured while the document is being parsed, and an Inertia visit mounts
+ * into a document that was parsed on `/login`. Arriving the real way — submit the sign-in form,
+ * get redirected here — therefore left focus on `<body>` and the first thing a keyboard user had
+ * to do was hunt for the field. Focusing on mount covers both arrivals; the attribute below is
+ * kept for the no-JS/hard-reload case, and the two are idempotent.
+ */
+onMounted(focusFirstSlot);
+
 async function toggleMode(): Promise<void> {
     useRecovery.value = !useRecovery.value;
     form.clearErrors();
@@ -50,7 +63,7 @@ async function toggleMode(): Promise<void> {
     if (useRecovery.value) {
         (recoveryInput.value?.querySelector('input') ?? recoveryInput.value)?.focus();
     } else {
-        document.querySelector<HTMLInputElement>('[data-slot="pin-input-slot"]')?.focus();
+        focusFirstSlot();
     }
 }
 </script>
@@ -78,12 +91,23 @@ async function toggleMode(): Promise<void> {
                     class="justify-center"
                     @complete="onDigitsComplete"
                 >
+                    <!--
+                        The six slots are ONE tab stop. reka's `otp` mode bounces focus back to the
+                        first empty slot whenever a later one is focused (PinInputInput.handleFocus),
+                        which cancelled every forward Tab and trapped a keyboard user inside the
+                        group — they could never reach "Use a recovery code", the one control that
+                        gets them back in without their phone. Taking slots 2–6 out of the tab order
+                        is also how every OTP field behaves: Tab enters at slot 1 and the next Tab
+                        leaves. Typing, paste, arrow keys and Backspace move between slots by calling
+                        .focus() directly, which tabindex="-1" does not affect.
+                    -->
                     <PinInputGroup>
                         <PinInputSlot
                             v-for="index in 6"
                             :id="index === 1 ? 'code-0' : undefined"
                             :key="index"
                             :index="index - 1"
+                            :tabindex="index === 1 ? undefined : -1"
                             :autofocus="index === 1"
                             :aria-invalid="form.errors.code ? true : undefined"
                         />

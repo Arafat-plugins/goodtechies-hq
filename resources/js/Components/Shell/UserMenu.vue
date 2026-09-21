@@ -2,6 +2,7 @@
 import { Link, usePage } from '@inertiajs/vue3';
 import { ChevronDown, LogOut, UserRound } from '@lucide/vue';
 import { computed } from 'vue';
+import ThemeToggle from '@/Components/Shell/ThemeToggle.vue';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
 import { Button } from '@/Components/ui/button';
 import {
@@ -51,6 +52,8 @@ const initials = computed(() =>
                 <span class="truncate text-xs text-muted-foreground">{{ user.email }}</span>
                 <span class="text-xs text-muted-foreground">{{ roleLabel }}</span>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <ThemeToggle />
             <DropdownMenuSeparator />
             <DropdownMenuItem as-child>
                 <Link href="/profile" class="w-full">

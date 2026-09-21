@@ -3,21 +3,22 @@
 > Source of truth: `docs/master-prompt-v1.md` (v1.2), condensed from the client spec *GoodTechies HQ — Agency Operating System v1.0 (Sept 2026)* + the client's "Application Visuals" design doc + current ClickUp workspace (`docs/design-refs/`).
 > Updated at the end of every phase and after every gate. A new session must be able to continue from this file alone.
 
-**Last updated:** 17 Sep 2026 · **Current phase:** 0 — Foundation · **Status:** waiting for **GATE A**
-**Test suite:** `php artisan test` → 167 / 167 passed · **Deployed on VPS:** no. The deploy kit passed in a fresh Ubuntu 24.04 container; see the deployment log. · **Execution method:** dispatch v1.5.1
+**Last updated:** 20 Sep 2026 · **Current phase:** 0.5 — Design Foundation ✅ complete · **Status:** waiting for **GATE B** (GATE A questions still open)
+**Test suite:** `php artisan test` → 343 / 343 passed · **Deployed on VPS:** no. The deploy kit passed in a fresh Ubuntu 24.04 container; see the deployment log. · **Execution method:** dispatch v1.5.1
 
 ---
 
 ## Overall progress
 
-**Phase 0 of 12 built — waiting for GATE A (≈ 8 %)**
+**Phases 0, 1 and 0.5 built — waiting for GATE B (≈ 17 %)**
 
-`[███                             ]`
+`[█████                           ]`
 
 | Phase | Vertical slice | Gate | Status |
 | --- | --- | --- | --- |
-| 0 | Foundation: auth + 2FA, roles, three shells, audit/activity logs, CI, VPS deploy kit, backups | **GATE A** | 🔄 built — waiting for GATE A |
-| 1 | Clients & Projects with the privacy model | **GATE B** | ⬜ |
+| 0 | Foundation: auth + 2FA, roles, three shells, audit/activity logs, CI, VPS deploy kit, backups | **GATE A** | ✅ built (gate questions still open) |
+| 1 | Clients & Projects with the privacy model | **GATE B** | 🔄 built — waiting for GATE B |
+| 0.5 | Design Foundation: brand tokens from the logo, the app shell, 8 base components, charts, every Phase 0/1 screen migrated | — | ✅ complete |
 | 2 | Tasks: List (grouped) · Board · Calendar · tags · files · task discussion · in-app notifications | — | ⬜ |
 | 3 | Recurring task engine + fixed automation rules | — | ⬜ |
 | 4 | Remote timer + Timesheet + office attendance + schedules + workload | **GATE C** | ⬜ |
@@ -48,12 +49,13 @@ Full steps are in `docs/runbooks/local-setup.md`.
   1. `composer install && npm install && php artisan key:generate`
   2. `php artisan migrate:fresh --seed --database=pgsql_migrator`. The schema is owned by `hq_migrator`; the app runs as `hq_app`.
   3. `npm run build` (or `npm run dev`), then `php artisan serve`.
+- **Demo data:** `DemoSeeder` adds 4 clients and 7 projects (Buffalo Modular ×3, Heat Gap, APH — on hold and overdue, abc.com, and one internal project). Tapu is on the two SEO projects, Yaseen on the three maintenance projects plus the internal one.
 - **Seeded logins:** `shahadat@goodtechies.test`, `faruk@goodtechies.test` (Admin), `tapu@goodtechies.test` (Remote), `yaseen@goodtechies.test` (Employee), `accountant@goodtechies.test` (Accountant).
   - Password: `SEED_PASSWORD`.
   - Admins and the Accountant also need a TOTP code from `SEED_TWO_FACTOR_SECRET` (local/testing only; production forces enrolment at first login).
 - **Tests:**
-  - `php artisan test` runs everything (167).
-  - `php artisan test --group=phase0` and `php artisan test --group=permissions` run subsets.
+  - `php artisan test` runs everything (343).
+  - `php artisan test --group=phase0`, `--group=phase1` and `--group=permissions` run subsets.
 - **Checks:** `vendor/bin/pint --test`, `npx vue-tsc --noEmit`.
 - **Deploy kit test:** `deploy/test/run-install-test.sh` (needs Docker).
 
@@ -174,6 +176,146 @@ See `docs/decisions.md` (0-1 … 0-20). The ones to confirm at GATE A:
 7. Office working week and hours: is Sun–Thu, 09:00, 8 h right (Tapu 5 h)? Or Sat–Thu?
 8. Real email addresses for the five accounts (the seeds use `@goodtechies.test` until then).
 
+
+## Phase 1 — Clients & Projects 🔄 (built, waiting for GATE B)
+
+### What you can click now
+| Screen / action | Where | Notes |
+| --- | --- | --- |
+| Clients list | `/admin/clients` | Search, status filter, project counts, row actions (View, Edit, Deactivate with a confirm) |
+| Client detail | `/admin/clients/{id}` | Contacts, internal notes, the client's projects with their money line, and an activity timeline |
+| New / edit client | `/admin/clients/create`, `/edit` | Repeatable contacts editor (up to 10), internal notes |
+| Projects list | `/admin/projects` | Search plus client / type / status / PM filters and a "Show archived" toggle; overdue deadlines and Urgent priority stand out |
+| New / edit project | `/admin/projects/create`, `/edit` | Client (or Internal), domain, type, billing type, priority, PM, dates, both note fields; members and finance can be set while creating |
+| Project detail | `/admin/projects/{id}` | Tabs: Overview, Finance (edit in place), Members (add/remove + role), Activity, plus disabled Tasks and Files tabs for Phase 2. Change status (a cancel asks for a reason), Archive / Unarchive |
+| Employee projects | `/employee/projects` | Only the projects that person is on, as cards headed by the **domain** — no client name, no money anywhere |
+| Employee project page | `/employee/projects/{id}` | Domain, type, status, priority, dates, PM, team, the team's notes, and Phase 2 placeholders for Tasks and Files |
+
+### Built (files)
+- **Database:** `clients` (contacts **encrypted at rest**), `projects`, `project_finance` (money in its own table, so hiding it is a join to omit), `project_members`, and the deferred foreign key on `user_project_permissions.project_id`.
+- **Enums:** `ClientStatus`, `ProjectType`, `BillingType`, `BillingFrequency`, `ProjectStatus`, `Priority`.
+- **Privacy layer:** `ProjectResource` and `ClientResource` decide every field from the requester — a field they may not see is **absent**, never null. `ProjectPolicy`, `ClientPolicy`, and `Project::visibleTo()` scoping every list.
+- **Services:** `ClientService`, `ProjectService` (create, update, members, status transitions, archive/unarchive), `ProjectFinanceService` (audited price changes).
+- **HTTP:** `Admin/ClientController`, `Admin/Project{,Finance,Member,Status}Controller`, `Employee/ProjectController`, and seven Form Requests.
+- **UI:** the Admin client and project screens, the Employee project screens, and the shared list blocks `FilterBar`, `Pagination`, `EmptyState`, `StatusPill`.
+
+### Tests — `php artisan test` → 343 / 343 passed (2252 assertions); `--group=phase1` → 166
+- **Privacy (the Part F §2 negative suite):** an employee's payload is walked recursively on all four project endpoints and contains no `client`, `internal_notes`, `billing_type`, `finance`, `price`, `recurring_amount`, `contract_value`, `contract_terms` or `profitability_snapshot` key; the admin's does.
+- **Scoping:** a project an employee is not on returns **404**, never 403; the Accountant is refused on all 20 client and project routes.
+- **Per-project grant:** a `projects.view_finance` grant reveals the money for that one project and no other.
+- **Audit:** one `project.created` row per project and one `project.price_changed` row per price change, with old and new values.
+- **Rules:** every allowed and forbidden status transition, archived projects refusing writes, cancel requiring a reason, members add/remove.
+- **Encryption:** the raw `contact_info` column is ciphertext, and cascades on delete behave.
+- **Matrix:** every new route × six roles, with the route-coverage guard still green.
+
+### Decisions made in Phase 1
+`docs/decisions.md` 1-1 … 1-10. The ones worth knowing: internal projects have no client row (1-1); status changes only through their own endpoints (1-2); money shows as USD until a currency setting is wired in (1-5).
+
+### Known issues / notes
+- **Fixed during the phase:** the security critic found that the general project-update endpoint accepted `status`, letting an assigned manager cancel or reopen a project and leave a project "archived" but still writable. Status now moves only through its own endpoints, with regression tests.
+- **Follow-ups parked:** no "Internal only" option in the client filter (1-7); a member's role is set on the project page, not in the create form (1-8); the "You" badge matches on name (1-10).
+- **Not clicked:** dialogs, tab bodies and form submissions were checked by their tests, not by clicking — the render script cannot click. Every screen was rendered and measured at 375 / 768 / 1280.
+
+### Questions for the client (ask at GATE B)
+1. Client contacts: is one contact per client enough, or do you want several with roles (the editor supports up to 10)?
+2. Project types: the list is SEO, Website Maintenance, Website Development, WooCommerce, Web Application, Marketing, Internal, Other — anything missing?
+3. Should an employee see the project's **priority** (they do now), or is that internal?
+4. Archiving: unarchiving returns a project to Active. Should it return to the status it had instead?
+5. Is "Internal" the right label for projects with no client?
+
+## Phase 0.5 — Design Foundation ✅ complete
+
+Ran out of order, after Phase 1 rather than before it, because it was written after Phase 1 was
+already built. Spec: `docs/design-foundation-v1.md` v1.1, whose §0 status board is the
+task-by-task record with a commit SHA per task.
+
+### What changed for you
+
+- **The app is the client's brand now.** Every colour is derived from
+  `docs/design-refs/GoodTechies siteicon  1.svg` — `#F04E27` and `#0A0D12` — instead of the
+  hand-picked navy and teal Phase 0 used while the token server was unreachable. The mark in
+  the sidebar is the real SVG, and the favicon set is generated from it.
+- **A real sidebar.** Nav rows are grouped into collapsible sections that remember whether you
+  left them open; the rail collapses to icons; the 29 rows for phases that do not exist yet live
+  in one closed *Coming soon* list at the bottom instead of cluttering the real navigation.
+- **A top bar that tells you where you are** — a breadcrumb derived from the URL — and four
+  things you reach from anywhere: `⌘K` search, quick create, the notification bell, your account.
+- **Dark mode**, as a real second theme rather than a filter. Light / Dark / System is in the
+  account menu and it survives a reload.
+- **Every list is one component now.** `DataTable` gives them the same header, the same row
+  menu, the same empty state, and a card layout on a phone instead of a sideways scroll.
+- **Empty is no longer broken.** A panel with nothing in it says what will go there and when;
+  a filter with no matches says so and offers to clear itself; slow pages show a skeleton.
+- **Charts exist**, ready for the phases that have numbers to put in them.
+
+### Verification
+
+`npm run build`, `npx vue-tsc --noEmit`, `vendor/bin/pint --test` and `php artisan test`
+(343 / 343, 2252 assertions) all green. Phase 0.5 changed no route, controller, model or
+migration, so the suite is the Phase 1 suite unchanged — which is the point.
+
+Beyond that, the close-out ran the three passes the spec's §6 demanded, against the running app:
+
+- **Light and dark** on Login, the 2FA challenge, all three dashboards, Profile and Settings —
+  plus a script that measured every visible run of text against its real composited backdrop.
+  Zero below the AA threshold.
+- **Keyboard only.** A 26-stop walk of each shell: every stop paints a visible focus ring, every
+  overlay returns focus to whatever opened it, and nothing is reachable by mouse but not by key.
+- **360 px** on all three shells: no page overflows, no tap targets overlap, no text is clipped.
+
+Those passes found six defects, all now fixed (see below). `DESIGN.md` was regenerated from
+`app.css` with 52 measured contrast pairs and is the file to read before writing any Tailwind
+class.
+
+### Decisions made in Phase 0.5
+`docs/decisions.md` 0.5-1 … 0.5-30. The ones worth knowing:
+
+- **0.5-1** The shell is light neutral, not dark — your choice; the app should not be the
+  loudest thing on a screen it shares with a browser and a document.
+- **0.5-2** The brand values are read out of the logo SVG. Closed — there is nothing left to
+  sample.
+- **0.5-22** `#F04E27` measures 3.50:1 against the canvas, which is below the readability floor,
+  so it is split in two: `--brand` for graphics (the rail, the mark, the focus ring) and
+  `--primary`, two steps darker, for anything with text on it. **This split must not be
+  collapsed later** — it is the reason no button in the app is exactly the logo's orange.
+- **0.5-4** Charts are unovis — your choice. Phase 10's Gantt is a custom component, not a chart.
+- **0.5-5** The employee timer is a dashboard hero card — your choice.
+- **0.5-6** Tasks default to a List grouped by status — your choice. This settles Phase 2's
+  first build: a grouped `DataTable`, with the Board as a second view over the same data.
+- **0.5-7 — still open.** There is no wordmark in the artwork you supplied, so the lockup is the
+  mark plus "GoodTechies HQ" set in Inter Semibold. **If a real wordmark is coming, say so and
+  it gets swapped in one file.**
+- **0.5-16 / 0.5-19** `DataTable` ships sorting and rows-per-page, but they stay switched off
+  until a controller can actually honour them. A control the server ignores is a lie in the UI.
+- **0.5-11** is marked superseded: T1 left the Phase 0 navy in place for T2 to decide, and T2
+  replaced it.
+
+### Known issues / notes
+
+- **Fixed at close-out**, found by the keyboard and 360 px passes, not by reading code:
+  - On the two-factor screen, `Tab` could not get out of the six-digit code field, so a
+    keyboard-only admin who had lost their phone could never reach **Use a recovery code** — the
+    one control that gets them back in. The six boxes are now a single tab stop.
+  - The same screen did not focus the code field when you arrived from the login form.
+  - On a phone, the Login history on your Profile scrolled sideways and hid the IP and Device
+    columns. It now stacks into cards like every other list.
+  - An overdue deadline was red and nothing else, in three places — invisible to a screen reader
+    and to anyone who does not see red. It now says **Overdue**.
+  - There was no skip link, so reaching the page body meant 8–14 tab presses on every screen,
+    reset by every navigation.
+  - Two small ones: the command palette's filter had no focus ring, and the accountant's one
+    button was greyed out with its reason hidden in a tooltip.
+- **Not verified:** `DetailDrawer` is built but has no caller yet — no list opens a row — so the
+  spec's `DataTable → DetailDrawer → Esc` hop could not be exercised. The underlying sheet
+  primitive was tested through the mobile navigation instead. `DataTable`'s sorting, selection
+  and bulk bar are likewise built but dark until a controller supports them (0.5-16, 0.5-19),
+  and the charts render only their empty states because no phase has produced numbers yet.
+- **Parked for a later phase:** Laravel's own error pages (403, 429, 500) are unthemed and flash
+  white in dark mode. They belong to whichever phase owns error handling, not to this one.
+- **Numbering repair:** the decisions log had ten rows sitting outside its table and four
+  numbers that meant two different things. Repaired — it now runs 0.5-1 … 0.5-30 with no
+  duplicate and no gap, and the spec's §0 board records how.
+
 ## Deployment log
 
 | Date | Commit | Server | Result |
@@ -184,15 +326,12 @@ See `docs/decisions.md` (0-1 … 0-20). The ones to confirm at GATE A:
 
 ## Next step
 
-**Stop: waiting for GATE A.** The user should:
+**Stop: waiting for GATE B.** Sign in as Shahadat and as Tapu side by side and check the privacy behaviour: Shahadat sees *Buffalo Modular Homes*, the price and the internal notes; Tapu sees *buffalomodular.com — SEO* and nothing commercial.
 
-1. Check login, the forced 2FA set-up and the three shells in the browser.
-2. Answer the questions above.
-3. Decide on the medium security finding (recommended: fix it before Phase 1).
+Then:
 
-After GATE A:
-
-1. Run the security fix brief, if approved.
-2. Record the confirmed decisions in the table above.
-3. Re-run `/dispatch bootstrap` if the map drifted.
-4. Start **Phase 1 — Clients & Projects**: migrations → ProjectResource and policies → controllers with negative privacy tests → Admin UI → Employee UI → matrix rows → verify.
+1. Answer the GATE A questions above (they are still open) and the GATE B ones.
+2. Start **Phase 2 — Tasks**: List grouped by status (decision 0.5-6 settles that this is the
+   first build), Board, Calendar, tags, files, task discussion and in-app notifications. It is the
+   biggest phase so far, about ten briefs. Phase 0.5 means it starts from a shell, a table, an
+   empty state and a chart set that already exist — Phase 2 writes screens, not primitives.

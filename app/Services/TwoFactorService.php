@@ -8,6 +8,7 @@ use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Writer;
+use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -33,6 +34,38 @@ class TwoFactorService
         private readonly Google2FA $google2fa,
         private readonly AuditLogger $audit,
     ) {}
+
+    /**
+     * Is two-factor authentication enforced at sign-in?
+     *
+     * The one predicate behind the switch, and deliberately the only copy of it. Both
+     * enforcement points consult this and neither repeats the condition:
+     *
+     *  - App\Http\Controllers\Auth\LoginController — sends a user with a confirmed
+     *    secret to the challenge after the password step.
+     *  - App\Http\Middleware\EnsureTwoFactorEnrolled — holds a user whose role requires
+     *    2FA at enrolment until they confirm.
+     *
+     * In production this returns true before the configuration is read at all, so
+     * AUTH_TWO_FACTOR_ENFORCED is inert there whatever it is set to. isProduction()
+     * takes no arguments, so unlike environment(...) there is no argument list for a
+     * later edit to widen; the early return must be deleted outright to weaken this,
+     * and a test asserts the production behaviour directly.
+     *
+     * Outside production (local, testing, staging, …) the config key decides, and it
+     * fails closed: see config/auth.php. Switching enforcement off never clears a
+     * secret, a confirmation or a recovery code — User::requiresTwoFactor() stays a
+     * fact about the role, so nobody is silently un-enrolled and flipping the switch
+     * back restores the previous state exactly.
+     */
+    public static function isEnforced(): bool
+    {
+        if (App::isProduction()) {
+            return true;
+        }
+
+        return (bool) config('auth.two_factor.enforced', true);
+    }
 
     public function generateSecret(): string
     {

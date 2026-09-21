@@ -18,6 +18,9 @@ class DatabaseSeeder extends Seeder
             RolePermissionSeeder::class,
             SettingsSeeder::class,
             TeamSeeder::class,
+            DemoSeeder::class,
+            // Phase 2: tasks hang off DemoSeeder's projects, so it has to have run first.
+            TaskSeeder::class,
         ]);
     }
 }

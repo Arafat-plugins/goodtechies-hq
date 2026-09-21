@@ -4,6 +4,7 @@ import { Menu } from '@lucide/vue';
 import { ref, watch } from 'vue';
 import AppWordmark from '@/Components/AppWordmark.vue';
 import AppSidebarNav from '@/Components/Shell/AppSidebarNav.vue';
+import SidebarComingSoon from '@/Components/Shell/SidebarComingSoon.vue';
 import { Button } from '@/Components/ui/button';
 import { ScrollArea } from '@/Components/ui/scroll-area';
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '@/Components/ui/sheet';
@@ -39,7 +40,7 @@ watch(
         >
             <div class="flex h-14 shrink-0 items-center border-b border-sidebar-border px-4">
                 <Link :href="homeHref" @click="open = false">
-                    <AppWordmark inverted />
+                    <AppWordmark variant="lockup" surface="light" />
                 </Link>
             </div>
             <SheetTitle class="sr-only">Navigation</SheetTitle>
@@ -47,6 +48,9 @@ watch(
             <ScrollArea class="min-h-0 flex-1">
                 <AppSidebarNav :groups="groups" @navigate="open = false" />
             </ScrollArea>
+            <!-- Same grouping and the same Coming soon disclosure as the sidebar; no rail,
+                 because the drawer is already the collapsed state. -->
+            <SidebarComingSoon :groups="groups" />
         </SheetContent>
     </Sheet>
 </template>

@@ -6,92 +6,263 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Phase 0.5 / T1 — brand tokens read out of docs/design-refs/GoodTechies siteicon  1.svg.
+ * The mark holds exactly three colours and no gradient: #0A0D12 (tile), #FFFFFF (glyphs),
+ * #F04E27 (one dot). Every value below follows from those three; nothing here is sampled
+ * from a raster or eyeballed. Hexes in comments are the sRGB render of the oklch value.
+ *
+ * Accent discipline: --brand marks the ONE thing that matters on a screen. If a screen
+ * shows orange three times, two of them are wrong.
+ */
+
 :root {
     --radius: 0.75rem;
 
-    --background: oklch(0.985 0.003 223);
-    --foreground: oklch(0.289 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.289 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.289 0 0);
-    --primary: oklch(0.393 0.069 237.0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.961 0.006 223.5);
-    --secondary-foreground: oklch(0.393 0.069 237.0);
-    --muted: oklch(0.961 0.006 223.5);
-    --muted-foreground: oklch(0.679 0.023 227.7);
-    --accent: oklch(0.961 0.006 223.5);
-    --accent-foreground: oklch(0.584 0.085 195.1);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.92 0.008 223);
-    --input: oklch(0.92 0.008 223);
-    --ring: oklch(0.584 0.085 195.1);
+    /* ── Brand ─────────────────────────────────────────────────────────────
+     * --brand is the logo colour verbatim: graphics only (active nav rail, the
+     * mark, chart series 1, focus ring, selection outline). It is 3.50:1 on the
+     * canvas — never a fill behind text. Text-bearing surfaces use --primary,
+     * two lightness steps darker on the same hue. Do not collapse the split. */
+    --brand: oklch(0.6455 0.2048 34.43);            /* #F04E27 — the logo's dot */
+    --brand-ink: oklch(0.1582 0.0118 260.6);        /* #0A0D12 — the logo's tile */
+    --brand-tint: oklch(0.97 0.022 34.4);           /* #FFF0EB — active/selected row fill */
+    --brand-tint-strong: oklch(0.94 0.045 34.4);    /* #FFE1D8 — hover on a selected row */
 
-    --chart-1: oklch(0.393 0.069 237.0);
-    --chart-2: oklch(0.584 0.085 195.1);
-    --chart-3: oklch(0.679 0.023 227.7);
-    --chart-4: oklch(0.77 0.15 75);
-    --chart-5: oklch(0.63 0.13 150);
+    /* ── Neutral ramp — hue 260.6 (the logo ink's hue), chroma 0.006 ────────
+     * 0.985 / 0.97 / 0.922 / 0.70 / 0.52 / 0.30. No neutral sits at the old
+     * hues 223 / 237 / 250; the greys are family with the mark. */
+    --background: oklch(0.985 0.006 260.6);         /* #F8FAFE */
+    --foreground: oklch(0.30 0.006 260.6);          /* #2C2E31 — 13.06:1 on background */
+    --card: oklch(1 0 0);                           /* #FFFFFF — one step above the canvas */
+    --card-foreground: oklch(0.30 0.006 260.6);     /* #2C2E31 */
+    --popover: oklch(1 0 0);                        /* #FFFFFF */
+    --popover-foreground: oklch(0.30 0.006 260.6);  /* #2C2E31 */
+    --secondary: oklch(0.97 0.006 260.6);           /* #F3F5F9 */
+    --secondary-foreground: oklch(0.30 0.006 260.6);/* #2C2E31 */
+    --muted: oklch(0.97 0.006 260.6);               /* #F3F5F9 */
+    --muted-foreground: oklch(0.52 0.006 260.6);    /* #67696C — 5.28:1 on background */
+    --accent: oklch(0.97 0.006 260.6);              /* #F3F5F9 */
+    --accent-foreground: oklch(0.30 0.006 260.6);   /* #2C2E31 */
+    --border: oklch(0.922 0.006 260.6);             /* #E3E5E9 — hairline */
+    --input: oklch(0.922 0.006 260.6);              /* #E3E5E9 */
 
-    --sidebar: oklch(0.393 0.069 237.0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.584 0.085 195.1);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(1 0 0 / 10%);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.584 0.085 195.1);
+    /* ── Semantic ──────────────────────────────────────────────────────────*/
+    --primary: oklch(0.56 0.205 34.4);              /* #D12D00 — 5.13:1 on card */
+    --primary-hover: oklch(0.50 0.205 34.4);        /* #BC0A00 — 6.34:1 on background */
+    --primary-foreground: oklch(0.99 0 0);          /* #FCFCFC — 4.99:1 on primary */
+    --destructive: oklch(0.577 0.245 27.325);       /* #E7000B — shadcn default, unchanged */
+    --ring: var(--brand);                           /* #F04E27 — focus ring is brand */
 
-    --status-todo: oklch(0.679 0.023 227.7);
-    --status-progress: oklch(0.584 0.085 195.1);
+    /* ── Charts — T8 / decision 0.5-4 ──────────────────────────────────────
+     * Series 1 is the brand: the number being read. The other four are
+     * categorical and carry no meaning of their own. Hues 34.4 / 131 / 212 /
+     * 265 / 329 — each of the four at least 20° off the brand and at least 15°
+     * off every --status-* hue (27, 50, 75, 150, 240), so a categorical slice
+     * can never be mistaken for a status. Lightness is staggered rather than
+     * flat: under deuteranopia and protanopia hue is what collapses, so the
+     * separation has to live in L. Checked with the Machado (2009) severity-1.0
+     * simulation, all pairs: worst ΔE 7.0 (deutan), normal-vision worst 18.9,
+     * every mark ≥ 3:1 on the card. The 6–8 CVD band is only legal with a
+     * second encoding, so every wrapper that uses more than one series ships
+     * labels and a 2 px surface gap between fills. */
+    --chart-1: var(--brand);                        /* #F04E27 — series 1 is the brand */
+    --chart-2: oklch(0.59 0.16 131);                /* #5A8F04 */
+    --chart-3: oklch(0.65 0.11 212);                /* #15A0B6 */
+    --chart-4: oklch(0.56 0.21 265);                /* #3667ED */
+    --chart-5: oklch(0.57 0.21 329);                /* #B538B2 */
+
+    /* ── Sidebar — T2 / decision 0.5-1: light neutral shell (Option A) ──────
+     * The chrome recedes: the shell is the top of the neutral ramp, one shade
+     * off the canvas, separated from the content by a hairline and not by a
+     * colour change. The one orange on the screen is the active row's rail.
+     * --sidebar-border doubles as the neutral hover wash on a non-active row;
+     * hover on the active row is --brand-tint-strong. */
+    --sidebar: oklch(0.985 0.006 260.6);            /* #F8FAFE — ramp step 1 */
+    --sidebar-foreground: oklch(0.30 0.006 260.6);  /* #2C2E31 — 13.06:1 on sidebar */
+    --sidebar-foreground-muted: oklch(0.52 0.006 260.6); /* #67696C — 5.28:1, group labels + phase badges */
+    --sidebar-primary: var(--brand);                /* #F04E27 — graphics only, never behind text */
+    --sidebar-primary-foreground: oklch(0.99 0 0);  /* #FCFCFC */
+    --sidebar-accent: var(--brand-tint);            /* #FFF0EB — active row fill, 12.31:1 under sidebar-foreground */
+    --sidebar-accent-foreground: oklch(0.30 0.006 260.6); /* #2C2E31 */
+    --sidebar-border: oklch(0.922 0.006 260.6);     /* #E3E5E9 — hairline, and the hover wash */
+    --sidebar-rail: var(--brand);                   /* #F04E27 — 3 px bar on the active row */
+    --sidebar-ring: var(--brand);                   /* #F04E27 — same focus ring as --ring */
+
+    /* ── Status ────────────────────────────────────────────────────────────
+     * The plain --status-* name stays the dot colour. Each one also carries a
+     * -fg / -bg / -border triplet so a badge is one lookup. Borders are the
+     * same hue at L 0.88 / C 0.04.
+     *
+     * Phase 2 added `backlog` (196) and `changes` (344) for the two task
+     * statuses the original six had nowhere to put. Both are ≥ 20° off every
+     * other status hue and ≥ 15° off every --chart-* hue, so the chart rule
+     * above still holds. They are the ONLY two hues that survive: a deuteranope
+     * simulation (Viénot 1999) over every legal hue showed violet (280–315)
+     * collapsing onto `progress` and yellow-green (100–120) onto `review`, and
+     * a second red was rejected outright because it lies to normal vision next
+     * to `cancelled`. 196 and 344 are near-complementary and would themselves
+     * collapse at a shared lightness, so light fg separates them within the
+     * recipe's band — `backlog` at L 0.45, `changes` at L 0.50 — which is the
+     * same "put the separation in L" move the chart palette makes. */
+    --status-backlog: oklch(0.63 0.105 196);        /* #109C9E — dot */
+    --status-backlog-fg: oklch(0.45 0.075 196);     /* #066263 — 6.54:1 */
+    --status-backlog-bg: oklch(0.965 0.030 196);    /* #DDFAFA */
+    --status-backlog-border: oklch(0.88 0.04 196);  /* #BAE0E0 */
+
+    --status-todo: oklch(0.70 0.006 260.6);         /* #9C9EA2 — neutral ramp step 4 */
+    --status-todo-fg: oklch(0.48 0.006 260.6);      /* #5C5E61 — 5.99:1 */
+    --status-todo-bg: oklch(0.97 0.004 260.6);      /* #F3F5F8 */
+    --status-todo-border: oklch(0.88 0.04 260.6);   /* #C9D8F3 */
+
+    --status-progress: oklch(0.58 0.120 240);       /* #2382BA — the badge's own hue */
+    --status-progress-fg: oklch(0.45 0.120 240);    /* #005B90 — 6.43:1 */
+    --status-progress-bg: oklch(0.96 0.025 240);    /* #E3F5FF */
+    --status-progress-border: oklch(0.88 0.04 240); /* #C1DCF0 */
+
     --status-review: oklch(0.77 0.15 75);
+    --status-review-fg: oklch(0.48 0.130 75);       /* #874F00 — 6.08:1 */
+    --status-review-bg: oklch(0.97 0.030 80);       /* #FFF3DF */
+    --status-review-border: oklch(0.88 0.04 75);    /* #E7D4BB */
+
+    --status-changes: oklch(0.63 0.190 344);        /* #D34FA5 — dot */
+    --status-changes-fg: oklch(0.50 0.200 344);     /* #A9177E — 5.94:1 */
+    --status-changes-bg: oklch(0.96 0.025 344);     /* #FFECF6 */
+    --status-changes-border: oklch(0.88 0.04 344);  /* #ECCEDE */
+
     --status-done: oklch(0.63 0.13 150);
+    --status-done-fg: oklch(0.45 0.130 150);        /* #00682A — 6.26:1 */
+    --status-done-bg: oklch(0.96 0.030 150);        /* #E4F8E7 */
+    --status-done-border: oklch(0.88 0.04 150);     /* #C6DFCA */
+
     --status-waiting: oklch(0.7 0.16 50);
+    --status-waiting-fg: oklch(0.48 0.140 50);      /* #993F00 — 6.18:1 */
+    --status-waiting-bg: oklch(0.97 0.030 50);      /* #FFF0E4 */
+    --status-waiting-border: oklch(0.88 0.04 50);   /* #EED1C1 */
+
     --status-cancelled: oklch(0.577 0.245 27.325);
+    --status-cancelled-fg: oklch(0.50 0.200 27);    /* #BB0916 — 5.79:1 */
+    --status-cancelled-bg: oklch(0.96 0.030 27);    /* #FFEBE7 */
+    --status-cancelled-border: oklch(0.88 0.04 27); /* #F1CEC9 */
+
+    /* ── Elevation ─────────────────────────────────────────────────────────
+     * One surface may not sit on another at the same elevation. */
+    --elevation-flat: none;                         /* table rows, list items, nav */
+    --elevation-raised:
+        0 1px 2px 0 oklch(0 0 0 / 0.05),
+        0 1px 3px 0 oklch(0 0 0 / 0.06);            /* cards, panels */
+    --elevation-overlay:
+        0 10px 15px -3px oklch(0 0 0 / 0.10),
+        0 4px 6px -4px oklch(0 0 0 / 0.10);         /* dialog, popover, drawer, command */
 }
 
 .dark {
-    --background: oklch(0.2 0.02 237);
-    --foreground: oklch(0.97 0.005 223);
-    --card: oklch(0.24 0.025 237);
-    --card-foreground: oklch(0.97 0.005 223);
-    --popover: oklch(0.24 0.025 237);
-    --popover-foreground: oklch(0.97 0.005 223);
-    --primary: oklch(0.675 0.095 195.1);
-    --primary-foreground: oklch(0.2 0.02 237);
-    --secondary: oklch(0.27 0.02 237);
-    --secondary-foreground: oklch(0.97 0.005 223);
-    --muted: oklch(0.27 0.02 237);
-    --muted-foreground: oklch(0.679 0.023 227.7);
-    --accent: oklch(0.27 0.02 237);
-    --accent-foreground: oklch(0.675 0.095 195.1);
-    --destructive: oklch(0.704 0.191 22.216);
+    /* ── Brand ─────────────────────────────────────────────────────────────*/
+    --brand: oklch(0.70 0.19 34.4);                 /* #FE6845 — 6.73:1 on canvas */
+    --brand-ink: oklch(0.1582 0.0118 260.6);        /* #0A0D12 */
+    --brand-tint: oklch(0.26 0.045 34.4);           /* #371B15 — active/selected row fill */
+    --brand-tint-strong: oklch(0.32 0.070 34.4);    /* #512419 */
+
+    /* ── Neutral ramp — same hue 260.6, mirrored ───────────────────────────
+     * The canvas is the logo's tile exactly, not an approximation. */
+    --background: oklch(0.1582 0.0118 260.6);       /* #0A0D12 — the logo tile */
+    --foreground: oklch(0.97 0.006 260.6);          /* #F3F5F9 — 17.84:1 on background */
+    --card: oklch(0.21 0.006 260.6);                /* #17181B — one step above the canvas */
+    --card-foreground: oklch(0.97 0.006 260.6);     /* #F3F5F9 */
+    --popover: oklch(0.21 0.006 260.6);             /* #17181B */
+    --popover-foreground: oklch(0.97 0.006 260.6);  /* #F3F5F9 */
+    --secondary: oklch(0.26 0.006 260.6);           /* #222427 */
+    --secondary-foreground: oklch(0.97 0.006 260.6);/* #F3F5F9 */
+    --muted: oklch(0.26 0.006 260.6);               /* #222427 */
+    --muted-foreground: oklch(0.70 0.006 260.6);    /* #9C9EA2 — 7.28:1 on background */
+    --accent: oklch(0.26 0.006 260.6);              /* #222427 */
+    --accent-foreground: oklch(0.97 0.006 260.6);   /* #F3F5F9 */
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 10%);
-    --ring: oklch(0.675 0.095 195.1);
 
-    --chart-1: oklch(0.675 0.095 195.1);
-    --chart-2: oklch(0.675 0.095 195.1);
-    --chart-3: oklch(0.679 0.023 227.7);
-    --chart-4: oklch(0.77 0.15 75);
-    --chart-5: oklch(0.63 0.13 150);
+    /* ── Semantic ──────────────────────────────────────────────────────────*/
+    --primary: oklch(0.72 0.174 34.4);              /* #FE7555 — 7.31:1 on canvas */
+    --primary-hover: oklch(0.78 0.150 34.4);        /* #FF9175 */
+    --primary-foreground: oklch(0.1582 0.0118 260.6); /* #0A0D12 — 7.31:1 on primary */
+    --destructive: oklch(0.704 0.191 22.216);       /* #FF6467 — shadcn default, unchanged */
+    --ring: var(--brand);                           /* #FE6845 */
 
-    --sidebar: oklch(0.310 0.053 237.8);
-    --sidebar-foreground: oklch(0.97 0.005 223);
-    --sidebar-primary: oklch(0.675 0.095 195.1);
-    --sidebar-primary-foreground: oklch(0.2 0.02 237);
-    --sidebar-accent: oklch(1 0 0 / 10%);
-    --sidebar-accent-foreground: oklch(0.97 0.005 223);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.675 0.095 195.1);
+    /* ── Charts — T8, same five hues, stepped for the dark canvas ──────────
+     * Not a flip of the light values: the marks sit on #17181B, so each one is
+     * re-stepped up the ramp until it clears the card. Same simulation, all
+     * pairs: worst ΔE 7.3 (deutan), normal-vision worst 15.3, every mark
+     * ≥ 3:1 on the card. */
+    --chart-1: var(--brand);                        /* #FE6845 */
+    --chart-2: oklch(0.78 0.20 131);                /* #88D029 */
+    --chart-3: oklch(0.78 0.13 212);                /* #26CDE7 */
+    --chart-4: oklch(0.70 0.155 265);               /* #6F9AFE */
+    --chart-5: oklch(0.70 0.20 329);                /* #DF68DA */
 
-    --status-todo: oklch(0.679 0.023 227.7);
-    --status-progress: oklch(0.675 0.095 195.1);
+    /* ── Sidebar — T2, mirrored: one step lighter than the dark canvas ─────
+     * Same model as light, no separate colour scheme: neutral shell, hairline
+     * edge, one orange rail. --sidebar-border is 10 % white, which is both the
+     * hairline and the hover wash. */
+    --sidebar: oklch(0.20 0.012 260.6);             /* #13161C — one step above the canvas */
+    --sidebar-foreground: oklch(0.96 0.004 260.6);  /* #F0F2F4 — 16.12:1 on sidebar */
+    --sidebar-foreground-muted: oklch(0.70 0.006 260.6); /* #9C9EA2 — 6.78:1, group labels + phase badges */
+    --sidebar-primary: var(--brand);                /* #FE6845 */
+    --sidebar-primary-foreground: oklch(0.1582 0.0118 260.6); /* #0A0D12 — 6.73:1 on brand */
+    --sidebar-accent: var(--brand-tint);            /* #371B15 — active row fill, 14.03:1 under sidebar-foreground */
+    --sidebar-accent-foreground: oklch(0.96 0.004 260.6); /* #F0F2F4 */
+    --sidebar-border: oklch(1 0 0 / 10%);           /* hairline, and the hover wash */
+    --sidebar-rail: var(--brand);                   /* #FE6845 — 6.26:1 on sidebar */
+    --sidebar-ring: var(--brand);                   /* #FE6845 */
+
+    /* ── Status — mirrored: fg to L 0.80, bg to L 0.26, border to L 0.38 ───*/
+    --status-backlog: oklch(0.63 0.105 196);        /* #109C9E — dot */
+    --status-backlog-fg: oklch(0.80 0.135 196);     /* #0FD8DA — 8.68:1 */
+    --status-backlog-bg: oklch(0.26 0.030 196);     /* #112929 */
+    --status-backlog-border: oklch(0.38 0.04 196);  /* #274949 */
+
+    --status-todo: oklch(0.70 0.006 260.6);         /* #9C9EA2 — neutral ramp step 4 */
+    --status-todo-fg: oklch(0.80 0.006 260.6);      /* #BBBEC2 — 8.32:1 */
+    --status-todo-bg: oklch(0.26 0.004 260.6);      /* #232426 */
+    --status-todo-border: oklch(0.38 0.04 260.6);   /* #364358 */
+
+    --status-progress: oklch(0.70 0.120 240);       /* #4FA8E1 — the badge's own hue */
+    --status-progress-fg: oklch(0.80 0.120 240);    /* #6FC8FF — 8.38:1 */
+    --status-progress-bg: oklch(0.26 0.025 240);    /* #19262F */
+    --status-progress-border: oklch(0.38 0.04 240); /* #2E4556 */
+
     --status-review: oklch(0.77 0.15 75);
+    --status-review-fg: oklch(0.80 0.130 75);       /* #EEB154 — 8.20:1 */
+    --status-review-bg: oklch(0.26 0.030 80);       /* #2C2213 */
+    --status-review-border: oklch(0.38 0.04 75);    /* #4F3F2A */
+
+    --status-changes: oklch(0.63 0.190 344);        /* #D34FA5 — dot */
+    --status-changes-fg: oklch(0.80 0.145 344);     /* #FE96D5 — 7.89:1 */
+    --status-changes-bg: oklch(0.26 0.030 344);     /* #2F1E28 */
+    --status-changes-border: oklch(0.38 0.04 344);  /* #523A48 */
+
     --status-done: oklch(0.63 0.13 150);
+    --status-done-fg: oklch(0.80 0.130 150);        /* #7CD591 — 8.65:1 */
+    --status-done-bg: oklch(0.26 0.030 150);        /* #19281C */
+    --status-done-border: oklch(0.38 0.04 150);     /* #334937 */
+
     --status-waiting: oklch(0.7 0.16 50);
+    --status-waiting-fg: oklch(0.80 0.140 50);      /* #FFA167 — 7.87:1 */
+    --status-waiting-bg: oklch(0.26 0.030 50);      /* #302017 */
+    --status-waiting-border: oklch(0.38 0.04 50);   /* #543C2F */
+
     --status-cancelled: oklch(0.704 0.191 22.216);
+    --status-cancelled-fg: oklch(0.80 0.200 27);    /* #FF8174 — 6.47:1 */
+    --status-cancelled-bg: oklch(0.26 0.030 27);    /* #311E1C */
+    --status-cancelled-border: oklch(0.38 0.04 27); /* #563A37 */
+
+    /* ── Elevation ─────────────────────────────────────────────────────────
+     * Deeper on the dark canvas, where a 5 % black shadow reads as nothing. */
+    --elevation-flat: none;
+    --elevation-raised:
+        0 1px 2px 0 oklch(0 0 0 / 0.30),
+        0 1px 3px 0 oklch(0 0 0 / 0.36);
+    --elevation-overlay:
+        0 10px 15px -3px oklch(0 0 0 / 0.50),
+        0 4px 6px -4px oklch(0 0 0 / 0.50);
 }
 
 @theme inline {
@@ -102,6 +273,15 @@
     --radius-lg: var(--radius);
     --radius-xl: calc(var(--radius) + 4px);
 
+    --shadow-flat: var(--elevation-flat);
+    --shadow-raised: var(--elevation-raised);
+    --shadow-overlay: var(--elevation-overlay);
+
+    --color-brand: var(--brand);
+    --color-brand-ink: var(--brand-ink);
+    --color-brand-tint: var(--brand-tint);
+    --color-brand-tint-strong: var(--brand-tint-strong);
+
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-card: var(--card);
@@ -109,6 +289,7 @@
     --color-popover: var(--popover);
     --color-popover-foreground: var(--popover-foreground);
     --color-primary: var(--primary);
+    --color-primary-hover: var(--primary-hover);
     --color-primary-foreground: var(--primary-foreground);
     --color-secondary: var(--secondary);
     --color-secondary-foreground: var(--secondary-foreground);
@@ -129,6 +310,8 @@
 
     --color-sidebar: var(--sidebar);
     --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-foreground-muted: var(--sidebar-foreground-muted);
+    --color-sidebar-rail: var(--sidebar-rail);
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
     --color-sidebar-accent: var(--sidebar-accent);
@@ -136,12 +319,38 @@
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-ring: var(--sidebar-ring);
 
+    --color-status-backlog: var(--status-backlog);
+    --color-status-backlog-fg: var(--status-backlog-fg);
+    --color-status-backlog-bg: var(--status-backlog-bg);
+    --color-status-backlog-border: var(--status-backlog-border);
     --color-status-todo: var(--status-todo);
+    --color-status-todo-fg: var(--status-todo-fg);
+    --color-status-todo-bg: var(--status-todo-bg);
+    --color-status-todo-border: var(--status-todo-border);
     --color-status-progress: var(--status-progress);
+    --color-status-progress-fg: var(--status-progress-fg);
+    --color-status-progress-bg: var(--status-progress-bg);
+    --color-status-progress-border: var(--status-progress-border);
     --color-status-review: var(--status-review);
+    --color-status-review-fg: var(--status-review-fg);
+    --color-status-review-bg: var(--status-review-bg);
+    --color-status-review-border: var(--status-review-border);
+    --color-status-changes: var(--status-changes);
+    --color-status-changes-fg: var(--status-changes-fg);
+    --color-status-changes-bg: var(--status-changes-bg);
+    --color-status-changes-border: var(--status-changes-border);
     --color-status-done: var(--status-done);
+    --color-status-done-fg: var(--status-done-fg);
+    --color-status-done-bg: var(--status-done-bg);
+    --color-status-done-border: var(--status-done-border);
     --color-status-waiting: var(--status-waiting);
+    --color-status-waiting-fg: var(--status-waiting-fg);
+    --color-status-waiting-bg: var(--status-waiting-bg);
+    --color-status-waiting-border: var(--status-waiting-border);
     --color-status-cancelled: var(--status-cancelled);
+    --color-status-cancelled-fg: var(--status-cancelled-fg);
+    --color-status-cancelled-bg: var(--status-cancelled-bg);
+    --color-status-cancelled-border: var(--status-cancelled-border);
 }
 
 @layer base {

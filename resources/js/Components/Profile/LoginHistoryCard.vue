@@ -48,7 +48,46 @@ const headClass = 'text-xs uppercase text-muted-foreground';
             <CardDescription>Your most recent sign-in attempts.</CardDescription>
         </CardHeader>
         <CardContent class="min-w-0">
-            <div v-if="rows.length > 0" class="overflow-x-auto">
+            <!--
+                Below md the four columns do not fit a 360 px card: the table's own
+                `overflow-auto` box scrolled sideways (475 px of table in a 278 px box) and IP and
+                Device were unreachable without dragging inside the card, which page-level overflow
+                checks never see. Same `md` card fallback `DataTable` uses, written by hand: this
+                card wants none of `DataTable`'s machinery (no sorting, no selection, no bulk bar,
+                no per-page, no second Card around its own), so the breakpoint pair is the smaller
+                change.
+            -->
+            <ul v-if="rows.length > 0" class="flex flex-col divide-y md:hidden">
+                <li v-for="row in rows" :key="row.key" class="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+                    <div class="flex min-w-0 flex-wrap items-center gap-2">
+                        <span class="min-w-0 text-sm font-medium tabular-nums break-words">{{ row.when }}</span>
+                        <span
+                            class="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium"
+                        >
+                            <span
+                                :class="
+                                    cn('size-1.5 rounded-full', row.succeeded ? 'bg-status-done' : 'bg-status-cancelled')
+                                "
+                                aria-hidden="true"
+                            />
+                            {{ row.succeeded ? 'Success' : 'Failed' }}
+                        </span>
+                    </div>
+                    <dl class="flex min-w-0 flex-col gap-1">
+                        <div class="flex min-w-0 flex-wrap items-baseline gap-2">
+                            <dt class="shrink-0 text-xs text-muted-foreground">IP</dt>
+                            <dd class="min-w-0 text-xs tabular-nums break-all">{{ row.ip }}</dd>
+                        </div>
+                        <div class="flex min-w-0 flex-wrap items-baseline gap-2">
+                            <dt class="shrink-0 text-xs text-muted-foreground">Device</dt>
+                            <dd class="min-w-0 text-xs break-words">{{ row.device }}</dd>
+                        </div>
+                    </dl>
+                </li>
+            </ul>
+
+            <!-- md and up: the real table. Only this box scrolls sideways, never the page. -->
+            <div v-if="rows.length > 0" class="hidden min-w-0 md:block">
                 <Table>
                     <TableHeader>
                         <TableRow>

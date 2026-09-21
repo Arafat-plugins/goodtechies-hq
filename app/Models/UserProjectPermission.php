@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * A per-project permission grant. The project relation arrives with the projects table in Phase 1.
+ * A per-project permission grant.
  */
 #[Fillable(['user_id', 'project_id', 'permission_id'])]
 class UserProjectPermission extends Model
@@ -18,6 +18,14 @@ class UserProjectPermission extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     /**

@@ -23,6 +23,13 @@
     <php>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <!--
+            Pinned ON so a developer who has switched two-factor enforcement off in their own
+            .env (AUTH_TWO_FACTOR_ENFORCED=false, a local convenience) does not silently switch
+            it off for the test suite as well and hide a real 2FA regression. The suite always
+            tests the enforced default; the tests that need it off set the config themselves.
+        -->
+        <env name="AUTH_TWO_FACTOR_ENFORCED" value="true"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BACKUP_DISK" value="backups"/>
         <env name="BACKUP_ARCHIVE_PASSWORD" value="backup-password-for-tests-only"/>

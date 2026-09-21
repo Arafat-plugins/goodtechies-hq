@@ -114,4 +114,38 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Two-Factor Authentication
+    |--------------------------------------------------------------------------
+    |
+    | 'enforced' is a developer convenience only: setting AUTH_TWO_FACTOR_ENFORCED
+    | to false lets an Admin or Accountant sign in on a developer's own machine with
+    | just a password, so a TOTP code is not needed on every rebuild.
+    |
+    | It does nothing in production. App\Services\TwoFactorService::isEnforced()
+    | returns true unconditionally when the application is running in production,
+    | whatever this value is, and that is the only place either value is read.
+    |
+    | The value fails closed. Only an explicit boolean false ("false", "0", "off",
+    | "no") switches enforcement off. An absent, empty or misspelt value leaves
+    | two-factor authentication switched ON — note that filter_var on its own reads
+    | the empty string as false, which is why it is screened out first. Nothing here
+    | destroys a secret or a recovery code: enforcement is skipped, enrolment is not
+    | undone, and switching the variable back restores the previous behaviour exactly.
+    |
+    */
+
+    'two_factor' => [
+        'enforced' => (static function (): bool {
+            $raw = env('AUTH_TWO_FACTOR_ENFORCED', true);
+
+            if ($raw === null || $raw === '') {
+                return true;
+            }
+
+            return filter_var($raw, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true;
+        })(),
+    ],
+
 ];

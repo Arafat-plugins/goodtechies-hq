@@ -30,8 +30,8 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
             label: 'Menu',
             items: [
                 { label: 'Dashboard', href: '/employee/dashboard', icon: LayoutDashboard },
-                { label: 'My Tasks', icon: ListTodo, phase: 2 },
-                { label: 'Projects', icon: FolderKanban, phase: 1 },
+                { label: 'My Tasks', href: '/employee/tasks', icon: ListTodo },
+                { label: 'Projects', href: '/employee/projects', icon: FolderKanban },
                 { label: 'Calendar', icon: CalendarDays, phase: 2 },
                 { label: 'Meetings', icon: Video, phase: 7 },
                 { label: 'Messages', icon: MessagesSquare, phase: 6 },

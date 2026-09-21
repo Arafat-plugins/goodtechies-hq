@@ -2,7 +2,6 @@
 import { Head } from '@inertiajs/vue3';
 import {
     Bell,
-    CalendarCheck,
     CalendarClock,
     CalendarDays,
     CircleAlert,
@@ -11,43 +10,35 @@ import {
     ListTodo,
     LoaderCircle,
     PartyPopper,
-    Timer,
     Video,
 } from '@lucide/vue';
-import { computed } from 'vue';
-import PageHeader from '@/Components/PageHeader.vue';
-import PlaceholderPanel from '@/Components/PlaceholderPanel.vue';
-import StatCard from '@/Components/StatCard.vue';
+import TimerHeroCard from '@/Components/Dashboard/TimerHeroCard.vue';
+import EmptyState from '@/Components/EmptyState.vue';
+import PageShell from '@/Components/PageShell.vue';
+import { Card } from '@/Components/ui/card';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import type { TrackingMode } from '@/types';
 
 defineOptions({ layout: EmployeeLayout });
 
-const props = defineProps<{
+defineProps<{
     greetingName: string;
     today: string;
     trackingMode: TrackingMode;
 }>();
 
+/**
+ * Demoted from five hero cards to one compact row inside a single card: they are counts
+ * you read, not things you do, and the hero above is what the page is for. One shared
+ * phase line under the row replaces five identical ones.
+ */
 const taskStats = [
-    { label: 'My Tasks', icon: ListTodo },
-    { label: 'Due Today', icon: CalendarClock },
+    { label: 'Assigned', icon: ListTodo },
+    { label: 'Due today', icon: CalendarClock },
     { label: 'Overdue', icon: CircleAlert },
-    { label: 'In Progress', icon: LoaderCircle },
+    { label: 'In progress', icon: LoaderCircle },
     { label: 'Completed', icon: CircleCheck },
 ];
-
-const roleCard = computed(() => {
-    if (props.trackingMode === 'remote_timer') {
-        return { label: 'Time today', sub: 'Target 5h · arrives in Phase 4', icon: Timer };
-    }
-
-    if (props.trackingMode === 'office_attendance') {
-        return { label: 'Attendance today', sub: 'Arrives in Phase 4', icon: CalendarCheck };
-    }
-
-    return null;
-});
 
 const panels = [
     { title: 'My schedule', phase: 4, icon: CalendarDays, description: 'Your working hours and shifts will show here.' },
@@ -61,30 +52,39 @@ const panels = [
 <template>
     <Head title="Dashboard" />
 
-    <div class="flex flex-col gap-6">
-        <PageHeader :greeting-name="greetingName" :today="today" />
+    <!--
+        No #actions slot: the hero card carries this page's only primary action, so the
+        header stays the greeting and nothing else.
+    -->
+    <PageShell title="Dashboard" :greeting="{ name: greetingName, today }">
+        <TimerHeroCard :mode="trackingMode" />
 
-        <section aria-label="My tasks" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <StatCard v-for="stat in taskStats" :key="stat.label" :label="stat.label" :phase="2" :icon="stat.icon" />
-            <StatCard
-                v-if="roleCard"
-                class="lg:col-span-2"
-                :label="roleCard.label"
-                :phase="4"
-                :sub="roleCard.sub"
-                :icon="roleCard.icon"
-            />
-        </section>
+        <Card class="gap-4 p-4 shadow-xs">
+            <h2 class="text-sm font-medium">My tasks</h2>
+            <dl class="grid min-w-0 grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                <div v-for="stat in taskStats" :key="stat.label" class="flex min-w-0 flex-col gap-1">
+                    <dt class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                        <component :is="stat.icon" class="size-3.5 shrink-0" aria-hidden="true" />
+                        <span class="truncate">{{ stat.label }}</span>
+                    </dt>
+                    <dd class="text-xl font-semibold tabular-nums text-muted-foreground">
+                        <span aria-hidden="true">—</span>
+                        <span class="sr-only">Not available yet</span>
+                    </dd>
+                </div>
+            </dl>
+            <p class="text-xs text-muted-foreground">Arrives in Phase 2</p>
+        </Card>
 
         <section aria-label="Coming up" class="grid gap-4 md:grid-cols-2">
-            <PlaceholderPanel
-                v-for="panel in panels"
-                :key="panel.title"
-                :title="panel.title"
-                :phase="panel.phase"
-                :icon="panel.icon"
-                :description="panel.description"
-            />
+            <Card v-for="panel in panels" :key="panel.title" class="min-w-0 gap-4 p-6 shadow-xs">
+                <h2 class="text-sm font-medium">{{ panel.title }}</h2>
+                <EmptyState
+                    :icon="panel.icon"
+                    :title="`Arrives in Phase ${panel.phase}`"
+                    :description="panel.description"
+                />
+            </Card>
         </section>
-    </div>
+    </PageShell>
 </template>

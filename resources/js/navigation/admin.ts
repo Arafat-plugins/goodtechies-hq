@@ -50,9 +50,9 @@ export const adminNav: NavGroup[] = [
     {
         label: 'Work',
         items: [
-            { label: 'Clients', icon: Building2, phase: 1 },
-            { label: 'Projects', icon: FolderKanban, phase: 1 },
-            { label: 'Tasks', icon: ListChecks, phase: 2 },
+            { label: 'Clients', href: '/admin/clients', icon: Building2 },
+            { label: 'Projects', href: '/admin/projects', icon: FolderKanban },
+            { label: 'Tasks', href: '/admin/tasks', icon: ListChecks },
             { label: 'Calendar', icon: CalendarDays, phase: 2 },
             { label: 'Meetings', icon: Video, phase: 7 },
             { label: 'Team', icon: UsersRound, phase: 6 },

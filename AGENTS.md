@@ -28,7 +28,7 @@ UI surfaces (Admin, Employee, Accountant) and **privacy by role is enforced on t
 | `app/Support/` | Enums and keys (`Permission`, `Role`, `TrackingMode`, statuses) | new keys |
 | `app/Console/Commands/` | `hq:*` artisan commands | scheduled or ops jobs |
 | `app/Events/`, `app/Listeners/`, `app/Jobs/` | Events; the one `NotificationDispatcher` listener; queue jobs | from Phase 2 |
-| `database/migrations/` | Added phase by phase, never ahead | schema |
+| `database/migrations/` | Added phase by phase, never ahead (Phase 0 identity/audit; Phase 1 clients, projects, project_finance, project_members) | schema |
 | `database/seeders/` | `RolePermissionSeeder`, `SettingsSeeder`, `TeamSeeder`, `DemoSeeder` (Phase 1+) | seed data |
 | `routes/` | `web.php` includes the surface files `auth.php`, `admin.php`, `employee.php`, `accountant.php`, `shared.php`; `console.php` holds the schedule | routes |
 | `resources/js/Layouts/` | `AdminLayout.vue`, `EmployeeLayout.vue`, `AccountantLayout.vue`, `AuthLayout.vue`, each a **separate** shell | shell chrome |
@@ -53,7 +53,10 @@ UI surfaces (Admin, Employee, Accountant) and **privacy by role is enforced on t
 - **Tests:** `tests/Pest.php` binds `TestCase` + `RefreshDatabase` for the `Feature` and `Permissions` folders.
 
 ### Surfaces
-Generated 2026-09-17 from `php artisan route:list --except-vendor` (plus framework `GET /up`).
+Generated 2026-09-17 from `php artisan route:list --except-vendor` (plus framework `GET /up`), and
+still current: Phase 0.5 changed no route, controller or model. The **Styles** column is historical.
+Every page now opens with `PageShell`; admin lists use `DataTable` + the chip `FilterBar`; an
+unbuilt panel is `Card` + `EmptyState`. See DESIGN.md §4.
 | Surface (route) | Entry | View | Styles |
 | --- | --- | --- | --- |
 | `GET /` | `HomeController` (redirects to login or the user's shell) | none | none |
@@ -64,12 +67,20 @@ Generated 2026-09-17 from `php artisan route:list --except-vendor` (plus framewo
 | `GET /admin/settings` | `Admin/SettingsController` | `Pages/Admin/Settings.vue` | utility classes |
 | `GET /employee/dashboard` | `Employee/DashboardController` | `Pages/Employee/Dashboard.vue` in `EmployeeLayout` | utility classes |
 | `GET /accountant/dashboard` | `Accountant/DashboardController` | `Pages/Accountant/Dashboard.vue` in `AccountantLayout` | utility classes |
+| `/admin/clients` (index/create/store/show/edit/update) + `POST /admin/clients/{client}/deactivate` | `Admin/ClientController` | `Pages/Admin/Clients/{Index,Create,Edit,Show}.vue`, `Components/Clients/*` | utility classes |
+| `/admin/projects` (index/create/store/show/edit/update) | `Admin/ProjectController` | `Pages/Admin/Projects/{Index,Create,Edit,Show}.vue`, `Components/Projects/*` | utility classes |
+| `PUT /admin/projects/{project}/finance` · `/members` · `POST …/status` · `/archive` · `/unarchive` | `Admin/Project{Finance,Member,Status}Controller` | rendered inside `Pages/Admin/Projects/Show.vue` | utility classes |
+| `/employee/projects`, `/employee/projects/{project}` | `Employee/ProjectController` | `Pages/Employee/Projects/{Index,Show}.vue`, `Components/Employee/*` | utility classes |
 | `/profile` (GET/PUT), `PUT /profile/password`, `DELETE /profile/two-factor`, `POST /profile/two-factor/recovery-codes`, `DELETE /profile/sessions/{session}` | `Shared/Profile*Controller` | `Pages/Shared/Profile.vue` (layout chosen from `auth.user.surface`), `Components/Profile/*` | utility classes |
 
-- **Shell building blocks:** `Components/Shell/*` (sidebar, top bar, user menu, mobile sheet) and `navigation/{admin,employee,accountant}.ts`. To enable a nav item, give it an `href` and remove its `phase`.
-- **Shared cards:** `Components/{PageHeader,StatCard,PlaceholderPanel,AppWordmark,FlashMessage}.vue`.
+- **Shell building blocks:** `Components/Shell/*` (skip link, sidebar + rail toggle, Coming-soon disclosure, top bar, ⌘K palette, quick create, bell, user menu, theme toggle, mobile sheet) and `navigation/{admin,employee,accountant}.ts`. To enable a nav item, give it an `href` and remove its `phase`. `SkipToContent.vue` must stay the first child of each layout, and each layout's `<main>` keeps `id="main-content" tabindex="-1"`.
+- **Shared blocks:** `Components/{PageShell,StatusBadge,EmptyState,Toaster,DetailDrawer,FilterBar,FilterChip,StatCard,AppWordmark,FlashMessage,Pagination,StatusPill}.vue`, plus `DataTable/*`, `Skeletons/*`, `Charts/*` and `Dashboard/*`. `StatusPill.vue` also exports `toneForProjectStatus()`; `Pagination.vue` exports the `Paginated<T>` type; `Charts/chartTokens.ts` is how a chart reads CSS variables.
+- **`PageHeader.vue` and `PlaceholderPanel.vue` no longer exist** — Phase 0.5 deleted them. `PageShell` replaces the first; `Card` + `EmptyState` replaces the second. Do not reintroduce either.
+- **Read `DESIGN.md` before writing any Tailwind class.** It carries every token with its light and dark value, the real signature of every shared component, and the 20 things that are never allowed. It is generated from `app.css`, which wins if the two ever disagree.
 - **Route file ownership:** `routes/auth.php`, `admin.php`, `employee.php`, `accountant.php`, `shared.php`. The schedule lives in `routes/console.php`.
-- **Services:** `AuditLogger`, `ActivityLogger`, `SettingsService`, `EmployeeAdministrationService`, `TwoFactorService`, `SessionService`.
+- **Services:** `AuditLogger`, `ActivityLogger`, `SettingsService`, `EmployeeAdministrationService`, `TwoFactorService`, `SessionService`, `ClientService`, `ProjectService`, `ProjectFinanceService`.
+- **Serializers:** `ProjectResource` and `ClientResource` — the only way a project or client leaves the server. A project's **status changes only** through `POST …/status`, `…/archive`, `…/unarchive`; `PUT /admin/projects/{id}` ignores a `status` key by design.
+- **Policies:** `EmployeePolicy`, `ProjectPolicy` (view, create, update, archive, unarchive, cancel, manageMembers, viewCommercial, viewFinance, updateFinance), `ClientPolicy`. `Project::visibleTo($user)` scopes every list.
 - **Middleware aliases:** `surface:<admin|employee|accountant>` and `two-factor`.
 - **Gates:** one per permission value (`can:settings.manage`).
 - **Enums** (`app/Support`):
@@ -123,12 +134,21 @@ Generated 2026-09-17 from `php artisan route:list --except-vendor` (plus framewo
 | Deploy kit test | `deploy/test/run-install-test.sh` (fresh Ubuntu 24.04 container; needs Docker) |
 | Verify backup | `php artisan hq:verify-backup [--disk=…]` |
 | Measure widths | `node .claude/dispatch/dispatch-measure.mjs http://127.0.0.1:8000/<path> 375 768 1280` |
+| Render a signed-in page | a brief that needs one is given the helper's path; it logs in as a seeded user (computing the TOTP where the role has 2FA) and reports overflow per width |
 
 The local cloud workspace has PostgreSQL 16 on `127.0.0.1:5432`, superuser `postgres`, trust auth (dev only), and Redis on `127.0.0.1:6379`.
 
 ## Known-failing baseline
-Measured 2026-09-17 at `1ac6aa6` with `php artisan test`: none failing (167 passed).
-`vendor/bin/pint --test`: passed. `npx vue-tsc --noEmit`: passed. `npm run build`: passed.
+Measured 2026-09-20 at `dfec2e9` (Phase 2, task detail) with `php artisan test`: none
+failing (**628 passed, 3661 assertions**). `vendor/bin/pint --test`: passed.
+`npx vue-tsc --noEmit`: passed. `npm run build`: passed. If your number is not 628, that is a
+finding, not drift.
+
+**A task's status is guarded at the model.** `Task` throws
+`TaskStateException::statusWrittenOutsideTheMachine()` if `status` is dirty on an existing row
+and the write did not come through `Task::applyTransition()`. Every status move — form, drag,
+job, command — goes through `TaskService::transition()`. Do not add a second path, and do not
+reach for `withoutStatusGuard()` outside seeding.
 
 ## Verification capabilities
 
@@ -136,7 +156,8 @@ Measured 2026-09-17 by `/dispatch setup`:
 
 - Dev server: `npm run build && php artisan serve --host=127.0.0.1 --port=8000` → http://127.0.0.1:8000. There is no Vite dev server; pages are measured against the built assets.
 - Rendering: local Playwright (`playwright@1.56.1`, dev dependency, Chromium from `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`); run `.claude/dispatch/dispatch-measure.mjs`. Frontend agent tools: `Bash, Read, Edit, Write, Grep, Glob`. The browser is reached through the script, not an MCP.
-- Design source: DESIGN.md. The shadcn-tokens MCP is **not** reachable in this environment, so the token values in DESIGN.md / `resources/css/app.css` are the source.
+- Design source: **DESIGN.md**, regenerated at the end of Phase 0.5 from `app.css` with 52 measured contrast pairs. The shadcn-tokens MCP is **not** reachable in this environment, so DESIGN.md and `resources/css/app.css` are the source. `CLAUDE.md` still tells you to call that MCP first; it is stale on this point and DESIGN.md wins.
+- Accessibility floor, established by Phase 0.5 and not to be regressed: no surface overflows horizontally at 360/375/768/1280; every tab stop paints a visible focus ring; an overlay returns focus to whatever opened it; the skip link is the first tab stop on every shell page; and no status or state is carried by colour alone.
 - Database: postgres, read-only user `hq_ro` (`DB_RO_*` in `.env`, created by `deploy/sql/roles.sql`)
 - Lint / test / build: see Commands
 

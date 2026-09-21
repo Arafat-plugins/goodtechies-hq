@@ -1,6 +1,11 @@
 <?php
 
+use App\Models\Client;
 use App\Models\Employee;
+use App\Models\Project;
+use App\Models\Task;
+use App\Models\TaskChecklistItem;
+use App\Models\TaskLink;
 use App\Models\User;
 use App\Support\RoleName;
 use Illuminate\Routing\Route as RoutingRoute;
@@ -44,22 +49,92 @@ const MATRIX_IGNORED_ROUTES = [
 ];
 
 /**
- * Values substituted for route parameters.
+ * Values substituted for route parameters that need no database row.
  */
 const MATRIX_PARAMETERS = [
     '{session}' => 'not-a-session-of-this-user',
 ];
 
 /**
- * @return list<array{0: string, 1: string, 2: array<string, int|string>}>
+ * Every substitution, including the seeded records the parameterised routes point at. The
+ * project is one of Tapu's two SEO projects, so a role that may not see it is covered too:
+ * Yaseen is on neither, and the Accountant sees no project at all.
+ *
+ * @return array<string, string>
+ */
+function matrixParameters(): array
+{
+    return MATRIX_PARAMETERS + [
+        '{client}' => (string) Client::where('name', 'Buffalo Modular Homes')->firstOrFail()->id,
+        '{project}' => (string) Project::where('name', 'Buffalo Modular — SEO')->firstOrFail()->id,
+
+        // The task every task row points at unless it overrides it: one of Tapu's SEO tasks, so
+        // the roles line up the way the project rows do — Tapu is assigned, Yaseen is not and
+        // gets 404, the Accountant has no task routes at all. It is the seeded task carrying a
+        // checklist and links, which the child-resource rows need something real to aim at.
+        '{task}' => matrixTaskId(MATRIX_TASK),
+        // Defaults for the child parameters, overridden per row so that a DELETE consumes a
+        // record no other row is pointed at.
+        '{item}' => matrixResolve('checklist:List every page with a wrong canonical'),
+        '{link}' => matrixResolve('link:https://search.google.com/search-console'),
+        '{dependency}' => matrixTaskId('Build the internal link map for the county pages'),
+    ];
+}
+
+/** The task the task rows point at by default. */
+const MATRIX_TASK = 'Fix the duplicate canonical tags on model pages';
+
+function matrixTaskId(string $title): string
+{
+    return (string) Task::where('title', $title)->firstOrFail()->id;
+}
+
+/**
+ * Resolve a per-row override token to an id.
+ *
+ * The rows carry tokens rather than ids because permissionMatrix() is also read by the coverage
+ * guard, which never touches the database — a row that queried on the way in would make the
+ * guard depend on the seed.
+ */
+function matrixResolve(string $token): string
+{
+    [$kind, $value] = explode(':', $token, 2);
+
+    return match ($kind) {
+        'task' => matrixTaskId($value),
+        // By title and by URL, not by position in the list: an earlier DELETE row has already
+        // removed one of these by the time a later row resolves, and an index would then slide
+        // onto the wrong record.
+        'checklist' => (string) TaskChecklistItem::query()
+            ->where('task_id', matrixTaskId(MATRIX_TASK))
+            ->where('title', $value)
+            ->firstOrFail()->id,
+        'link' => (string) TaskLink::query()
+            ->where('task_id', matrixTaskId(MATRIX_TASK))
+            ->where('url', $value)
+            ->firstOrFail()->id,
+        default => $value,
+    };
+}
+
+/**
+ * @return list<array{0: string, 1: string, 2: array<string, int|string>, 3?: array<string, string>}>
  */
 function permissionMatrix(): array
 {
     $guestOnly = ['guest' => 302, 'ADMIN' => '302 /', 'MANAGER' => '302 /', 'EMPLOYEE' => '302 /', 'REMOTE_EMPLOYEE' => '302 /', 'ACCOUNTANT' => '302 /'];
     $everyone = fn (int|string $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => $status];
     $admin = ['guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403];
+    $adminAction = ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403];
     $employee = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 200, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403];
     $accountant = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 200];
+
+    // A DELETE row destroys the record it points at, and route-model binding runs before the
+    // surface middleware — so every cell after the one that is allowed sees 404 where it would
+    // otherwise have seen 403. The surface guard on these routes is asserted directly instead,
+    // in tests/Feature/Admin/TaskWriteEndpointsTest.php.
+    $consumed = ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404];
+    $consumedByManager = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404];
 
     return [
         // method, uri, expected status per role
@@ -81,8 +156,91 @@ function permissionMatrix(): array
         ['GET', 'admin/dashboard', $admin],
         ['GET', 'admin/settings', $admin],
 
+        // Admin surface — clients. A body-less mutating call stops at the validation
+        // redirect, which is proof enough that it got past every gate.
+        ['GET', 'admin/clients', $admin],
+        ['GET', 'admin/clients/create', $admin],
+        ['POST', 'admin/clients', $adminAction],
+        ['GET', 'admin/clients/{client}', $admin],
+        ['GET', 'admin/clients/{client}/edit', $admin],
+        ['PUT', 'admin/clients/{client}', $adminAction],
+        ['POST', 'admin/clients/{client}/deactivate', $adminAction],
+
+        // Admin surface — projects. archive and unarchive sit next to each other on purpose:
+        // the Admin cell of the first is undone by the Admin cell of the second.
+        ['GET', 'admin/projects', $admin],
+        ['GET', 'admin/projects/create', $admin],
+        ['POST', 'admin/projects', $adminAction],
+        ['GET', 'admin/projects/{project}', $admin],
+        ['GET', 'admin/projects/{project}/edit', $admin],
+        ['PUT', 'admin/projects/{project}', $adminAction],
+        ['PUT', 'admin/projects/{project}/finance', $adminAction],
+        ['PUT', 'admin/projects/{project}/members', $adminAction],
+        ['POST', 'admin/projects/{project}/status', $adminAction],
+        ['POST', 'admin/projects/{project}/archive', $adminAction],
+        ['POST', 'admin/projects/{project}/unarchive', $adminAction],
+
+        // Admin surface — tasks. A status moves through `…/status` and nowhere else: there is
+        // no second endpoint here for the board drag to use, which is the point.
+        ['GET', 'admin/tasks', $admin],
+        ['POST', 'admin/tasks', $adminAction],
+        ['GET', 'admin/tasks/{task}', $admin],
+        ['PUT', 'admin/tasks/{task}', $adminAction],
+        ['POST', 'admin/tasks/{task}/status', $adminAction],
+        ['POST', 'admin/tasks/{task}/reorder', $adminAction],
+        ['PUT', 'admin/tasks/{task}/assignees', $adminAction],
+        ['POST', 'admin/tasks/{task}/handoff', $adminAction],
+        ['POST', 'admin/tasks/{task}/checklist', $adminAction],
+        ['PUT', 'admin/tasks/{task}/checklist/{item}', $adminAction, ['{item}' => 'checklist:List every page with a wrong canonical']],
+        ['DELETE', 'admin/tasks/{task}/checklist/{item}', $consumed, ['{item}' => 'checklist:Point each model page at itself']],
+        ['POST', 'admin/tasks/{task}/links', $adminAction],
+        ['DELETE', 'admin/tasks/{task}/links/{link}', $consumed, ['{link}' => 'link:https://search.google.com/search-console']],
+        ['POST', 'admin/tasks/{task}/dependencies', $adminAction],
+        // Detaching a dependency that is not there is a no-op, which is all this row needs to
+        // show it got past the gates — so it consumes nothing and keeps its 403s.
+        ['DELETE', 'admin/tasks/{task}/dependencies/{dependency}', $adminAction, ['{dependency}' => 'task:Build the internal link map for the county pages']],
+        // Adjacent on purpose, like the project pair above: the Admin cell of the first is
+        // undone by the Admin cell of the second, so the rows after these see a live task.
+        ['POST', 'admin/tasks/{task}/archive', $adminAction],
+        ['POST', 'admin/tasks/{task}/unarchive', $adminAction],
+        // Soft delete, on its own task, needed by no row after it.
+        ['DELETE', 'admin/tasks/{task}', $consumed, ['{task}' => 'task:Write the 404 and maintenance pages']],
+
         // Employee surface
         ['GET', 'employee/dashboard', $employee],
+        ['GET', 'employee/projects', $employee],
+        // Tapu (REMOTE_EMPLOYEE) is on this project and Yaseen (EMPLOYEE) is not: a project
+        // an employee is not on is missing, not forbidden.
+        ['GET', 'employee/projects/{project}', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
+        // The task list is a list: every role that may reach the surface gets a 200 and sees
+        // its own rows. Which rows those are is Task::visibleTo()'s business, tested in
+        // tests/Feature/Privacy/TaskPrivacyTest.php, not a status code here.
+        ['GET', 'employee/tasks', $employee],
+
+        // Employee surface — one task. The Manager lives on THIS surface, so the moves the plan
+        // gives to ADMIN/MANAGER are routed here too and refused to an employee by TaskPolicy.
+        //
+        // Two things shape the cells below:
+        //   - a task an employee is not assigned to is ABSENT: Yaseen gets 404, not 403;
+        //   - a Form Request runs before the controller, so on a row whose body is required
+        //     everybody who reaches the surface stops at the same validation redirect —
+        //     including Yaseen, who would otherwise have got a 404 one line later.
+        ['GET', 'employee/tasks/{task}', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
+        ['PUT', 'employee/tasks/{task}', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        // `status` is required, so nobody gets past validation without a body.
+        ['POST', 'employee/tasks/{task}/status', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        ['POST', 'employee/tasks/{task}/reorder', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        ['POST', 'employee/tasks/{task}/handoff', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        ['POST', 'employee/tasks/{task}/checklist', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        ['PUT', 'employee/tasks/{task}/checklist/{item}', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403], ['{item}' => 'checklist:Re-crawl and confirm the canonicals resolved']],
+        ['DELETE', 'employee/tasks/{task}/checklist/{item}', $consumedByManager, ['{item}' => 'checklist:Ask Google to re-index the eight pages']],
+        ['POST', 'employee/tasks/{task}/links', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        ['DELETE', 'employee/tasks/{task}/links/{link}', $consumedByManager, ['{link}' => 'link:https://buffalomodular.com/sitemap.xml']],
+        // Archive is ADMIN/MANAGER: an assignee reaches the task and is still refused, which is
+        // a 403 about their role and not a 404 about the record.
+        ['POST', 'employee/tasks/{task}/archive', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
+        // Delete is ADMIN/MANAGER too, and a Manager can only reach it here. Its own task.
+        ['DELETE', 'employee/tasks/{task}', $consumedByManager, ['{task}' => 'task:Refresh the agency case-study deck']],
 
         // Accountant surface
         ['GET', 'accountant/dashboard', $accountant],
@@ -122,12 +280,19 @@ function matrixKey(string $method, string $uri): string
 it('enforces the role × route matrix', function () {
     $this->seed();
     $users = matrixUsers();
+    $parameters = matrixParameters();
     $mismatches = [];
 
-    foreach (permissionMatrix() as [$method, $uri, $expectations]) {
+    foreach (permissionMatrix() as $row) {
+        [$method, $uri, $expectations] = $row;
+        // A fourth element overrides a parameter for this row only. A route appears in the
+        // matrix exactly once, so a destructive row needs its own record to consume rather
+        // than the one every other row of the same route is pointed at.
+        $overrides = array_map(matrixResolve(...), $row[3] ?? []);
+
         expect(array_keys($expectations))->toEqualCanonicalizing(MATRIX_ROLES);
 
-        $path = '/'.ltrim(strtr($uri, MATRIX_PARAMETERS), '/');
+        $path = '/'.ltrim(strtr($uri, $overrides + $parameters), '/');
 
         foreach (MATRIX_ROLES as $role) {
             // Every cell starts from a clean guard, session and rate limiter
