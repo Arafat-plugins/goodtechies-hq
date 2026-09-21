@@ -76,3 +76,4 @@ npx vue-tsc --noEmit                    # type check
 ## License
 
 Proprietary. Built for GoodTechies.
+# goodtechies-hq- 
