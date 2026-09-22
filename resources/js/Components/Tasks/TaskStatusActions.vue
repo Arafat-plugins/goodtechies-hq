@@ -36,11 +36,20 @@ import { Textarea } from '@/Components/ui/textarea';
 /**
  * Every move this task can make, and the one thing each move has to say first.
  *
- * The list of moves is NOT computed here. `task.available_transitions` arrives already
- * filtered through `TaskPolicy::transition` — the same gate call the endpoint makes — so this
- * component's whole job is to label them, collect what the server will demand, and post to
- * the one status endpoint. A board drag in the next slice sends the same `{status, after_id}`
- * to the same `submit()` and inherits every dialog below by not being allowed to skip them.
+ * The list of moves is NOT computed here. On the detail screen `task.available_transitions`
+ * arrives already filtered through `TaskPolicy::transition` — the same gate call the endpoint
+ * makes — so this component's whole job is to label them, collect what the server will demand,
+ * and post to the one status endpoint.
+ *
+ * **The Board is the second caller, and it is the reason `requestMove()` exists.** A drag
+ * sends the same `{status, after_id}` to the same `submit()` and inherits every dialog below
+ * by not being allowed to skip them — dragging a card into In review opens the work-summary
+ * form here, and the move does not commit until that form is sent. The Board mounts this
+ * `variant="headless"`, so it contributes the dialogs and no controls of its own; what it
+ * feeds in as `available_transitions` is the ROLE half of the rule (`TaskService::
+ * transitionsFor()`), because a gate call per candidate status per card is right on a detail
+ * page and wrong on a board of two hundred. The per-task half is still the endpoint's, which
+ * is why `outcome` reports whether the server actually took it.
  *
  * Three of the moves cannot be a bare button:
  *
@@ -53,18 +62,35 @@ import { Textarea } from '@/Components/ui/textarea';
  *    before the click, rather than letting the server refuse it after.
  */
 
-const props = defineProps<{
-    task: TaskDetail;
-    surface: TaskSurface;
-    /** Who may pass a verdict on this task, so the screen can name them when nobody here may. */
-    reviewers: { id: number; name: string | null }[];
-}>();
+const props = withDefaults(
+    defineProps<{
+        task: TaskDetail;
+        surface: TaskSurface;
+        /** Who may pass a verdict on this task, so the screen can name them when nobody here may. */
+        reviewers: { id: number; name: string | null }[];
+        /**
+         * `inline` draws the buttons and the *Change status* menu. `headless` draws only the
+         * dialogs, for a caller that has its own trigger — the Board, whose trigger is a drag
+         * and a card menu — so the two cannot end up with two copies of "what does this move
+         * have to collect first".
+         */
+        variant?: 'inline' | 'headless';
+    }>(),
+    { variant: 'inline' },
+);
 
 const emit = defineEmits<{
     /** A write landed. The page mount already has fresh props; the drawer re-reads. */
     settled: [];
     /** The viewer asked to hand the task over instead of completing it themselves. */
     'hand-off': [];
+    /**
+     * A status write came back, and whether the server took it. A flashed `TaskStateException`
+     * is a refusal at 200, so `false` here is the Board's cue to put the card back.
+     */
+    outcome: [accepted: boolean];
+    /** A dialog closed without sending. Nothing was written, so a caller must undo its own optimism. */
+    dismissed: [];
 }>();
 
 const routes = computed(() => taskRoutes(props.surface, props.task.id));
@@ -180,7 +206,20 @@ const submitting = ref(false);
 const fieldError = ref<string | null>(null);
 const field = ref<{ $el?: unknown } | null>(null);
 
-function start(move: Move): void {
+/**
+ * The card a drag landed under, sent as `after_id` so the move and the placing happen in one
+ * transaction. A click on the detail page sets nothing and the key is left off, which is what
+ * `ChangeTaskStatusRequest` reads as "leave it where the service puts it".
+ */
+const after = ref<number | null>(null);
+
+/** Did the write the open dialog was collecting for actually land? Drives `dismissed`. */
+const landed = ref(false);
+
+function start(move: Move, afterId: number | null = null): void {
+    landed.value = false;
+    after.value = afterId;
+
     if (move.kind === 'plain') {
         submit(move, {});
 
@@ -249,23 +288,74 @@ function confirm(): void {
 function submit(move: Move, payload: Record<string, unknown>): void {
     submitting.value = true;
 
+    let accepted = false;
+
     mutateTask(
         'post',
         routes.value.status,
-        { status: move.transition.value, ...payload },
+        {
+            status: move.transition.value,
+            ...payload,
+            // Omitted entirely rather than sent as null: `after_id` absent is the top of the
+            // column, and a drag that landed on top has to be able to say so.
+            ...(after.value === null ? {} : { after_id: after.value }),
+        },
         {
             onAccepted: () => {
+                accepted = true;
+                landed.value = true;
                 open.value = null;
                 pending.value = null;
                 text.value = '';
             },
-            onSettled: () => emit('settled'),
+            onSettled: () => {
+                emit('settled');
+                emit('outcome', accepted);
+                after.value = null;
+            },
             onFinish: () => {
                 submitting.value = false;
             },
         },
     );
 }
+
+/* ------------------------------------------------------------- the Board's door */
+
+/**
+ * Make a move on this task, from a caller with its own trigger.
+ *
+ * The three answers matter to a Board that has already moved the card optimistically:
+ *
+ *  - `committed` — posted. The `outcome` event says whether the server took it.
+ *  - `asking` — a dialog is open and **nothing has been written yet**. Sending it fires
+ *    `outcome`; abandoning it fires `dismissed`, and the card goes back.
+ *  - `unavailable` — this role cannot make that move from here at all, so no request is made.
+ */
+function requestMove(to: string, afterId: number | null = null): 'committed' | 'asking' | 'unavailable' {
+    const move = moves.value.find((candidate) => candidate.transition.value === to);
+
+    if (move === undefined) {
+        return 'unavailable';
+    }
+
+    start(move, afterId);
+
+    return move.kind === 'plain' ? 'committed' : 'asking';
+}
+
+/** Close without sending. Whatever the caller did in anticipation has to be undone. */
+function dismiss(): void {
+    open.value = null;
+    pending.value = null;
+    text.value = '';
+
+    if (!landed.value) {
+        emit('dismissed');
+    }
+}
+
+defineExpose({ requestMove });
 
 interface DialogCopy {
     title: string;
@@ -323,7 +413,12 @@ const required = computed(
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-3">
+    <!--
+        `headless` contributes the dialogs and nothing else. The Board's trigger is a drag and
+        a card menu, and a second set of buttons under every card would be a second answer to
+        a question this component already answers.
+    -->
+    <div v-if="variant === 'inline'" class="flex min-w-0 flex-col gap-3">
         <div v-if="moves.length > 0" class="flex min-w-0 flex-wrap items-center gap-2">
             <Button
                 v-for="move in prominent"
@@ -419,7 +514,7 @@ const required = computed(
         @update:open="
             (value) => {
                 if (!value) {
-                    open = null;
+                    dismiss();
                 }
             }
         "
@@ -478,7 +573,7 @@ const required = computed(
                 </div>
 
                 <DialogFooter>
-                    <Button type="button" variant="outline" :disabled="submitting" @click="open = null">
+                    <Button type="button" variant="outline" :disabled="submitting" @click="dismiss">
                         Cancel
                     </Button>
                     <Button

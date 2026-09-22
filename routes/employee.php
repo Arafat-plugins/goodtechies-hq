@@ -25,6 +25,14 @@ Route::prefix('employee')
         // Unarchive is Admin-only and therefore Admin-surface only.
         Route::prefix('tasks')->name('tasks.')->group(function () {
             Route::get('/', [TaskController::class, 'index'])->name('index');
+
+            // Routes of their own rather than `?view=` on the index, for the same reasons as
+            // on the Admin surface — and declared BEFORE `/{task}`, or `board` binds as a task
+            // id. The employee's board and calendar hold the tasks they are assigned to and
+            // nothing else; the scoping is Task::visibleTo()'s, not the route's.
+            Route::get('/board', [TaskController::class, 'board'])->name('board');
+            Route::get('/calendar', [TaskController::class, 'calendar'])->name('calendar');
+
             Route::get('/{task}', [TaskController::class, 'show'])->name('show');
             Route::put('/{task}', [TaskController::class, 'update'])->name('update');
             Route::delete('/{task}', [TaskController::class, 'destroy'])->name('destroy');

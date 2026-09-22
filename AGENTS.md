@@ -139,9 +139,9 @@ unbuilt panel is `Card` + `EmptyState`. See DESIGN.md §4.
 The local cloud workspace has PostgreSQL 16 on `127.0.0.1:5432`, superuser `postgres`, trust auth (dev only), and Redis on `127.0.0.1:6379`.
 
 ## Known-failing baseline
-Measured 2026-09-20 at `dfec2e9` (Phase 2, task detail) with `php artisan test`: none
-failing (**628 passed, 3661 assertions**). `vendor/bin/pint --test`: passed.
-`npx vue-tsc --noEmit`: passed. `npm run build`: passed. If your number is not 628, that is a
+Measured 2026-09-20 at `126c1de` (Phase 2, Board and Calendar) with `php artisan test`: none
+failing (**712 passed, 4199 assertions**). `vendor/bin/pint --test`: passed.
+`npx vue-tsc --noEmit`: passed. `npm run build`: passed. If your number is not 712, that is a
 finding, not drift.
 
 **A task's status is guarded at the model.** `Task` throws

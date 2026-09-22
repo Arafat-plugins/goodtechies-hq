@@ -183,6 +183,12 @@ function permissionMatrix(): array
         // Admin surface — tasks. A status moves through `…/status` and nowhere else: there is
         // no second endpoint here for the board drag to use, which is the point.
         ['GET', 'admin/tasks', $admin],
+        // The Board and the Calendar are routes, not a `?view=` on the index — which is what
+        // gives each of them a row of its own here instead of a surface hiding behind another
+        // route's cells. The Accountant holds no tasks.* permission, so viewAny refuses them
+        // even before the surface middleware would.
+        ['GET', 'admin/tasks/board', $admin],
+        ['GET', 'admin/tasks/calendar', $admin],
         ['POST', 'admin/tasks', $adminAction],
         ['GET', 'admin/tasks/{task}', $admin],
         ['PUT', 'admin/tasks/{task}', $adminAction],
@@ -216,6 +222,11 @@ function permissionMatrix(): array
         // its own rows. Which rows those are is Task::visibleTo()'s business, tested in
         // tests/Feature/Privacy/TaskPrivacyTest.php, not a status code here.
         ['GET', 'employee/tasks', $employee],
+        // Same for the employee pair. Yaseen is assigned nothing on the seed, so his board is
+        // eight empty columns and his calendar an empty month — a 200 either way, because an
+        // empty view is not a refusal.
+        ['GET', 'employee/tasks/board', $employee],
+        ['GET', 'employee/tasks/calendar', $employee],
 
         // Employee surface — one task. The Manager lives on THIS surface, so the moves the plan
         // gives to ADMIN/MANAGER are routed here too and refused to an employee by TaskPolicy.

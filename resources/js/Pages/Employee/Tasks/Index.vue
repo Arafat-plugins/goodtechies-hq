@@ -12,6 +12,7 @@ import type {
     TaskTag,
 } from '@/Components/Tasks/TaskList.vue';
 import TaskList, { taskColumns } from '@/Components/Tasks/TaskList.vue';
+import TaskViewSwitcher from '@/Components/Tasks/TaskViewSwitcher.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
 import { queryParam } from '@/lib/tableState';
@@ -74,6 +75,10 @@ function openTask(task: Task): void {
     <Head title="My Tasks" />
 
     <PageShell title="My Tasks" description="The work assigned to you, and where each piece stands.">
+        <template #tabs>
+            <TaskViewSwitcher surface="employee" current="list" />
+        </template>
+
         <TaskList
             table-id="employee-tasks"
             :tasks="tasks"

@@ -33,3 +33,6 @@ Thumbs.db
 /Claude outputs/
 
 start-hq.log
+
+# Local-only push script - never send this to GitHub
+/push-to-github.bat

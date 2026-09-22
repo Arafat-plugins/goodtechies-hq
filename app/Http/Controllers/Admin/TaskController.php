@@ -14,6 +14,7 @@ use App\Http\Requests\Task\StoreTaskRequest;
 use App\Http\Requests\Task\UpdateChecklistItemRequest;
 use App\Http\Requests\Task\UpdateTaskAssigneesRequest;
 use App\Http\Requests\Task\UpdateTaskRequest;
+use App\Http\Requests\Task\ViewTaskCalendarRequest;
 use App\Http\Resources\TaskResource;
 use App\Models\ActivityLog;
 use App\Models\Employee;
@@ -29,13 +30,15 @@ use App\Support\TaskPriority;
 use App\Support\TaskStatus;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Tasks on the Admin surface: the List view, the detail page, and every write a task takes.
+ * Tasks on the Admin surface: the List, Board and Calendar views, the detail page, and every
+ * write a task takes.
  *
  * Even here the list is scoped through Task::visibleTo(): the surface a request arrives on is
  * never what decides which rows it sees, and a task an Admin could not see would answer 404
@@ -89,6 +92,61 @@ class TaskController extends Controller
             // The assignee picker's options. TaskService has taken an `assignee_id` filter
             // since slice 1 and no controller sent the list to build it with, so the chip bar
             // could not offer it — the 2-8 follow-up.
+            'employees' => $this->employees(),
+        ]);
+    }
+
+    /**
+     * The Board: the same query the List view runs, grouped by status, drawn as columns.
+     *
+     * A route of its own rather than `?view=board` on the index — it is deep-linkable, it gets
+     * its own row in the permission matrix instead of hiding behind another route's, and the
+     * Inertia page name follows it. The filters travel as query parameters, so switching views
+     * keeps them.
+     */
+    public function board(Request $request): Response
+    {
+        Gate::authorize('viewAny', Task::class);
+
+        $filters = $this->tasks->filters($request->query());
+
+        return Inertia::render('Admin/Tasks/Board', [
+            'board' => $this->presentBoard($this->tasks->board($request->user(), $filters), $request),
+            'filters' => $this->presentFilters($filters),
+            // The role half of the drag rule, so a column nobody in this role could drop into
+            // is not offered. The drop itself is still checked per task on the server.
+            'transitions' => $this->tasks->transitionsFor($request->user()),
+            'statuses' => $this->options(TaskStatus::boardOrder()),
+            'priorities' => $this->options(TaskPriority::cases()),
+            'projects' => $this->projects($request),
+            'tags' => $this->filterTags($request),
+            'employees' => $this->employees(),
+        ]);
+    }
+
+    /**
+     * The Calendar: one window, the tasks that overlap it, and each one's span.
+     *
+     * The window comes back in the payload. A grid that had to infer which dates it was
+     * drawing from the tasks it happened to receive would be wrong on the first empty month.
+     */
+    public function calendar(ViewTaskCalendarRequest $request): Response
+    {
+        Gate::authorize('viewAny', Task::class);
+
+        $filters = $this->tasks->filters($request->query());
+
+        return Inertia::render('Admin/Tasks/Calendar', [
+            'calendar' => $this->presentCalendar($this->tasks->calendar($request->user(), $filters), $request),
+            'filters' => $this->presentFilters($filters),
+            // Date drags are Admin/Manager only. This is the same answer UpdateTaskRequest
+            // gives when it makes `start_date` and `due_date` prohibited, from one definition,
+            // so a handle is never enabled for somebody the write would refuse.
+            'can_plan' => TaskService::mayPlan($request->user()),
+            'statuses' => $this->options(TaskStatus::boardOrder()),
+            'priorities' => $this->options(TaskPriority::cases()),
+            'projects' => $this->projects($request),
+            'tags' => $this->filterTags($request),
             'employees' => $this->employees(),
         ]);
     }
@@ -380,8 +438,50 @@ class TaskController extends Controller
     }
 
     /**
+     * The Board's payload: the status groups, named columns, with each card through
+     * TaskResource — which is what keeps a finance field off a board card, because
+     * TaskResource composes ProjectResource rather than reading a project's columns.
+     *
+     * @param  array<string, mixed>  $board
+     * @return array<string, mixed>
+     */
+    private function presentBoard(array $board, Request $request): array
+    {
+        return [
+            ...$board,
+            'columns' => array_map(fn (array $column): array => [
+                ...$column,
+                'tasks' => TaskResource::collection($column['tasks'])->toArray($request),
+            ], $board['columns']),
+        ];
+    }
+
+    /**
+     * The Calendar's payload. `span` rides beside the task rather than inside it: it is the
+     * geometry of this window, not a fact about the task, and TaskResource stays the one thing
+     * that decides which of a task's own fields leave the server.
+     *
+     * @param  array<string, mixed>  $calendar
+     * @return array<string, mixed>
+     */
+    private function presentCalendar(array $calendar, Request $request): array
+    {
+        return [
+            'window' => $calendar['window'],
+            'total' => $calendar['total'],
+            'unscheduled_count' => $calendar['unscheduled_count'],
+            'tasks' => array_map(
+                fn (array $entry): array => (new TaskResource($entry['task']))->resolve($request)
+                    + ['span' => $entry['span']],
+                $calendar['entries'],
+            ),
+        ];
+    }
+
+    /**
      * Filters as the screen's chip bar wants them: the as-of Carbon is an internal detail of
-     * the overdue calculation and does not belong in a query string the user can see.
+     * the overdue calculation and does not belong in a query string the user can see, and the
+     * window's two ends go back as the plain dates they arrived as.
      *
      * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
@@ -390,7 +490,10 @@ class TaskController extends Controller
     {
         unset($filters['as_of']);
 
-        return $filters;
+        return array_map(
+            fn (mixed $value): mixed => $value instanceof Carbon ? $value->toDateString() : $value,
+            $filters,
+        );
     }
 
     /**

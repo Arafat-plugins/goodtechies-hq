@@ -212,17 +212,15 @@ export function tagTone(colour: string): StatusKey {
 
 <script setup lang="ts">
 import { ListChecks } from '@lucide/vue';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { TableGroup } from '@/Components/DataTable/types';
-import type { FilterDef } from '@/Components/FilterBar.vue';
-import FilterBar from '@/Components/FilterBar.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
+import TaskFilterBar, { taskFiltersActive } from '@/Components/Tasks/TaskFilterBar.vue';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
-import { Checkbox } from '@/Components/ui/checkbox';
 import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
-import { pushQuery, resetQuery } from '@/lib/tableState';
+import { pushQuery } from '@/lib/tableState';
 import { useNavigationPending } from '@/lib/useNavigationPending';
 import { cn } from '@/lib/utils';
 
@@ -255,59 +253,16 @@ defineEmits<{ 'row-click': [task: Task] }>();
 
 /* ----------------------------------------------------------------- filters */
 
-/** The filters `TaskService::filters()` reads, offered where the option list exists. */
-const filterDefs = computed<FilterDef[]>(() => {
-    const defs: FilterDef[] = [
-        { key: 'status', label: 'Status', kind: 'select', options: props.statuses },
-        { key: 'priority', label: 'Priority', kind: 'select', options: props.priorities },
-        {
-            key: 'project_id',
-            label: 'Project',
-            kind: 'select',
-            options: props.projects.map((project) => ({ value: String(project.id), label: project.name })),
-            searchPlaceholder: 'Search projects…',
-        },
-        {
-            key: 'tag_id',
-            label: 'Tag',
-            kind: 'select',
-            options: props.tags.map((tag) => ({ value: String(tag.id), label: tag.name })),
-            searchPlaceholder: 'Search tags…',
-        },
-    ];
+/**
+ * The chips are `TaskFilterBar`'s, shared with the Board and the Calendar.
+ *
+ * Slice 4 moved them there rather than copying them twice more: three screens read one
+ * `TaskService::filters()`, and three copies of the definitions is two that can drift
+ * (DESIGN.md §5.8). Nothing about this list's own behaviour changed with the move.
+ */
+const hasFilters = computed(() => taskFiltersActive(props.filters));
 
-    if (props.employees?.length) {
-        defs.splice(2, 0, {
-            key: 'assignee_id',
-            label: 'Assignee',
-            kind: 'select',
-            options: props.employees.map((employee) => ({
-                value: String(employee.id),
-                label: employee.name,
-            })),
-            searchPlaceholder: 'Search people…',
-        });
-    }
-
-    return defs;
-});
-
-const hasFilters = computed(
-    () =>
-        Boolean(props.filters.search) ||
-        props.filters.status !== null ||
-        props.filters.priority !== null ||
-        props.filters.project_id !== null ||
-        props.filters.tag_id !== null ||
-        props.filters.assignee_id !== null ||
-        props.filters.overdue ||
-        props.filters.archived,
-);
-
-function clearFilters(): void {
-    // Group-by is a way of reading the list, not a filter on it, so Clear all keeps it.
-    resetQuery(['group_by']);
-}
+const filterBar = ref<InstanceType<typeof TaskFilterBar> | null>(null);
 
 /* ---------------------------------------------------------------- grouping */
 
@@ -365,32 +320,18 @@ const loading = useNavigationPending();
 
 <template>
     <div class="flex min-w-0 flex-col gap-4">
-        <FilterBar
-            :search="filters.search"
-            :filters="filterDefs"
-            :extra-active="filters.overdue || filters.archived"
+        <TaskFilterBar
+            ref="filterBar"
+            :filters="filters"
+            :statuses="statuses"
+            :priorities="priorities"
+            :projects="projects"
+            :tags="tags"
+            :employees="employees"
             :placeholder="searchPlaceholder"
-            :input-id="`${tableId}-search`"
-        >
-            <template #extra>
-                <div class="flex h-9 items-center gap-2">
-                    <Checkbox
-                        :id="`${tableId}-overdue`"
-                        :model-value="filters.overdue"
-                        @update:model-value="(checked) => pushQuery({ overdue: checked === true })"
-                    />
-                    <Label :for="`${tableId}-overdue`" class="font-normal whitespace-nowrap">Overdue only</Label>
-                </div>
-                <div class="flex h-9 items-center gap-2">
-                    <Checkbox
-                        :id="`${tableId}-archived`"
-                        :model-value="filters.archived"
-                        @update:model-value="(checked) => pushQuery({ archived: checked === true })"
-                    />
-                    <Label :for="`${tableId}-archived`" class="font-normal whitespace-nowrap">Show archived</Label>
-                </div>
-            </template>
-        </FilterBar>
+            :id-prefix="tableId"
+            :clear-keeps="['group_by']"
+        />
 
         <DataTable
             :id="tableId"
@@ -407,7 +348,7 @@ const loading = useNavigationPending();
             :empty-description="emptyDescription"
             filtered-title="No tasks match these filters"
             filtered-description="Clear a filter, or widen the search."
-            @clear="clearFilters"
+            @clear="filterBar?.clearFilters()"
             @row-click="(task) => $emit('row-click', task)"
         >
             <template #toolbar>

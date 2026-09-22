@@ -11,6 +11,7 @@ use App\Models\TaskLink;
 use App\Models\User;
 use App\Support\AuditEvent;
 use App\Support\Permission;
+use App\Support\RoleName;
 use App\Support\TaskPriority;
 use App\Support\TaskStatus;
 use App\Support\UserStatus;
@@ -23,7 +24,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
 /**
- * Tasks: the grouped List query, and every write a task can take.
+ * Tasks: the read queries the three views share, and every write a task can take.
+ *
+ * There is one query. The List view groups it, the Board names those groups columns, and the
+ * Calendar windows it — grouped(), board() and calendar() are three shapes over query(), not
+ * three queries, so a filter behaves identically whichever view the user switched from.
  *
  * Every query starts at Task::visibleTo(), so a row the requester may not see is never in the
  * result to be filtered out later. The surface a request arrives on never decides this.
@@ -52,6 +57,17 @@ class TaskService
 
     /** The group-by variants the List view offers. */
     public const GROUP_BY = ['status', 'assignee', 'project', 'priority'];
+
+    /**
+     * The two orderings the views ask for. See order().
+     *
+     * They are named rather than passed as raw SQL because there are exactly two questions a
+     * task list is ever asked here, and a third caller inventing its own sort is how the List
+     * and the Board end up disagreeing about where a card is.
+     */
+    public const ORDER_LIST = 'list';
+
+    public const ORDER_BOARD = 'board';
 
     /**
      * The attributes a caller may write through create() and update().
@@ -93,14 +109,18 @@ class TaskService
     /**
      * The base query: visible to this user, filtered, ordered.
      *
+     * The ordering is a parameter rather than a fact about this method, and it defaults to the
+     * List's. A view asks for the order that answers its own question — see order() — and a
+     * caller that says nothing gets the one /admin/tasks has always shown.
+     *
      * @param  array<string, mixed>  $filters
      * @return Builder<Task>
      */
-    public function query(User $user, array $filters = []): Builder
+    public function query(User $user, array $filters = [], string $order = self::ORDER_LIST): Builder
     {
         $filters = $this->filters($filters);
 
-        return Task::query()
+        return $this->order(Task::query()
             ->visibleTo($user)
             ->with(self::RELATIONS)
             // The List view's "Subtasks" column, promised by slice 1's TaskResource and
@@ -122,14 +142,54 @@ class TaskService
                 'tags',
                 fn (Builder $t) => $t->where('tags.id', $id),
             ))
+            // The date window, as an OVERLAP rather than a containment — see windowPredicate().
+            ->when($filters['date_from'], fn (Builder $q, Carbon $from) => $q->whereRaw(
+                'coalesce(tasks.due_date, tasks.start_date) >= ?',
+                [$from->toDateString()],
+            ))
+            ->when($filters['date_to'], fn (Builder $q, Carbon $to) => $q->whereRaw(
+                'coalesce(tasks.start_date, tasks.due_date) <= ?',
+                [$to->toDateString()],
+            ))
             ->when($filters['overdue'], fn (Builder $q) => $q->overdue($filters['as_of']))
             // Archived tasks are hidden from active views unless explicitly asked for.
-            ->unless($filters['archived'], fn (Builder $q) => $q->notArchived())
-            // Due first, undated last, then the manual Kanban order, then id so the sort is
-            // total and a list never reshuffles between two identical requests.
-            ->orderByRaw('due_date asc nulls last')
-            ->orderBy('position')
-            ->orderBy('id');
+            ->unless($filters['archived'], fn (Builder $q) => $q->notArchived()), $order);
+    }
+
+    /**
+     * The ordering a view asked for. Two views, two questions, two orderings — and the whole
+     * difference is which column leads.
+     *
+     * **The List** (ORDER_LIST) is read top to bottom and answers "what is next", so the due
+     * date leads, undated work falls to the bottom, and `position` is only a tiebreak. This is
+     * what /admin/tasks has always shown and it is why the ordering is a parameter: changing
+     * this default would move a screen nobody asked to move.
+     *
+     * **A Board lane** (ORDER_BOARD) is dragged, so `position` leads — that is the whole point
+     * of a manual order. A lane sorted by date first is a lane where a card dropped at the top
+     * springs back, because `position` third behind a date almost never gets to break anything.
+     *
+     * The Board's tiebreaks, in order:
+     *
+     *   1. `due_date asc nulls last`. A card nobody has dragged has no manual order to honour —
+     *      `position` defaults to 0 for any row written outside this service, and the positions
+     *      that already exist were handed out per project, so two cards in one lane can share a
+     *      number. Both cases are answered the same way and answered well: cards that agree on
+     *      `position` fall back to the date, which is exactly the order the Board shows today.
+     *      An untouched lane therefore reads like the List, and a collision is harmless rather
+     *      than arbitrary.
+     *   2. `id`. Makes the sort total, so two cards that agree on both never swap places between
+     *      two identical requests — and place() can only compute a drop against a lane whose
+     *      order is stable.
+     *
+     * @param  Builder<Task>  $query
+     * @return Builder<Task>
+     */
+    private function order(Builder $query, string $order): Builder
+    {
+        return $order === self::ORDER_BOARD
+            ? $query->orderBy('position')->orderByRaw('due_date asc nulls last')->orderBy('id')
+            : $query->orderByRaw('due_date asc nulls last')->orderBy('position')->orderBy('id');
     }
 
     /**
@@ -151,13 +211,17 @@ class TaskService
      *     overdue_count: int,
      * }
      */
-    public function grouped(User $user, array $filters = [], string $groupBy = 'status'): array
-    {
+    public function grouped(
+        User $user,
+        array $filters = [],
+        string $groupBy = 'status',
+        string $order = self::ORDER_LIST,
+    ): array {
         $groupBy = in_array($groupBy, self::GROUP_BY, true) ? $groupBy : 'status';
         $filters = $this->filters($filters);
 
         /** @var Collection<int, Task> $tasks */
-        $tasks = $this->query($user, $filters)->get();
+        $tasks = $this->query($user, $filters, $order)->get();
 
         $groups = match ($groupBy) {
             'assignee' => $this->byAssignee($tasks),
@@ -186,6 +250,152 @@ class TaskService
     public function overdue(User $user, array $filters = [], ?Carbon $asOf = null): Collection
     {
         return $this->query($user, $filters)->overdue($asOf ?? Carbon::today())->get();
+    }
+
+    /**
+     * The Board's payload: the same grouped-by-status query the List view already builds,
+     * named for what it is. A board column IS a status group — there is no second query and
+     * no second ordering, so a card cannot sit in one place on the List and another on the
+     * Board.
+     *
+     * Every status is present, including the empty ones: byStatus() walks
+     * TaskStatus::boardOrder() rather than the rows it happens to have, because a column that
+     * vanishes when it is empty is a column you cannot drag anything INTO.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{
+     *     columns: list<array{key: string, label: string, tone: string|null, count: int, tasks: Collection<int, Task>}>,
+     *     total: int,
+     *     overdue_count: int,
+     * }
+     */
+    public function board(User $user, array $filters = []): array
+    {
+        $grouped = $this->grouped($user, $filters, 'status', self::ORDER_BOARD);
+
+        return [
+            'columns' => $grouped['groups'],
+            'total' => $grouped['total'],
+            'overdue_count' => $grouped['overdue_count'],
+        ];
+    }
+
+    /**
+     * The Calendar's payload: a window, the tasks that OVERLAP it, and each one's geometry.
+     *
+     * The window it answers with is the window it actually used — defaulted to the as-of
+     * month when the caller named none, and never silently different from what was asked
+     * for. A grid that has to infer which dates it is drawing is a grid that will one day
+     * draw the wrong ones.
+     *
+     * Each entry carries a `span` so the screen lays a bar out without doing date arithmetic
+     * of its own: where the span really starts and ends, where it starts and ends INSIDE this
+     * window, and whether it runs off either edge. A task starting 28 Aug and due 3 Sep is in
+     * both months' payloads, clipped differently in each.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{
+     *     window: array{from: string, to: string, days: int, month: string|null},
+     *     entries: list<array{task: Task, span: array<string, mixed>}>,
+     *     total: int,
+     *     unscheduled_count: int,
+     * }
+     */
+    public function calendar(User $user, array $filters = []): array
+    {
+        $filters = $this->filters($filters);
+        [$from, $to] = $this->window($filters);
+
+        $filters['date_from'] = $from;
+        $filters['date_to'] = $to;
+
+        $entries = [];
+
+        foreach ($this->query($user, $filters)->get() as $task) {
+            $span = $this->span($task, $from, $to);
+
+            if ($span !== null) {
+                $entries[] = ['task' => $task, 'span' => $span];
+            }
+        }
+
+        // Lane-packing order: earliest visible day first, then the longest bar, then id so
+        // two identical spans never swap places between two requests.
+        usort($entries, fn (array $a, array $b): int => [
+            $a['span']['visible_start'], -$a['span']['total_days'], (int) $a['task']->getKey(),
+        ] <=> [
+            $b['span']['visible_start'], -$b['span']['total_days'], (int) $b['task']->getKey(),
+        ]);
+
+        return [
+            'window' => [
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
+                'days' => (int) $from->diffInDays($to) + 1,
+                // Set only when the window is exactly one calendar month, which is what a
+                // month grid asks for and what its heading names.
+                'month' => $from->isSameDay($from->copy()->startOfMonth())
+                    && $to->isSameDay($from->copy()->endOfMonth()->startOfDay())
+                        ? $from->format('Y-m')
+                        : null,
+            ],
+            'entries' => $entries,
+            'total' => count($entries),
+            // The tasks this window can never show, because they have no date at all. Sent as
+            // a count so the grid can say so instead of quietly losing them.
+            'unscheduled_count' => $this->query($user, [...$filters, 'date_from' => null, 'date_to' => null])
+                ->whereNull('start_date')
+                ->whereNull('due_date')
+                ->count(),
+        ];
+    }
+
+    /**
+     * The role half of the drag rule: per column, the columns this user's ROLE may move a card
+     * to. Derived from TaskStatus, not restated — the board, the calendar and the detail form
+     * read one map.
+     *
+     * It is deliberately only half the answer. The task half — "an employee moves a task they
+     * are assigned to" and "only this project's reviewer passes a review" — is a fact about a
+     * particular card and stays in TaskPolicy, which the endpoint checks on every drop. So a
+     * target this map offers can still be refused; what it buys is a board that does not offer
+     * a column nobody in this role could ever drop into. TaskResource's `available_transitions`
+     * is the per-task answer, and it costs a gate call per candidate status per row, which is
+     * right on a detail page and wrong on a board.
+     *
+     * @return array<string, list<string>>
+     */
+    public function transitionsFor(?User $user): array
+    {
+        $role = $user?->employee?->role?->name;
+        $map = [];
+
+        foreach (TaskStatus::boardOrder() as $from) {
+            $map[$from->value] = $role === null ? [] : array_values(array_map(
+                fn (TaskStatus $to): string => $to->value,
+                array_filter(
+                    $from->allowedTransitions(),
+                    fn (TaskStatus $to): bool => $from->mayRoleTransition($role, $to),
+                ),
+            ));
+        }
+
+        return $map;
+    }
+
+    /**
+     * May this user change the PLAN — the dates, the priority, the title, which project a task
+     * is in — as opposed to the work?
+     *
+     * One definition with two readers. UpdateTaskRequest makes the plan fields `prohibited` for
+     * anybody this says no to, and the Calendar sends the same answer as `can_plan` so the date
+     * handles are disabled for exactly the people the request would refuse. Two copies of this
+     * rule is one copy that can drift, and the drift would look like a date drag that appears
+     * to work and then is not saved.
+     */
+    public static function mayPlan(?User $user): bool
+    {
+        return $user?->hasRole(RoleName::ADMIN, RoleName::MANAGER) === true;
     }
 
     /*
@@ -221,7 +431,7 @@ class TaskService
             $task->forceFill([
                 'status' => $status,
                 'created_by' => $actor->getKey(),
-                'position' => $this->nextPosition((int) $task->project_id, $status),
+                'position' => $this->nextPosition($status),
             ])->save();
 
             if (isset($attributes['work_summary'])) {
@@ -380,7 +590,7 @@ class TaskService
                 $this->place($task, $after);
             } else {
                 $task->forceFill([
-                    'position' => $this->nextPosition((int) $task->project_id, $to, (int) $task->getKey()),
+                    'position' => $this->nextPosition($to, (int) $task->getKey()),
                 ])->save();
             }
 
@@ -1093,10 +1303,19 @@ class TaskService
      *
      * @return Collection<int, Task>
      */
+    /**
+     * A lane, in drag order.
+     *
+     * A lane is a STATUS, not a (project, status) pair. The Board's columns are statuses
+     * across every project — a card carries its project name precisely because the lane
+     * mixes them — so scoping a column to one project made a manual order that could only
+     * ever reorder a card against its own project's cards, and forced the screen to walk a
+     * drop anchor backwards looking for one. Positions are handed out per status for the
+     * same reason.
+     */
     private function column(Task $task): Collection
     {
         return Task::query()
-            ->where('project_id', $task->project_id)
             ->where('status', $task->status?->value)
             ->orderBy('position')
             ->orderBy('id')
@@ -1105,8 +1324,7 @@ class TaskService
 
     private function sameColumn(Task $task, Task $other): bool
     {
-        return (int) $task->project_id === (int) $other->project_id
-            && $task->status === $other->status;
+        return $task->status === $other->status;
     }
 
     /**
@@ -1114,10 +1332,9 @@ class TaskService
      * already carrying the new status by the time this runs, and a card must not be placed
      * relative to where it already is.
      */
-    private function nextPosition(int $projectId, TaskStatus $status, ?int $exceptId = null): int
+    private function nextPosition(TaskStatus $status, ?int $exceptId = null): int
     {
         $last = Task::query()
-            ->where('project_id', $projectId)
             ->where('status', $status->value)
             ->when($exceptId !== null, fn (Builder $query) => $query->whereKeyNot($exceptId))
             ->max('position');
@@ -1224,6 +1441,85 @@ class TaskService
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * The window a calendar request actually gets: what it asked for, or the as-of month.
+     *
+     * Half a window is still a window — `date_from` alone is "this month onwards from there" —
+     * so each end falls back to the other's month rather than to nothing. A window that runs
+     * backwards collapses to a single day; over HTTP ViewTaskCalendarRequest refuses it first,
+     * and this is what keeps a job or a console command from producing an empty grid instead
+     * of an error.
+     *
+     * @param  array{date_from: Carbon|null, date_to: Carbon|null, as_of: Carbon}  $filters
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function window(array $filters): array
+    {
+        $from = $filters['date_from'];
+        $to = $filters['date_to'];
+
+        if ($from === null && $to === null) {
+            $month = $filters['as_of'];
+
+            return [$month->copy()->startOfMonth(), $month->copy()->endOfMonth()->startOfDay()];
+        }
+
+        $from ??= $to->copy()->startOfMonth();
+        $to ??= $from->copy()->endOfMonth()->startOfDay();
+
+        return $to->lt($from) ? [$from->copy(), $from->copy()] : [$from->copy(), $to->copy()];
+    }
+
+    /**
+     * One task's geometry inside one window.
+     *
+     * The span is `[start_date, due_date]`, and a task carrying only one of the two is a
+     * single day on that date — the plan's "tasks by due date, and start→due span when a start
+     * date exists", said once, here, rather than recomputed in the screen. A task with neither
+     * date has no place on a grid and returns null; the query has already excluded it.
+     *
+     * `visible_*` is the span clipped to the window and `continues_*` says which edge it runs
+     * off, which together are everything a bar needs: a task starting 28 Aug and due 3 Sep
+     * draws in September from the 1st with an arrow on its left, and in August to the 31st
+     * with an arrow on its right, from two payloads that each did the clipping here.
+     *
+     * @return array{start: string, end: string, visible_start: string, visible_end: string, days: int, total_days: int, continues_before: bool, continues_after: bool, is_single_day: bool}|null
+     */
+    private function span(Task $task, Carbon $from, Carbon $to): ?array
+    {
+        $start = $task->start_date ?? $task->due_date;
+        $end = $task->due_date ?? $task->start_date;
+
+        if ($start === null || $end === null) {
+            return null;
+        }
+
+        $start = $start->copy()->startOfDay();
+        $end = $end->copy()->startOfDay();
+
+        // UpdateTaskRequest refuses a due date before its start date, so this only catches a
+        // row that got its dates some other way. Swapping beats drawing a negative-width bar.
+        if ($end->lt($start)) {
+            [$start, $end] = [$end, $start];
+        }
+
+        $visibleStart = $start->lt($from) ? $from->copy() : $start->copy();
+        $visibleEnd = $end->gt($to) ? $to->copy() : $end->copy();
+
+        return [
+            'start' => $start->toDateString(),
+            'end' => $end->toDateString(),
+            'visible_start' => $visibleStart->toDateString(),
+            'visible_end' => $visibleEnd->toDateString(),
+            // Inclusive of both ends: a one-day task is 1, not 0.
+            'days' => (int) $visibleStart->diffInDays($visibleEnd) + 1,
+            'total_days' => (int) $start->diffInDays($end) + 1,
+            'continues_before' => $start->lt($from),
+            'continues_after' => $end->gt($to),
+            'is_single_day' => $start->isSameDay($end),
+        ];
     }
 
     /**
@@ -1376,8 +1672,25 @@ class TaskService
      * the request carried none of them. An unrecognised enum value becomes null rather than
      * reaching the query as a literal.
      *
+     * `date_from` / `date_to` are the calendar's window, and the predicate they build is an
+     * OVERLAP, not a containment:
+     *
+     *     coalesce(due_date, start_date) >= date_from
+     *     coalesce(start_date, due_date) <= date_to
+     *
+     * `whereBetween('due_date', …)` would be wrong, and wrong in the direction that loses
+     * work. A task that starts 28 August and is due 3 September belongs on BOTH months' grids
+     * — it is being worked on for the whole of the 1st, 2nd and 3rd of September — and a test
+     * on `due_date` alone drops it from August's, where a bar should run to the edge. The
+     * coalesce is what makes a task with only one of the two dates a single day on that date
+     * instead of a row with a NULL that no comparison matches: both ends are null only when
+     * the task has no dates at all, and then the comparison is NULL and the task is correctly
+     * absent from every window.
+     *
+     * Either end may stand alone: `date_from` on its own is an open-ended "from here on".
+     *
      * @param  array<string, mixed>  $filters
-     * @return array{search: string|null, project_id: int|null, status: string|null, priority: string|null, assignee_id: int|null, tag_id: int|null, overdue: bool, archived: bool, as_of: Carbon}
+     * @return array{search: string|null, project_id: int|null, status: string|null, priority: string|null, assignee_id: int|null, tag_id: int|null, date_from: Carbon|null, date_to: Carbon|null, overdue: bool, archived: bool, as_of: Carbon}
      */
     public function filters(array $filters): array
     {
@@ -1391,6 +1704,8 @@ class TaskService
             'priority' => TaskPriority::tryFrom((string) ($filters['priority'] ?? ''))?->value,
             'assignee_id' => $this->id($filters['assignee_id'] ?? null),
             'tag_id' => $this->id($filters['tag_id'] ?? null),
+            'date_from' => $this->date($filters['date_from'] ?? null),
+            'date_to' => $this->date($filters['date_to'] ?? null),
             'overdue' => (bool) ($filters['overdue'] ?? false),
             'archived' => (bool) ($filters['archived'] ?? false),
             // Overdue is relative to a date, so the date is a parameter rather than a call to
@@ -1402,5 +1717,28 @@ class TaskService
     private function id(mixed $value): ?int
     {
         return is_numeric($value) ? (int) $value : null;
+    }
+
+    /**
+     * A window end, normalised to midnight. An unparseable one becomes null rather than
+     * reaching the query, the same way an unrecognised enum filter does above — over HTTP
+     * ViewTaskCalendarRequest has already named it as an error, and a caller that is not HTTP
+     * gets a default window rather than a database error.
+     */
+    private function date(mixed $value): ?Carbon
+    {
+        if ($value instanceof Carbon) {
+            return $value->copy()->startOfDay();
+        }
+
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse(trim($value))->startOfDay();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

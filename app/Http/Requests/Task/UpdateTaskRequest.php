@@ -3,7 +3,7 @@
 namespace App\Http\Requests\Task;
 
 use App\Models\Task;
-use App\Support\RoleName;
+use App\Services\TaskService;
 use App\Support\TaskPriority;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Database\Query\Builder;
@@ -97,9 +97,14 @@ class UpdateTaskRequest extends FormRequest
         ];
     }
 
+    /**
+     * Not a role check written out here: TaskService::mayPlan() is the one definition, and the
+     * Calendar sends the same answer as `can_plan` so its date handles are disabled for exactly
+     * the people this makes the date fields `prohibited` for.
+     */
     private function mayChangeThePlan(): bool
     {
-        return $this->user()?->hasRole(RoleName::ADMIN, RoleName::MANAGER) === true;
+        return TaskService::mayPlan($this->user());
     }
 
     /**

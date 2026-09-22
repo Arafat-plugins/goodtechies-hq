@@ -14,6 +14,7 @@ import type {
     TaskTag,
 } from '@/Components/Tasks/TaskList.vue';
 import TaskList, { taskColumns } from '@/Components/Tasks/TaskList.vue';
+import TaskViewSwitcher from '@/Components/Tasks/TaskViewSwitcher.vue';
 import { Button } from '@/Components/ui/button';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
@@ -86,6 +87,10 @@ function openTask(task: Task): void {
     <Head title="Tasks" />
 
     <PageShell title="Tasks" description="Every task across the agency, grouped however you read it.">
+        <template #tabs>
+            <TaskViewSwitcher surface="admin" current="list" />
+        </template>
+
         <template #actions>
             <Button type="button" @click="quickAddOpen = true">
                 <Plus aria-hidden="true" />

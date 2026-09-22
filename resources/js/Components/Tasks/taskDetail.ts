@@ -108,6 +108,12 @@ export function taskRoutes(surface: TaskSurface, id: number) {
         destroy: base,
         /** The ONE door a status goes through. `update` does not accept `status`. */
         status: `${base}/status`,
+        /**
+         * Moving a card **inside** its own column. A drag between columns is a status move
+         * and carries its `after_id` to `status` instead, so the move and the placing happen
+         * in one transaction rather than two requests that can half-fail.
+         */
+        reorder: `${base}/reorder`,
         archive: `${base}/archive`,
         unarchive: `${base}/unarchive`,
         assignees: `${base}/assignees`,

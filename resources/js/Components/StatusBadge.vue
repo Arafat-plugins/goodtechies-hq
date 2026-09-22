@@ -25,6 +25,33 @@ const STATUS_LABELS: Record<StatusKey, string> = {
 export function labelFor(status: StatusKey): string {
     return STATUS_LABELS[status];
 }
+
+/**
+ * Written out in full so Tailwind keeps every one of these classes in the build.
+ * Each status carries a foreground / background / border triplet, so a status-toned
+ * surface reads the same in light and dark without a single conditional.
+ */
+const TONE_CLASS: Record<StatusKey, string> = {
+    backlog: 'bg-status-backlog-bg text-status-backlog-fg border-status-backlog-border',
+    todo: 'bg-status-todo-bg text-status-todo-fg border-status-todo-border',
+    progress: 'bg-status-progress-bg text-status-progress-fg border-status-progress-border',
+    review: 'bg-status-review-bg text-status-review-fg border-status-review-border',
+    changes: 'bg-status-changes-bg text-status-changes-fg border-status-changes-border',
+    done: 'bg-status-done-bg text-status-done-fg border-status-done-border',
+    waiting: 'bg-status-waiting-bg text-status-waiting-fg border-status-waiting-border',
+    cancelled: 'bg-status-cancelled-bg text-status-cancelled-fg border-status-cancelled-border',
+};
+
+/**
+ * The status triplet for a surface that is not this badge.
+ *
+ * The Calendar's span bars need it: a bar is not a pill, so it cannot *be* a `StatusBadge`,
+ * but it must not carry a second copy of the mapping either. It still prints its label —
+ * a tinted rectangle with no words is colour carrying meaning alone (DESIGN.md §5.6).
+ */
+export function statusToneClass(status: StatusKey): string {
+    return TONE_CLASS[status];
+}
 </script>
 
 <script setup lang="ts">
@@ -41,22 +68,6 @@ const props = withDefaults(
     }>(),
     { size: 'md' },
 );
-
-/**
- * Written out in full so Tailwind keeps every one of these classes in the build.
- * Each status carries a foreground / background / border triplet, so the badge
- * reads the same in light and dark without a single conditional.
- */
-const TONE_CLASS: Record<StatusKey, string> = {
-    backlog: 'bg-status-backlog-bg text-status-backlog-fg border-status-backlog-border',
-    todo: 'bg-status-todo-bg text-status-todo-fg border-status-todo-border',
-    progress: 'bg-status-progress-bg text-status-progress-fg border-status-progress-border',
-    review: 'bg-status-review-bg text-status-review-fg border-status-review-border',
-    changes: 'bg-status-changes-bg text-status-changes-fg border-status-changes-border',
-    done: 'bg-status-done-bg text-status-done-fg border-status-done-border',
-    waiting: 'bg-status-waiting-bg text-status-waiting-fg border-status-waiting-border',
-    cancelled: 'bg-status-cancelled-bg text-status-cancelled-fg border-status-cancelled-border',
-};
 
 /** The dot keeps the saturated base colour, so it stays readable on the tinted pill. */
 const DOT_CLASS: Record<StatusKey, string> = {

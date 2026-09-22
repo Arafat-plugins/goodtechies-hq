@@ -601,21 +601,55 @@ it('puts a card dropped at the top above everything, without renumbering', funct
         ->and($first->fresh()->position)->toBe(1000);
 })->group('phase2');
 
-it('renumbers the column, and only the column, when the midpoints run out', function () {
+it('renumbers the lane, and only the lane, when the midpoints run out', function () {
     $a = Task::factory()->status(TaskStatus::Todo)->create(['project_id' => $this->project->id, 'position' => 1000]);
     $b = Task::factory()->status(TaskStatus::Todo)->create(['project_id' => $this->project->id, 'position' => 1001]);
     $moved = Task::factory()->status(TaskStatus::Todo)->create(['project_id' => $this->project->id, 'position' => 9000]);
 
-    // A card in another column, which must not be touched.
+    // A card in another lane, which must not be touched.
     $elsewhere = Task::factory()->status(TaskStatus::Backlog)->create(['project_id' => $this->project->id, 'position' => 1001]);
-    // …and one in the same status on another project, likewise.
-    $otherProject = Task::factory()->status(TaskStatus::Todo)->create(['position' => 1001]);
+
+    // A card in the SAME status on another project. It shares the lane — the Board's columns
+    // are statuses across every project — so it renumbers with the rest. This assertion used
+    // to say the opposite, back when a lane was a (project, status) pair and a manual order
+    // could only ever reorder a card against its own project's cards.
+    $otherProject = Task::factory()->status(TaskStatus::Todo)->create(['position' => 1002]);
 
     $this->service->reorder($this->admin, $moved->fresh(['project', 'assignees']), $a);
 
-    expect([$a->fresh()->position, $moved->fresh()->position, $b->fresh()->position])->toBe([1000, 2000, 3000])
-        ->and($elsewhere->fresh()->position)->toBe(1001)
-        ->and($otherProject->fresh()->position)->toBe(1001);
+    // Absolute numbers are not the claim — the lane spans every project, so the seed's own
+    // To-do cards are in it too and a renumber walks the whole thing. What must hold is the
+    // ORDER, and that the renumber left a gap big enough to drop into again.
+    $positions = fn (): array => [
+        (int) $a->fresh()->position,
+        (int) $moved->fresh()->position,
+        (int) $b->fresh()->position,
+        (int) $otherProject->fresh()->position,
+    ];
+
+    [$pa, $pMoved, $pb, $pOther] = $positions();
+
+    expect($pa)->toBeLessThan($pMoved)
+        ->and($pMoved)->toBeLessThan($pb)
+        ->and($pb)->toBeLessThan($pOther)
+        // Spread apart again, not left crammed at consecutive integers.
+        ->and($pMoved - $pa)->toBeGreaterThan(1)
+        // The other lane is untouched, which is the "and only the lane" half.
+        ->and((int) $elsewhere->fresh()->position)->toBe(1001);
+})->group('phase2');
+
+it('reorders a card against one from a different project in the same lane', function () {
+    // The case the Board actually produces: a lane mixes projects, so the card you drop under
+    // is very often somebody else's. Before, this threw "A task can only be reordered against
+    // a card in the same column" and the screen had to walk the anchor backwards to avoid it.
+    $anchor = Task::factory()->status(TaskStatus::Todo)->create(['position' => 1000]);
+    $moved = Task::factory()->status(TaskStatus::Todo)->create(['project_id' => $this->project->id, 'position' => 5000]);
+
+    expect($anchor->project_id)->not->toBe($moved->project_id);
+
+    $this->service->reorder($this->admin, $moved->fresh(['project', 'assignees']), $anchor);
+
+    expect($moved->fresh()->position)->toBeGreaterThan((int) $anchor->fresh()->position);
 })->group('phase2');
 
 it('lands a card that changed column at the bottom of the new one', function () {

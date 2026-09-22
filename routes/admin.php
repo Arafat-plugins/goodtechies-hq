@@ -51,6 +51,17 @@ Route::prefix('admin')
         // shape Phase 1's project fix established, applied before the hole can open.
         Route::prefix('tasks')->name('tasks.')->group(function () {
             Route::get('/', [TaskController::class, 'index'])->name('index');
+
+            // The Board and the Calendar are routes of their own, not `?view=` on the index:
+            // each is deep-linkable and bookmarkable, each gets its own row in the permission
+            // matrix instead of hiding a surface behind another route's row, and the Inertia
+            // page name follows the route. The filters travel as query parameters, so the chip
+            // bar survives a switch between views.
+            //
+            // Declared BEFORE `/{task}`, or `board` binds as a task id and the page 404s.
+            Route::get('/board', [TaskController::class, 'board'])->name('board');
+            Route::get('/calendar', [TaskController::class, 'calendar'])->name('calendar');
+
             Route::post('/', [TaskController::class, 'store'])->name('store');
             Route::get('/{task}', [TaskController::class, 'show'])->name('show');
             Route::put('/{task}', [TaskController::class, 'update'])->name('update');

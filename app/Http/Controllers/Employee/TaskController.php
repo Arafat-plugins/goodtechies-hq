@@ -11,6 +11,7 @@ use App\Http\Requests\Task\StoreChecklistItemRequest;
 use App\Http\Requests\Task\StoreTaskLinkRequest;
 use App\Http\Requests\Task\UpdateChecklistItemRequest;
 use App\Http\Requests\Task\UpdateTaskRequest;
+use App\Http\Requests\Task\ViewTaskCalendarRequest;
 use App\Http\Resources\TaskResource;
 use App\Models\ActivityLog;
 use App\Models\Employee;
@@ -26,13 +27,15 @@ use App\Support\TaskPriority;
 use App\Support\TaskStatus;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * The employee's own tasks: the list, the detail page, and the writes doing the work involves.
+ * The employee's own tasks: the List, Board and Calendar views, the detail page, and the
+ * writes doing the work involves.
  *
  * A task they are not ASSIGNED to does not exist as far as this surface is concerned — not
  * even one on a project they are a member of. It is absent from the list and answers 404 by id,
@@ -93,6 +96,58 @@ class TaskController extends Controller
             'tasks' => $this->present($grouped, $request),
             'filters' => $this->presentFilters($filters),
             'groupByOptions' => self::GROUP_BY,
+            'statuses' => $this->options(TaskStatus::boardOrder()),
+            'priorities' => $this->options(TaskPriority::cases()),
+            'projects' => $this->projects($request),
+            'tags' => $this->filterTags($request),
+        ]);
+    }
+
+    /**
+     * The Board, scoped the way everything on this surface is scoped: the columns hold the
+     * tasks this employee is assigned to and nothing else, because the query starts at
+     * Task::visibleTo(). A Manager on the same route sees every card.
+     *
+     * A route of its own rather than `?view=board`, for the same reasons as on the Admin
+     * surface: deep-linkable, its own row in the permission matrix, and the page name follows
+     * the route. Filters travel as query parameters so switching views keeps them.
+     */
+    public function board(Request $request): Response
+    {
+        Gate::authorize('viewAny', Task::class);
+
+        $filters = $this->tasks->filters($request->query());
+
+        return Inertia::render('Employee/Tasks/Board', [
+            'board' => $this->presentBoard($this->tasks->board($request->user(), $filters), $request),
+            'filters' => $this->presentFilters($filters),
+            // Which columns this ROLE may drag between — TO DO ↔ IN PROGRESS ↔ WAITING and
+            // into IN REVIEW for an employee, with Completed absent because a review verdict
+            // is a manager's. The per-task half is still checked on every drop.
+            'transitions' => $this->tasks->transitionsFor($request->user()),
+            'statuses' => $this->options(TaskStatus::boardOrder()),
+            'priorities' => $this->options(TaskPriority::cases()),
+            'projects' => $this->projects($request),
+            'tags' => $this->filterTags($request),
+        ]);
+    }
+
+    /**
+     * The Calendar, over the same scoped query.
+     */
+    public function calendar(ViewTaskCalendarRequest $request): Response
+    {
+        Gate::authorize('viewAny', Task::class);
+
+        $filters = $this->tasks->filters($request->query());
+
+        return Inertia::render('Employee/Tasks/Calendar', [
+            'calendar' => $this->presentCalendar($this->tasks->calendar($request->user(), $filters), $request),
+            'filters' => $this->presentFilters($filters),
+            // False for an employee, true for the Manager who shares this surface. It is the
+            // same answer UpdateTaskRequest gives when it makes the dates prohibited, so the
+            // disabled handles and the refused write cannot disagree.
+            'can_plan' => TaskService::mayPlan($request->user()),
             'statuses' => $this->options(TaskStatus::boardOrder()),
             'priorities' => $this->options(TaskPriority::cases()),
             'projects' => $this->projects($request),
@@ -319,6 +374,46 @@ class TaskController extends Controller
     }
 
     /**
+     * The Board's payload: the status groups, named columns, each card through TaskResource —
+     * which composes ProjectResource and so decides per requester what a card may carry. On
+     * this surface that is what leaves a project as a domain rather than a client and a price.
+     *
+     * @param  array<string, mixed>  $board
+     * @return array<string, mixed>
+     */
+    private function presentBoard(array $board, Request $request): array
+    {
+        return [
+            ...$board,
+            'columns' => array_map(fn (array $column): array => [
+                ...$column,
+                'tasks' => TaskResource::collection($column['tasks'])->toArray($request),
+            ], $board['columns']),
+        ];
+    }
+
+    /**
+     * The Calendar's payload. `span` sits beside the task, not inside it: it is this window's
+     * geometry rather than a fact about the task.
+     *
+     * @param  array<string, mixed>  $calendar
+     * @return array<string, mixed>
+     */
+    private function presentCalendar(array $calendar, Request $request): array
+    {
+        return [
+            'window' => $calendar['window'],
+            'total' => $calendar['total'],
+            'unscheduled_count' => $calendar['unscheduled_count'],
+            'tasks' => array_map(
+                fn (array $entry): array => (new TaskResource($entry['task']))->resolve($request)
+                    + ['span' => $entry['span']],
+                $calendar['entries'],
+            ),
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
@@ -326,7 +421,10 @@ class TaskController extends Controller
     {
         unset($filters['as_of']);
 
-        return $filters;
+        return array_map(
+            fn (mixed $value): mixed => $value instanceof Carbon ? $value->toDateString() : $value,
+            $filters,
+        );
     }
 
     /**
