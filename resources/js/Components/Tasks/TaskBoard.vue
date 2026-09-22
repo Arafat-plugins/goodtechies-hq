@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { KanbanSquare } from '@lucide/vue';
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import TaskBoardCard from '@/Components/Tasks/TaskBoardCard.vue';
@@ -46,6 +46,21 @@ import { cn } from '@/lib/utils';
  * Every move a mouse can make is on the card's ⋯ menu: *Move to* for a column change and
  * *Move up* / *Move down* for the order inside one. Both go down the same two code paths the
  * drag does, so they cannot drift apart from it.
+ *
+ * ## How it scrolls, and why that is the shape it is
+ *
+ * From `md` up the board is a **fixed region under the page header**: it is exactly as tall as
+ * what is left of the viewport, each lane scrolls its own cards vertically, and the strip
+ * scrolls sideways with its scrollbar at the bottom of that region. The page itself does not
+ * scroll. Before this, the lanes grew as tall as their contents — twenty-five cards made the
+ * document 1858 px on a 900 px viewport — and the strip's horizontal scrollbar sat at the very
+ * bottom of all of it, roughly 900 px below the fold. The one control for moving the board
+ * sideways could only be reached by first scrolling past every card, which is the client's
+ * report: *"bottom scrollbar is below huge."*
+ *
+ * Below `md` nothing changes: a phone gets one snapped column at a time and the wrapped status
+ * rail that names and counts every lane, and the page scrolls as it always did. A region that
+ * short on a phone would hold barely one card, and a touch swipe never needed the scrollbar.
  */
 
 const props = defineProps<{
@@ -83,6 +98,10 @@ watch(
     (board) => {
         local.value = cloneColumns(board.columns);
         restorePoint.value = null;
+
+        // A new payload can change what sits above the board — the filter bar gains or loses a
+        // chip row — so the region asks again where its top edge ended up.
+        void nextTick(measureFill);
     },
 );
 
@@ -401,6 +420,7 @@ function nudge(card: BoardCard, columnKey: string, direction: 'up' | 'down'): vo
 
 /* ------------------------------------------------------------- getting around it */
 
+const root = ref<HTMLElement | null>(null);
 const strip = ref<HTMLElement | null>(null);
 
 /**
@@ -414,10 +434,244 @@ function jumpTo(key: string): void {
     column?.scrollIntoView({ block: 'nearest', inline: 'start', behavior: 'smooth' });
     column?.querySelector<HTMLElement>('[data-column-heading]')?.focus();
 }
+
+/* ----------------------------------------------------- the region and its height */
+
+/**
+ * The height the strip is given, in pixels, or `null` for "grow as you like".
+ *
+ * There is no number in this file for how tall the board is or how much sits above or below it.
+ * It is all **measured**: the strip's own top edge, the page gutter the layout puts under
+ * `<main>`, and whatever of the board sits under the strip (the gap and the ordering note).
+ * What is left between them is the strip. So the height follows the top bar, the page title,
+ * the view switcher, and a filter bar that wraps to two rows at 768 and to five at 375 — and it
+ * keeps following them when any of those change.
+ *
+ * None of those measurements depend on the strip's own height, so this cannot chase itself:
+ * everything above it is in normal flow before it, and the note below it is a fixed line.
+ */
+const fill = ref<number | null>(null);
+
+/** The `md` breakpoint, read from the browser rather than guessed at from `innerWidth`. */
+const FILL_FROM = '(min-width: 48rem)';
+
+/**
+ * The shortest strip that is still a board: a lane heading and enough of the first card to read
+ * and to grab. 10rem on Tailwind's own scale.
+ *
+ * It is deliberately low. The floor exists for the degenerate case — a window a couple of
+ * hundred pixels tall — and every pixel it is raised is another window size where the board
+ * goes back to being twice as tall as the screen with its scrollbar under the fold, which is
+ * the complaint. A 1366×768 laptop leaves about 220 px here, and that has to be a board.
+ */
+const FILL_FLOOR = 160;
+
+let fillQuery: MediaQueryList | null = null;
+let observer: ResizeObserver | null = null;
+
+function measureFill(): void {
+    const el = root.value;
+    const scroller = strip.value;
+
+    // No strip means an empty board, which is its own `EmptyState` and wants no region at all.
+    if (el === null || scroller === null || fillQuery === null || !fillQuery.matches) {
+        fill.value = null;
+
+        return;
+    }
+
+    const rootBox = el.getBoundingClientRect();
+    const stripBox = scroller.getBoundingClientRect();
+    const main = el.closest('main');
+    const gutter = main === null ? 0 : Number.parseFloat(window.getComputedStyle(main).paddingBottom) || 0;
+
+    // Whatever the board still draws under the strip: the flex gap and the ordering note.
+    const below = rootBox.bottom - stripBox.bottom;
+
+    // Document-relative, so the answer is the same whether or not the page happens to be
+    // scrolled when it is taken.
+    const top = stripBox.top + window.scrollY;
+    const available = Math.floor(document.documentElement.clientHeight - top - below - gutter);
+
+    fill.value = available >= FILL_FLOOR ? available : null;
+}
+
+onMounted(() => {
+    fillQuery = window.matchMedia(FILL_FROM);
+    fillQuery.addEventListener('change', measureFill);
+    window.addEventListener('resize', measureFill);
+
+    // The one way a press can end that never reaches this element: the window itself goes away.
+    window.addEventListener('blur', releasePan);
+
+    /*
+     * `<main>` is what changes size when anything above the board does — the filter bar taking
+     * a second row, the title wrapping, the sidebar rail collapsing. Watching it is how the
+     * region notices that its top moved. Watching the board itself would not: its height is
+     * fixed, so it would never report the change.
+     */
+    const main = root.value?.closest('main') ?? null;
+
+    if (main !== null && typeof ResizeObserver !== 'undefined') {
+        observer = new ResizeObserver(() => measureFill());
+        observer.observe(main);
+    }
+
+    requestAnimationFrame(measureFill);
+});
+
+onBeforeUnmount(() => {
+    fillQuery?.removeEventListener('change', measureFill);
+    window.removeEventListener('resize', measureFill);
+    window.removeEventListener('blur', releasePan);
+    observer?.disconnect();
+    observer = null;
+    releasePan();
+});
+
+/* ----------------------------------------------------------------- drag-to-pan */
+
+/**
+ * Grab the board's background and the board moves with the pointer — which is what the client
+ * asked for by name, and the fastest way across eight lanes now that the strip is one viewport
+ * tall.
+ *
+ * Three things make it either fine or infuriating, so they are all here rather than left to
+ * chance:
+ *
+ * - **It never starts on something that is already a gesture.** A card owns an HTML5 drag; a
+ *   button, a link, a menu item and a field own their click. `PAN_IGNORES` is the list, and a
+ *   pointer that went down inside any of them is not a pan, so a card drag and a pan can never
+ *   fight over the same pointer.
+ * - **A grab that did not move is still a click.** The click that follows a pan is swallowed
+ *   only once the pointer has travelled past `PAN_SLOP`; below that, the click goes through to
+ *   whatever it was on.
+ * - **Releasing outside the window ends it.** The pointer is captured, so the release comes
+ *   back here even off-screen, and `pointercancel`, `lostpointercapture` and the window's own
+ *   `blur` all end the pan too. A board stuck in pan state is worse than no pan at all.
+ *
+ * Pointer events, not mouse events, so a trackpad is a mouse and a stylus is a pen. **Touch is
+ * left alone on purpose:** a finger already pans the strip and scrolls a lane natively, and
+ * taking that over means `touch-action: none`, which would take the lane's own scrolling with
+ * it.
+ */
+const PAN_IGNORES = [
+    '[data-board-card]',
+    'a',
+    'button',
+    'input',
+    'select',
+    'textarea',
+    'label',
+    '[role="button"]',
+    '[role="menu"]',
+    '[role="menuitem"]',
+    '[role="dialog"]',
+    '[contenteditable="true"]',
+].join(',');
+
+/** How far the pointer travels before a grab stops being a click. */
+const PAN_SLOP = 4;
+
+const panning = ref(false);
+
+let panPointer: number | null = null;
+let panFrom = { x: 0, y: 0, left: 0, top: 0 };
+let panList: HTMLElement | null = null;
+let panMoved = false;
+let swallowClick = false;
+
+function onPanDown(event: PointerEvent): void {
+    // Whatever the last pan decided about its click, this new press settles again.
+    swallowClick = false;
+
+    if (event.pointerType === 'touch' || event.button !== 0) {
+        return;
+    }
+
+    const el = strip.value;
+    const target = event.target;
+
+    if (el === null || !(target instanceof Element) || target.closest(PAN_IGNORES) !== null) {
+        return;
+    }
+
+    /*
+     * Kills the text selection and the focus move the press would otherwise start. Nothing
+     * focusable is left to lose — every control was excluded above — and `click` still fires,
+     * so a grab that did not move still reads as a click.
+     */
+    event.preventDefault();
+
+    // A pan that began over a lane drags that lane's cards vertically as well as the strip
+    // sideways, so one gesture moves the board in the direction it was pushed.
+    panList = target.closest<HTMLElement>('[data-board-list]');
+
+    panPointer = event.pointerId;
+    panMoved = false;
+    panFrom = { x: event.clientX, y: event.clientY, left: el.scrollLeft, top: panList?.scrollTop ?? 0 };
+    panning.value = true;
+
+    el.setPointerCapture(event.pointerId);
+}
+
+function onPanMove(event: PointerEvent): void {
+    const el = strip.value;
+
+    if (!panning.value || el === null || event.pointerId !== panPointer) {
+        return;
+    }
+
+    const dx = event.clientX - panFrom.x;
+    const dy = event.clientY - panFrom.y;
+
+    if (!panMoved && Math.abs(dx) + Math.abs(dy) > PAN_SLOP) {
+        panMoved = true;
+    }
+
+    el.scrollLeft = panFrom.left - dx;
+
+    if (panList !== null) {
+        panList.scrollTop = panFrom.top - dy;
+    }
+}
+
+function onPanUp(event: PointerEvent): void {
+    if (panPointer === null || event.pointerId !== panPointer) {
+        return;
+    }
+
+    swallowClick = panMoved;
+    releasePan();
+}
+
+function releasePan(): void {
+    const el = strip.value;
+
+    if (el !== null && panPointer !== null && el.hasPointerCapture(panPointer)) {
+        el.releasePointerCapture(panPointer);
+    }
+
+    panPointer = null;
+    panList = null;
+    panMoved = false;
+    panning.value = false;
+}
+
+/** The click that ends a pan that actually moved, caught before it reaches anything. */
+function onPanClick(event: MouseEvent): void {
+    if (!swallowClick) {
+        return;
+    }
+
+    swallowClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+}
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-4">
+    <div ref="root" class="flex min-w-0 flex-col gap-4">
         <TaskFilterBar
             ref="filterBar"
             :filters="filters"
@@ -428,9 +682,10 @@ function jumpTo(key: string): void {
             :employees="employees"
             :placeholder="searchPlaceholder"
             :id-prefix="`${surface}-board`"
+            class="shrink-0"
         />
 
-        <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div class="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <p class="text-xs text-muted-foreground">
                 <span class="tabular-nums">{{ board.total }}</span>
                 {{ board.total === 1 ? 'task' : 'tasks' }}
@@ -480,14 +735,45 @@ function jumpTo(key: string): void {
             a column reach the screen edge at 360 instead of stopping at the layout's gutter,
             and the padding puts the gutter back inside the scroller so the first and last
             column are not flush against the glass.
+
+            From `md` up it is also given a **measured** height — everything the viewport has
+            left — which is what puts its horizontal scrollbar on screen: the lanes scroll their
+            own cards instead of making the page taller. `overscroll-x-contain` keeps a trackpad
+            swipe past the last lane from being read as "go back".
         -->
         <div
             v-else
             ref="strip"
-            class="-mx-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6"
+            :class="
+                cn(
+                    '-mx-4 overflow-x-auto overscroll-x-contain px-4 pb-2 md:-mx-6 md:px-6',
+                    fill !== null && 'shrink-0 overflow-y-hidden',
+                    // Grab over pannable background; a card and every control keep their own.
+                    panning ? 'cursor-grabbing select-none' : 'cursor-grab',
+                )
+            "
+            :style="fill === null ? undefined : { height: `${fill}px` }"
             :aria-busy="busyId !== null || undefined"
+            @pointerdown="onPanDown"
+            @pointermove="onPanMove"
+            @pointerup="onPanUp"
+            @pointercancel="onPanUp"
+            @lostpointercapture="releasePan"
+            @click.capture="onPanClick"
         >
-            <div class="flex min-w-max snap-x snap-proximity items-start gap-4">
+            <!--
+                `fill` is the one switch: with a measured height the lanes fill it and scroll
+                their own cards; without one they are exactly as tall as their contents and the
+                page scrolls, which is the 360 answer and the fallback on a very short window.
+            -->
+            <div
+                :class="
+                    cn(
+                        'flex min-w-max snap-x snap-proximity gap-4',
+                        fill === null ? 'items-start' : 'h-full items-stretch',
+                    )
+                "
+            >
                 <section
                     v-for="column in local"
                     :key="column.key"
@@ -495,7 +781,8 @@ function jumpTo(key: string): void {
                     :aria-labelledby="`${surface}-col-${column.key}`"
                     :class="
                         cn(
-                            'flex w-72 shrink-0 snap-start flex-col gap-3 rounded-xl bg-muted p-3 transition-opacity',
+                            'flex w-72 shrink-0 snap-start flex-col rounded-xl bg-muted transition-opacity',
+                            fill !== null && 'h-full',
                             // A column this role can never drop into says so while a card is
                             // held, rather than taking the drop and undoing it afterwards.
                             drag !== null && !acceptsDrag(column.key) && 'opacity-40',
@@ -506,28 +793,43 @@ function jumpTo(key: string): void {
                     @dragleave="onDragLeave(column.key, $event)"
                     @drop="onDrop(column.key, $event)"
                 >
-                    <div class="flex min-w-0 items-center justify-between gap-2">
-                        <h2
-                            :id="`${surface}-col-${column.key}`"
-                            data-column-heading
-                            tabindex="-1"
-                            class="min-w-0 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                    <!--
+                        Outside the scroller on purpose: a lane you have scrolled into the
+                        middle of still says which lane it is, and its count still counts.
+                    -->
+                    <div class="flex min-w-0 shrink-0 flex-col gap-3 p-3 pb-0">
+                        <div class="flex min-w-0 items-center justify-between gap-2">
+                            <h2
+                                :id="`${surface}-col-${column.key}`"
+                                data-column-heading
+                                tabindex="-1"
+                                class="min-w-0 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                            >
+                                <StatusBadge :status="column.tone ?? 'todo'" :label="column.label" />
+                            </h2>
+                            <span class="shrink-0 text-xs tabular-nums text-muted-foreground">
+                                {{ column.count }}
+                            </span>
+                        </div>
+
+                        <p
+                            v-if="drag !== null && !acceptsDrag(column.key)"
+                            class="text-xs text-muted-foreground"
                         >
-                            <StatusBadge :status="column.tone ?? 'todo'" :label="column.label" />
-                        </h2>
-                        <span class="shrink-0 text-xs tabular-nums text-muted-foreground">
-                            {{ column.count }}
-                        </span>
+                            Not a move your role can make.
+                        </p>
                     </div>
 
-                    <p
-                        v-if="drag !== null && !acceptsDrag(column.key)"
-                        class="text-xs text-muted-foreground"
+                    <!-- The cards, and the only thing in a lane that scrolls. -->
+                    <ul
+                        data-board-list
+                        :class="
+                            cn(
+                                'flex min-w-0 flex-col gap-2 p-3',
+                                fill !== null && 'min-h-0 flex-1 overflow-y-auto',
+                            )
+                        "
                     >
-                        Not a move your role can make.
-                    </p>
-
-                    <ul data-board-list class="flex min-w-0 flex-col gap-2">
                         <template v-for="(card, index) in column.tasks" :key="card.id">
                             <!-- Where the card would land. Neutral, so it is not a second accent. -->
                             <li
@@ -581,7 +883,7 @@ function jumpTo(key: string): void {
             nobody has dragged yet. The List is the view ordered by date — that is the whole
             difference between the two.
         -->
-        <p v-if="board.total > 0" class="text-xs text-muted-foreground">
+        <p v-if="board.total > 0" class="shrink-0 text-xs text-muted-foreground">
             Drag inside a lane to set its order — it is kept. Drag across lanes to change the
             status. Cards nobody has moved sit in due-date order.
         </p>

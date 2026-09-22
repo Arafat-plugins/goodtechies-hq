@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { usePage } from '@inertiajs/vue3';
 import type { CSSProperties, HTMLAttributes } from 'vue';
 import { computed } from 'vue';
 import { cn } from '@/lib/utils';
@@ -49,6 +50,13 @@ const lockupStyle = computed<CSSProperties>(() => ({
 const textStyle = computed<CSSProperties>(() => ({
     fontSize: `${((props.size * MARK_CAP_RATIO) / INTER_CAP_RATIO).toFixed(2)}px`,
 }));
+
+/**
+ * The product name, from the shared `app.name` prop — which is `config('app.name')`, which is
+ * APP_NAME. One source, so renaming the product is one line in `.env` and never a hunt through
+ * components for a literal somebody forgot.
+ */
+const appName = computed(() => (usePage().props.app?.name as string | undefined) ?? 'goodERP');
 </script>
 
 <template>
@@ -93,8 +101,8 @@ const textStyle = computed<CSSProperties>(() => ({
             class="font-semibold leading-none tracking-tight whitespace-nowrap"
             :style="textStyle"
         >
-            GoodTechies HQ
+            {{ appName }}
         </span>
-        <span v-else class="sr-only">GoodTechies HQ</span>
+        <span v-else class="sr-only">{{ appName }}</span>
     </span>
 </template>

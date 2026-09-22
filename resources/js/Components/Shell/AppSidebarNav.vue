@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Comp
 import { cn } from '@/lib/utils';
 import { readGroupOpen, writeGroupOpen } from '@/lib/sidebarState';
 import type { NavGroup, NavItem } from '@/navigation/types';
-import { groupHasActive, isActiveHref, isPinnedGroup, liveGroups } from '@/navigation/types';
+import { groupHasActive, isActiveItem, isPinnedGroup, liveGroups } from '@/navigation/types';
 
 const props = withDefaults(
     defineProps<{
@@ -110,7 +110,7 @@ function itemClass(item: NavItem): string {
     return cn(
         props.rail ? railRowClass : rowClass,
         'transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none',
-        isActiveHref(page.url, item.href) ? activeClass : inactiveClass,
+        isActiveItem(page.url, item) ? activeClass : inactiveClass,
     );
 }
 </script>
@@ -132,7 +132,7 @@ function itemClass(item: NavItem): string {
                             <TooltipTrigger as-child>
                                 <Link
                                     :href="item.href!"
-                                    :aria-current="isActiveHref(page.url, item.href) ? 'page' : undefined"
+                                    :aria-current="isActiveItem(page.url, item) ? 'page' : undefined"
                                     :class="itemClass(item)"
                                     @click="emit('navigate')"
                                 >
@@ -170,7 +170,7 @@ function itemClass(item: NavItem): string {
                             <li v-for="item in group.items" :key="item.label">
                                 <Link
                                     :href="item.href!"
-                                    :aria-current="isActiveHref(page.url, item.href) ? 'page' : undefined"
+                                    :aria-current="isActiveItem(page.url, item) ? 'page' : undefined"
                                     :class="itemClass(item)"
                                     @click="emit('navigate')"
                                 >

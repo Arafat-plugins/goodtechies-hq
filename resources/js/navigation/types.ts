@@ -11,6 +11,14 @@ export interface NavItem {
     href?: string;
     icon: Component;
     phase?: number;
+    /**
+     * What this row counts as "here", when that is wider than where it points.
+     *
+     * Tasks points at the Board because that is the default view, but List and Calendar are
+     * the same destination to a reader — the row must stay lit on all three. Without this,
+     * pointing a row at a sub-view silently unlights it everywhere else.
+     */
+    activePrefix?: string;
 }
 
 export interface NavGroup {
@@ -32,6 +40,11 @@ export function isActiveHref(url: string, href: string | undefined): boolean {
     }
 
     return url === href || url.startsWith(`${href}/`) || url.startsWith(`${href}?`);
+}
+
+/** Is this row the one the current URL belongs to? `activePrefix` widens it — see NavItem. */
+export function isActiveItem(url: string, item: NavItem): boolean {
+    return isActiveHref(url, item.activePrefix ?? item.href);
 }
 
 /**
@@ -69,5 +82,5 @@ export function comingSoonItems(groups: NavGroup[]): NavItem[] {
 }
 
 export function groupHasActive(group: NavGroup, url: string): boolean {
-    return group.items.some((item) => isActiveHref(url, item.href));
+    return group.items.some((item) => isActiveItem(url, item));
 }

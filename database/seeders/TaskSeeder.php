@@ -13,6 +13,7 @@ use App\Support\TaskPriority;
 use App\Support\TaskStatus;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * Demo tasks for the seeded dev/demo environment (master prompt Part D, Phase 2).
@@ -49,7 +50,47 @@ class TaskSeeder extends Seeder
             foreach ($this->tasks() as $row) {
                 $this->seedTask($row, $team, $tags);
             }
+
+            $this->spreadPositions();
         });
+    }
+
+    /**
+     * Give every card in a lane its own position — but only in a lane where two share one.
+     *
+     * The rows above carry a position per project, which was right when a Kanban column was a
+     * (project, status) pair. A lane is now a status across every project, so those numbers
+     * collide wholesale: every Backlog card arrived as 1000. Tied positions are readable —
+     * the due date breaks them — but they are not *droppable*: `place()` needs a gap between
+     * two neighbours to put a card into, and there is none between 1000 and 1000.
+     *
+     * Only lanes that actually collide are touched, and the order they are spread in is the
+     * order the Board already draws them in, so nothing appears to move. That also makes this
+     * safe on the launcher's reseed-every-start: once a lane is distinct — because it was
+     * spread here, or because somebody dragged a card — this leaves it alone.
+     */
+    private function spreadPositions(): void
+    {
+        Task::query()
+            ->get(['id', 'status', 'position', 'due_date'])
+            ->groupBy(fn (Task $task): string => (string) $task->status?->value)
+            ->each(function (Collection $lane): void {
+                if ($lane->pluck('position')->unique()->count() === $lane->count()) {
+                    return;
+                }
+
+                $lane
+                    ->sortBy([
+                        fn (Task $a, Task $b): int => (int) $a->position <=> (int) $b->position,
+                        fn (Task $a, Task $b): int => ($a->due_date?->timestamp ?? PHP_INT_MAX)
+                            <=> ($b->due_date?->timestamp ?? PHP_INT_MAX),
+                        fn (Task $a, Task $b): int => (int) $a->getKey() <=> (int) $b->getKey(),
+                    ])
+                    ->values()
+                    ->each(function (Task $task, int $index): void {
+                        $task->forceFill(['position' => ($index + 1) * Task::POSITION_STEP])->save();
+                    });
+            });
     }
 
     /**
@@ -120,7 +161,10 @@ class TaskSeeder extends Seeder
             'due_date' => $this->day($row['due']),
             'estimated_minutes' => $row['estimated_minutes'],
             'tracked_seconds' => $row['tracked_seconds'],
-            'position' => $row['position'],
+            // `position` is deliberately NOT refreshed. It is set once above, on creation.
+            // The launcher reseeds on every start, and rewriting it here would silently undo
+            // a card anyone had dragged — the one piece of demo state that is the user's,
+            // not the seed's.
             // A work summary is mandatory on submit-for-review and on completion, so every
             // task that reached either state has one — and it is the PRIMARY assignee's, which
             // is what the completion rule checks. An anonymous summary would make every

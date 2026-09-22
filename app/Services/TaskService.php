@@ -1312,14 +1312,20 @@ class TaskService
      * ever reorder a card against its own project's cards, and forced the screen to walk a
      * drop anchor backwards looking for one. Positions are handed out per status for the
      * same reason.
+     *
+     * It orders by ORDER_BOARD — the same ordering the Board draws with — and that is not a
+     * detail. place() turns the card you dropped under into an INDEX in this list, so if this
+     * list is in a different order from the one on screen, the card lands somewhere other than
+     * where it was dropped. It ordered by (position, id) once, while the Board drew by
+     * (position, due_date, id); every lane whose positions tied put the card in the wrong
+     * place, and every lane's positions tied.
      */
     private function column(Task $task): Collection
     {
-        return Task::query()
-            ->where('status', $task->status?->value)
-            ->orderBy('position')
-            ->orderBy('id')
-            ->get();
+        return $this->order(
+            Task::query()->where('status', $task->status?->value),
+            self::ORDER_BOARD,
+        )->get();
     }
 
     private function sameColumn(Task $task, Task $other): bool

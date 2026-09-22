@@ -1,5 +1,5 @@
 import type { NavGroup, NavItem } from '@/navigation/types';
-import { isActiveHref, isLiveItem } from '@/navigation/types';
+import { isActiveItem, isLiveItem } from '@/navigation/types';
 
 /**
  * The top bar's breadcrumb, derived from the nav tree and the current URL — never
@@ -31,7 +31,7 @@ interface NavMatch {
     item: NavItem;
 }
 
-/** The path without its query string, which `isActiveHref` tolerates but slicing does not. */
+/** The path without its query string, which the matcher tolerates but slicing does not. */
 export function pathOf(url: string): string {
     return url.split(/[?#]/)[0] ?? url;
 }
@@ -46,7 +46,9 @@ export function matchNavItem(groups: NavGroup[], url: string): NavMatch | null {
 
     for (const group of groups) {
         for (const item of group.items) {
-            if (!isLiveItem(item) || !isActiveHref(path, item.href)) {
+            // activePrefix, not href: the Tasks row points at the Board but owns the List and
+            // the Calendar too, and a breadcrumb on those must still find it.
+            if (!isLiveItem(item) || !isActiveItem(path, item)) {
                 continue;
             }
 

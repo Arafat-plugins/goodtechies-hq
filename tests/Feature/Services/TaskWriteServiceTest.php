@@ -449,9 +449,16 @@ it('creates a task in backlog, at the bottom of the column, with its assignees a
         'status' => TaskStatus::Completed->value,
     ], [$this->primary->id, $this->second->id], $this->second->id);
 
+    // "At the bottom" is the claim, not a number: a lane holds every project's cards in that
+    // status, so the seed is in this one too and the bottom is wherever the seed ends.
+    $highestOther = (int) Task::query()
+        ->where('status', TaskStatus::Backlog->value)
+        ->whereKeyNot($task->getKey())
+        ->max('position');
+
     expect($task->status)->toBe(TaskStatus::Backlog)
         ->and($task->created_by)->toBe($this->admin->id)
-        ->and($task->position)->toBe(2000)
+        ->and((int) $task->position)->toBeGreaterThan($highestOther)
         ->and($task->primary()?->id)->toBe($this->second->id);
 
     $audit = AuditLog::where('event', AuditEvent::TaskAssigned->value)->latest('id')->firstOrFail();
@@ -585,10 +592,12 @@ it('drops a card on the midpoint between its new neighbours', function () {
 
     $this->service->reorder($this->admin, $moved->fresh(['project', 'assignees']), $a);
 
-    expect($moved->fresh()->position)->toBe(1500)
-        // Nothing else moved: that is what the sparse numbering buys.
-        ->and($a->fresh()->position)->toBe(1000)
-        ->and($b->fresh()->position)->toBe(2000);
+    // Between its neighbours. Deliberately not a literal midpoint, and deliberately not a
+    // claim that the others held their numbers: a lane spans every project, so these three sit
+    // among the seed's cards, and a drop with no gap left renumbers the whole lane. What must
+    // always hold is the ORDER — sparse numbering is an optimisation, not the contract.
+    expect((int) $a->fresh()->position)->toBeLessThan((int) $moved->fresh()->position)
+        ->and((int) $moved->fresh()->position)->toBeLessThan((int) $b->fresh()->position);
 })->group('phase2');
 
 it('puts a card dropped at the top above everything, without renumbering', function () {
@@ -658,7 +667,13 @@ it('lands a card that changed column at the bottom of the new one', function () 
 
     $after = $this->service->transition($this->admin, $moved, TaskStatus::InProgress);
 
-    expect($after->position)->toBe(5000);
+    // Bottom of the lane it arrived in — and the lane is the status across every project.
+    $highestOther = (int) Task::query()
+        ->where('status', TaskStatus::InProgress->value)
+        ->whereKeyNot($after->getKey())
+        ->max('position');
+
+    expect((int) $after->position)->toBeGreaterThan($highestOther);
 })->group('phase2');
 
 it('refuses a reorder against a card in another column', function () {

@@ -27,7 +27,7 @@ return [
                 /*
                  * The list of directories and files that will be included in the backup.
                  *
-                 * GoodTechies HQ backs up the database only. Uploaded files live in S3, which
+                 * goodERP backs up the database only. Uploaded files live in S3, which
                  * protects them with bucket versioning and cross-region replication (runbook:
                  * docs/runbooks/restore-from-backup.md), so no files are included here.
                  */

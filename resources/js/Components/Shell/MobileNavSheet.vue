@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { Link, usePage } from '@inertiajs/vue3';
 import { Menu } from '@lucide/vue';
 import { ref, watch } from 'vue';
@@ -10,6 +11,9 @@ import { ScrollArea } from '@/Components/ui/scroll-area';
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '@/Components/ui/sheet';
 import type { NavGroup } from '@/navigation/types';
 
+
+// The product name, from the shared prop — see AppWordmark.
+const appName = computed(() => (usePage().props.app?.name as string | undefined) ?? 'goodERP');
 defineProps<{
     groups: NavGroup[];
     homeHref: string;
@@ -44,7 +48,7 @@ watch(
                 </Link>
             </div>
             <SheetTitle class="sr-only">Navigation</SheetTitle>
-            <SheetDescription class="sr-only">Sections of GoodTechies HQ</SheetDescription>
+            <SheetDescription class="sr-only">Sections of {{ appName }}</SheetDescription>
             <ScrollArea class="min-h-0 flex-1">
                 <AppSidebarNav :groups="groups" @navigate="open = false" />
             </ScrollArea>

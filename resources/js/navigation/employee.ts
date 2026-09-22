@@ -30,7 +30,8 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
             label: 'Menu',
             items: [
                 { label: 'Dashboard', href: '/employee/dashboard', icon: LayoutDashboard },
-                { label: 'My Tasks', href: '/employee/tasks', icon: ListTodo },
+                // Board by default here too, so both surfaces open on the same view.
+                { label: 'My Tasks', href: '/employee/tasks/board', activePrefix: '/employee/tasks', icon: ListTodo },
                 { label: 'Projects', href: '/employee/projects', icon: FolderKanban },
                 { label: 'Calendar', icon: CalendarDays, phase: 2 },
                 { label: 'Meetings', icon: Video, phase: 7 },

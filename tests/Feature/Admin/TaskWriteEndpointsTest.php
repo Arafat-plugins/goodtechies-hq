@@ -156,8 +156,24 @@ it('moves a task through the status endpoint, form-shaped and drag-shaped alike'
         ->assertRedirect()
         ->assertSessionHas('success');
 
+    // The claim is "it landed under the card it was dropped under", not a particular integer.
+    // A lane is every project's cards in that status, so the seed shares this one and the next
+    // card along is not necessarily the other one this test made — which is exactly why the
+    // number was 1500 back when a lane was scoped to one project.
+    $anchor = $column[0]->fresh();
+    $next = Task::query()
+        ->where('status', TaskStatus::InReview->value)
+        ->where('position', '>', $anchor->position)
+        ->whereKeyNot($this->task->getKey())
+        ->orderBy('position')
+        ->first();
+
     expect($this->task->fresh()->status)->toBe(TaskStatus::InReview)
-        ->and($this->task->fresh()->position)->toBe(1500);
+        ->and((int) $this->task->fresh()->position)->toBeGreaterThan((int) $anchor->position);
+
+    if ($next !== null) {
+        expect((int) $this->task->fresh()->position)->toBeLessThan((int) $next->position);
+    }
 
     // Form-shaped: a status and a work summary, no position.
     $this->actingAs($this->admin)

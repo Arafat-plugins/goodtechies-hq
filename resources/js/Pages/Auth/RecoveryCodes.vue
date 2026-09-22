@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { usePage } from '@inertiajs/vue3';
+import { computed } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import { Check, Copy, Download, TriangleAlert } from '@lucide/vue';
 import { ref } from 'vue';
@@ -7,6 +9,9 @@ import { Alert, AlertDescription } from '@/Components/ui/alert';
 import { Button } from '@/Components/ui/button';
 import { CardContent, CardFooter, CardHeader, CardTitle } from '@/Components/ui/card';
 
+
+// The name in the downloaded file follows APP_NAME too — see AppWordmark.
+const appName = computed(() => (usePage().props.app?.name as string | undefined) ?? 'goodERP');
 defineOptions({ layout: AuthLayout });
 
 const props = defineProps<{
@@ -17,7 +22,7 @@ const copied = ref(false);
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
 function codesText(): string {
-    return `GoodTechies HQ recovery codes\nEach code works once.\n\n${props.codes.join('\n')}\n`;
+    return `${appName.value} recovery codes\nEach code works once.\n\n${props.codes.join('\n')}\n`;
 }
 
 async function copyAll(): Promise<void> {
