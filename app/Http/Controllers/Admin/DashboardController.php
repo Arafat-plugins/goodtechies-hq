@@ -3,14 +3,19 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AttendanceRecord;
+use App\Models\DailyWorkSummary;
 use App\Models\Employee;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\AttendanceService;
 use App\Services\ProjectService;
 use App\Services\TaskReviewers;
 use App\Services\TaskService;
+use App\Support\AttendanceStatus;
 use App\Support\TaskBucket;
 use App\Support\TaskStatus;
+use App\Support\TrackingMode;
 use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -70,6 +75,7 @@ class DashboardController extends Controller
         private readonly TaskService $tasks,
         private readonly ProjectService $projects,
         private readonly TaskReviewers $reviewers,
+        private readonly AttendanceService $attendance,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -84,10 +90,112 @@ class DashboardController extends Controller
             'stats' => [
                 'activeEmployees' => Employee::where('status', UserStatus::Active)->count(),
             ],
+            'attendance' => $this->attendanceToday($user, $asOf),
             'workStats' => $this->workStats($user, $asOf, $maySeeTasks),
             'attention' => $maySeeTasks ? $this->attention($user, $asOf) : [],
             'taskStatuses' => $maySeeTasks ? $this->taskStatuses($user, $asOf) : [],
         ]);
+    }
+
+    /**
+     * The Company dashboard's attendance block (Phase 4, Part D §8 and AC2).
+     *
+     * Three real numbers and one honest blank:
+     *
+     *   - **Present today** and **Absent** — counts of people, from the same roster the
+     *     Attendance screen draws, so the card and the screen it opens cannot disagree. Present
+     *     folds in Late, because somebody who arrived at ten past nine is in the office: the
+     *     roster breaks the two apart and this card links to it. The predicates are
+     *     `AttendanceStatus`', asked once in `AttendanceService` and never restated here
+     *     (decision 2-37).
+     *   - **Remote time today**, one line per remote-timer employee — AC2's *"Tapu 4h 18m / 5h"*.
+     *     It is read from the `daily_work_summary` VIEW, which is what Part C rule 6 built it
+     *     for: reporting. The target beside it is the employee's own
+     *     `schedules.working_hours_per_day` and nothing is divided by it — no percentage, no bar
+     *     presented as a grade, no comparison between the people on the list (Part H §1).
+     *   - **On leave** stays a placeholder naming Phase 5. `leave_requests` does not exist, so a
+     *     card reading "0" would be a measurement nobody has taken — and would read as *nobody
+     *     is on leave*, which is a different and possibly false statement.
+     *
+     * Empty for somebody who may not manage other people's attendance: the whole block is
+     * absent from the payload rather than sent with zeroes (Part C §1 — a field the requester
+     * may not see is absent, not null).
+     *
+     * @return array<string, mixed>
+     */
+    private function attendanceToday(User $user, Carbon $asOf): array
+    {
+        if (! Gate::forUser($user)->allows('viewAny', AttendanceRecord::class)) {
+            return [];
+        }
+
+        $roster = $this->attendance->roster($user, $asOf);
+
+        $counts = $roster->countBy(fn (array $row): string => (string) ($row['status'] ?? 'none'));
+        $present = (int) $counts->get(AttendanceStatus::Present->value, 0)
+            + (int) $counts->get(AttendanceStatus::Late->value, 0);
+
+        return [
+            'present' => $present,
+            'absent' => (int) $counts->get(AttendanceStatus::Absent->value, 0),
+            'href' => '/admin/attendance',
+            'remote' => $this->remoteTimeToday($user, $asOf),
+        ];
+    }
+
+    /**
+     * "Tapu 4h 18m / 5h" — one row per remote-timer employee, for today.
+     *
+     * The minutes come from `daily_work_summary`, the reporting view, in one query for everybody
+     * on the list. The view's `tracked_minutes` asks `approved_at is not null` — decision 4-7's
+     * single predicate, the same one `AttendanceService::trackedMinutes()` asks for the roster —
+     * so the card and the roster row give the same figure, which is what Part C rule 6 exists to
+     * guarantee. `tests/Feature/Admin/DailyWorkSummaryTest.php` asserts that they agree.
+     *
+     * An employee with nothing tracked yet is **on the list at 0m**. Zero is an answer at nine
+     * in the morning; a name that appears only once somebody starts working is a list that
+     * cannot be read twice.
+     *
+     * @return list<array{id: int, name: string, tracked_minutes: int, target_minutes: int|null, pending_minutes: int}>
+     */
+    private function remoteTimeToday(User $user, Carbon $asOf): array
+    {
+        $employees = Employee::query()
+            ->attendanceVisibleTo($user)
+            ->where('tracking_mode', TrackingMode::RemoteTimer)
+            ->with(['user:id,name', 'schedule'])
+            ->join('users', 'users.id', '=', 'employees.user_id')
+            ->orderBy('users.name')
+            ->select('employees.*')
+            ->get();
+
+        if ($employees->isEmpty()) {
+            return [];
+        }
+
+        $summary = DailyWorkSummary::query()
+            ->forEmployees($employees->modelKeys())
+            ->forDate($asOf)
+            ->get()
+            ->keyBy('employee_id');
+
+        return $employees->map(function (Employee $employee) use ($summary): array {
+            $row = $summary->get($employee->getKey());
+            $hours = $employee->schedule?->working_hours_per_day;
+
+            return [
+                'id' => (int) $employee->getKey(),
+                'name' => $employee->user?->name ?? 'Unknown',
+                'tracked_minutes' => (int) ($row?->tracked_minutes ?? 0),
+                // Null when they have no schedule: the card then shows a duration and no target,
+                // rather than counting against a number nobody set.
+                'target_minutes' => $hours === null ? null : (int) round(((float) $hours) * 60),
+                // Reported beside the total and never inside it. An afternoon waiting for a
+                // sign-off is not counted, but it must not be invisible either — the Admin
+                // reading this card is the person who can sign it off.
+                'pending_minutes' => (int) ($row?->pending_minutes ?? 0),
+            ];
+        })->values()->all();
     }
 
     /**

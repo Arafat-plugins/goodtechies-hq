@@ -46,6 +46,9 @@ use Illuminate\Support\Carbon;
     'flag_reason',
     'approved_at',
     'approved_by',
+    'rejected_at',
+    'rejected_by',
+    'rejection_reason',
     'reason',
     'edited_at',
     'edited_by',
@@ -74,6 +77,7 @@ class TimeEntry extends Model
             'last_heartbeat_at' => 'datetime',
             'flagged_at' => 'datetime',
             'approved_at' => 'datetime',
+            'rejected_at' => 'datetime',
             'edited_at' => 'datetime',
             'entry_type' => TimeEntryType::class,
             'paused_seconds' => 'integer',
@@ -111,6 +115,14 @@ class TimeEntry extends Model
     public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function rejector(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'rejected_by');
     }
 
     /**
@@ -155,10 +167,40 @@ class TimeEntry extends Model
         return $this->approved_at !== null;
     }
 
-    /** A finished manual entry that nobody has signed off yet. */
+    /**
+     * A finished entry that nobody has signed off yet — approved or refused.
+     *
+     * Deliberately unchanged in meaning by the arrival of rejection: an entry somebody REFUSED
+     * is not awaiting anything, so it drops out of here and out of the Admin's queue, while
+     * still answering `counts()` false exactly as it did while it waited. That is what decision
+     * 4-7 buys — the total's predicate never learned a new word.
+     */
     public function awaitsApproval(): bool
     {
-        return $this->isStopped() && $this->approved_at === null;
+        return $this->isStopped() && $this->approved_at === null && $this->rejected_at === null;
+    }
+
+    /** Somebody looked at this entry and refused it. The hours stay; they do not count. */
+    public function isRejected(): bool
+    {
+        return $this->rejected_at !== null;
+    }
+
+    /**
+     * One word for where this entry stands with an approver, for a payload and for a screen
+     * that must not carry state in colour alone (DESIGN.md §5.6).
+     *
+     * `counted` covers both an auto entry the system signed off at stop and a manual one an
+     * Admin approved: the difference between them is `approved_by`, not whether it counts.
+     */
+    public function approvalKey(): string
+    {
+        return match (true) {
+            ! $this->isStopped() => 'open',
+            $this->isRejected() => 'rejected',
+            $this->counts() => 'counted',
+            default => 'pending',
+        };
     }
 
     /** One word for the state, for a payload and for a screen that must not use colour alone. */
@@ -169,6 +211,33 @@ class TimeEntry extends Model
             $this->isPaused() => 'paused',
             default => 'stopped',
         };
+    }
+
+    /**
+     * The row as an approval decision sees it, for `audit_logs`' old and new values.
+     *
+     * Both sides of a decision in one shape, so a reader diffs them by eye — the same contract
+     * `AttendanceRecord::auditValues()` keeps for a corrected day. `duration_seconds` rides
+     * along although a decision never changes it: it is the number being ruled on, and a log
+     * entry saying only "approved: true" leaves the reader to go and find out what for.
+     *
+     * `counts` is derived and included on purpose. It is the one thing a reader actually wants
+     * from this log — whether these hours are in somebody's total — and deriving it at read time
+     * from a `approved_at` that may since have been cleared is how a trail stops being a trail.
+     *
+     * @return array<string, mixed>
+     */
+    public function approvalAuditValues(): array
+    {
+        return [
+            'duration_seconds' => $this->duration_seconds,
+            'approved_at' => $this->approved_at?->toIso8601String(),
+            'approved_by' => $this->approved_by,
+            'rejected_at' => $this->rejected_at?->toIso8601String(),
+            'rejected_by' => $this->rejected_by,
+            'rejection_reason' => $this->rejection_reason,
+            'counts' => $this->counts(),
+        ];
     }
 
     /* ------------------------------------------------------------------- the maths */
@@ -252,6 +321,29 @@ class TimeEntry extends Model
     public function scopeCounted(Builder $query): void
     {
         $query->whereNotNull('approved_at');
+    }
+
+    /**
+     * The approval queue: finished, and nobody has ruled on it yet.
+     *
+     * The single spelling of `awaitsApproval()` as SQL, and the predicate the partial index
+     * `time_entries_awaiting_decision` is written against — the same discipline `scopeCounted`
+     * keeps for `counts()`. A screen, a count and an index that each spelled this differently
+     * would eventually disagree about how many entries are waiting.
+     *
+     * @param  Builder<TimeEntry>  $query
+     */
+    public function scopeAwaitingDecision(Builder $query): void
+    {
+        $query->whereNotNull('ended_at')->whereNull('approved_at')->whereNull('rejected_at');
+    }
+
+    /**
+     * @param  Builder<TimeEntry>  $query
+     */
+    public function scopeRejected(Builder $query): void
+    {
+        $query->whereNotNull('rejected_at');
     }
 
     /**

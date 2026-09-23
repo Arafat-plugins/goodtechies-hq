@@ -20,6 +20,17 @@ import PageShell from '@/Components/PageShell.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import AdminLayout from '@/Layouts/AdminLayout.vue';
+
+/**
+ * Shipped without a layout: this page and the schedule editor were the only two under
+ * `Pages/**` with no `defineOptions({ layout })`, so both rendered bare — no sidebar, no top
+ * bar, no skip link. Every accessibility measurement on them passed, because a page with no
+ * shell has nothing to overflow and almost nothing to tab through. Found by reading, not by
+ * measuring.
+ */
+defineOptions({ layout: AdminLayout });
+
 
 /**
  * Admin → Workforce → Attendance: the morning roster.

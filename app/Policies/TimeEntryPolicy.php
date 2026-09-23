@@ -91,6 +91,57 @@ class TimeEntryPolicy extends Policy
         return $this->track($user) && $this->owns($user, $entry);
     }
 
+    /**
+     * Ruling on an entry: Admin → Workforce → Time's Approve and Reject.
+     *
+     * **One ability for both verbs**, because they are one decision made two ways. A person who
+     * may sign hours off is exactly the person who may refuse them; splitting it would create a
+     * role that can approve but not turn anything down, which is not a job anybody has.
+     *
+     * Three things have to hold:
+     *
+     *   - `attendance.manage_others` — the same key that lets somebody correct another person's
+     *     attendance record, which is the same act on the other table. Approving hours is not a
+     *     new privilege and does not get a new key; a scoped rule is the key plus a scope check,
+     *     never a second key.
+     *   - The entry is **finished**. A session still going has no agreed length to rule on, and
+     *     `TimerService::assertDecidable()` refuses it too — the same pairing `update()` has.
+     *   - It is **not their own**. Nobody signs off their own claim, however senior. Today no
+     *     seeded person holds `attendance.manage_others` and a timer at once, so this branch is
+     *     unreachable through the UI — which is precisely why it is coded rather than argued.
+     *     The day somebody's tracking mode is changed is not the day to discover the rule was
+     *     only true by accident.
+     *
+     * The refusal is a **403**: being unable to rule on time entries at all is a fact about the
+     * requester. An entry they may not SEE is a different question and answers 404 — the
+     * controller resolves through `TimeEntry::visibleTo()` first (Part C §1).
+     */
+    public function approve(User $user, TimeEntry $entry): bool
+    {
+        if (! $entry->isStopped()) {
+            return false;
+        }
+
+        if ($this->owns($user, $entry)) {
+            return false;
+        }
+
+        return $this->allows($user, Permission::AttendanceManageOthers);
+    }
+
+    /**
+     * The Admin → Workforce → Time screen itself: the queue, and hours by employee, project and
+     * task.
+     *
+     * Not `viewAny` — that one is the employee's own Time page and is deliberately narrower
+     * (see its docblock). This is the other screen the same phase builds, and it asks the
+     * question that screen cannot: whose hours am I responsible for.
+     */
+    public function review(User $user): bool
+    {
+        return $this->allows($user, Permission::AttendanceManageOthers);
+    }
+
     private function owns(User $user, TimeEntry $entry): bool
     {
         $employeeId = $user->employee?->getKey();

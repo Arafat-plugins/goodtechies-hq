@@ -33,6 +33,20 @@ class TimerStateException extends RuntimeException
         return new self('That session has already been stopped.');
     }
 
+    /**
+     * A decision — approve or reject — asked about a session that is still going.
+     *
+     * There is no agreed length to rule on yet: the number would go on moving after the
+     * sign-off. The same reason `TimeEntryPolicy::update()` refuses to correct an open entry.
+     */
+    public static function stillRunning(): self
+    {
+        return new self(
+            'That session is still going, so there are no final hours to approve or refuse yet. '
+            .'Stop it first.'
+        );
+    }
+
     public static function notRunning(): self
     {
         return new self('That session is already paused.');

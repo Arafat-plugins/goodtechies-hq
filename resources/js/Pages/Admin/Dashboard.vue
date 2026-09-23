@@ -2,6 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import {
     CalendarClock,
+    CalendarOff,
     CircleAlert,
     ClipboardCheck,
     CircleCheck,
@@ -14,8 +15,10 @@ import {
     TrendingUp,
     UserCheck,
     Users,
+    UserX,
 } from '@lucide/vue';
 import { computed, type Component } from 'vue';
+import { formatMinutes } from '@/Components/Attendance/attendance';
 import AttentionList, { type AttentionItem } from '@/Components/Dashboard/AttentionList.vue';
 import AreaTrend from '@/Components/Charts/AreaTrend.vue';
 import DonutBreakdown, { type DonutSlice } from '@/Components/Charts/DonutBreakdown.vue';
@@ -50,6 +53,33 @@ interface AttentionRow {
     tone: 'default' | 'urgent';
 }
 
+/**
+ * One remote-timer employee's day — AC2's "Tapu 4h 18m / 5h".
+ *
+ * `tracked_minutes` and `target_minutes` are two durations printed side by side. Nothing
+ * divides one by the other, and no row is compared with any other row: hours are a record, not
+ * a rating (Part H §1). `target_minutes` is null for somebody with no schedule, and the line
+ * then shows a duration and no target rather than counting against a number nobody set.
+ */
+interface RemoteTimeRow {
+    id: number;
+    name: string;
+    tracked_minutes: number;
+    target_minutes: number | null;
+    pending_minutes: number;
+}
+
+/**
+ * Today's attendance, as the server counted it. Absent from the payload entirely for somebody
+ * who may not manage other people's attendance, which is why every field is optional here.
+ */
+interface AttendanceToday {
+    present?: number;
+    absent?: number;
+    href?: string;
+    remote?: RemoteTimeRow[];
+}
+
 /** One slice of "Tasks by status", already counted and already toned by the server. */
 interface TaskStatusCount {
     key: string;
@@ -64,6 +94,15 @@ const props = defineProps<{
     stats: {
         activeEmployees: number;
     };
+    /**
+     * Present today, Absent, and the remote-timer employees' tracked time — counted on the
+     * server from the same roster the Attendance screen draws, so the card and the screen it
+     * opens cannot disagree. `{}` for a viewer who may not manage other people's attendance.
+     *
+     * On leave is NOT in here and is still a placeholder: `leave_requests` arrives in Phase 5,
+     * and a card reading 0 would be a measurement nobody has taken.
+     */
+    attendance: AttendanceToday;
     /**
      * The plan's five task cards for this dashboard — Tasks due today, Overdue, Awaiting
      * review, Completed today, Active projects. Every one is a server-side COUNT scoped by
@@ -149,6 +188,21 @@ const taskStatusSlices = computed<DonutSlice[]>(() =>
     })),
 );
 
+/** True once the server sent the attendance block at all — see the prop's docblock. */
+const hasAttendance = computed(() => props.attendance.present !== undefined);
+
+/**
+ * `4h 18m / 5h`, or `4h 18m` when the person has no schedule to compare against.
+ *
+ * Two durations, printed. Never a percentage and never a ratio presented as a verdict: the
+ * target is what their schedule says the day is, not a bar somebody is measured against.
+ */
+function remoteTime(row: RemoteTimeRow): string {
+    const tracked = formatMinutes(row.tracked_minutes);
+
+    return row.target_minutes === null ? tracked : `${tracked} / ${formatMinutes(row.target_minutes)}`;
+}
+
 /**
  * Tier 4. Money is a footnote on the company dashboard, so these are the compact card:
  * same anatomy, smaller number, clearly below the hero row. The sparkline slot is left
@@ -196,9 +250,12 @@ const monthStats = [
         </section>
 
         <!--
-            Tier 1b — the people numbers, at a lower weight than the work. "Present today"
-            keeps its "Arrives in Phase 4" marker: attendance is not built, and a card that
-            quietly went blank would read as nobody being in.
+            Tier 1b — the people numbers, at a lower weight than the work.
+
+            Present today and Absent carry real counts now and both lead to the roster, which is
+            where the split between Present and Late lives. On leave keeps its "Arrives in
+            Phase 5" marker: `leave_requests` does not exist, and a card reading 0 would not be
+            a blank — it would say "nobody is on leave", which is a claim nothing can support.
         -->
         <section aria-label="Team today" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
@@ -208,7 +265,68 @@ const monthStats = [
                 sub="Current headcount · no history to compare yet"
                 :icon="Users"
             />
-            <StatCard size="compact" label="Present today" :phase="4" :icon="UserCheck" />
+            <StatCard
+                v-if="hasAttendance"
+                size="compact"
+                label="Present today"
+                :value="attendance.present"
+                :sub="attendance.present === 0 ? 'Nobody has clocked in yet' : 'In today, including late arrivals'"
+                :icon="UserCheck"
+                :href="attendance.href"
+            />
+            <StatCard
+                v-if="hasAttendance"
+                size="compact"
+                label="Absent"
+                :value="attendance.absent"
+                :sub="attendance.absent === 0 ? 'Nobody is marked absent' : 'Scheduled to work, no record'"
+                :icon="UserX"
+                :href="attendance.href"
+            />
+            <StatCard size="compact" label="On leave" :phase="5" :icon="CalendarOff" />
+        </section>
+
+        <!--
+            AC2 — "Tapu 4h 18m / 5h". One line per remote-timer employee, read from the
+            `daily_work_summary` view, which is the reporting join Part C rule 6 asks for.
+
+            Two durations side by side and nothing divided by anything: no percentage, no bar, no
+            ordering of people by hours (Part H §1). Anything still waiting for a sign-off is
+            named in words and is not in the figure beside it — decision 4-7 — and the line links
+            to the screen where it can be signed off.
+        -->
+        <section
+            v-if="hasAttendance && attendance.remote?.length"
+            aria-labelledby="remote-time-today"
+            class="flex flex-col gap-4"
+        >
+            <h2 id="remote-time-today" class="text-base font-semibold tracking-tight">Remote time today</h2>
+            <Card class="min-w-0 p-6">
+                <ul class="flex min-w-0 flex-col divide-y">
+                    <li
+                        v-for="row in attendance.remote"
+                        :key="row.id"
+                        class="flex min-w-0 flex-col gap-1 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4"
+                    >
+                        <Link
+                            :href="`/attendance/${row.id}`"
+                            class="truncate text-sm font-medium underline-offset-4 hover:underline"
+                        >
+                            {{ row.name }}
+                        </Link>
+                        <div class="flex shrink-0 flex-col items-start gap-0.5 sm:items-end">
+                            <span class="text-sm tabular-nums">{{ remoteTime(row) }}</span>
+                            <Link
+                                v-if="row.pending_minutes > 0"
+                                href="/admin/time"
+                                class="text-xs tabular-nums text-status-waiting-fg underline-offset-4 hover:underline"
+                            >
+                                {{ formatMinutes(row.pending_minutes) }} waiting for approval — not counted
+                            </Link>
+                        </div>
+                    </li>
+                </ul>
+            </Card>
         </section>
 
         <!--

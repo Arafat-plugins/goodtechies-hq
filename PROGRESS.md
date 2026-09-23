@@ -21,7 +21,7 @@
 | 0.5 | Design Foundation: brand tokens from the logo, the app shell, 8 base components, charts, every Phase 0/1 screen migrated | — | ✅ complete |
 | 2 | Tasks: List (grouped) · Board · Calendar · tags · files · task discussion · in-app notifications | — | ⬜ |
 | 3 | Recurring task engine + fixed automation rules | — | ⬜ |
-| 4 | Remote timer + Timesheet + office attendance + schedules + workload | **GATE C** | ⬜ |
+| 4 | Remote timer + Timesheet + office attendance + schedules + workload | **GATE C** | ✅ built, waiting for GATE C |
 | 5 | Leave management + holidays | — | ⬜ |
 | 6 | Team communication (team/project chat, DMs, announcements, voice, Team directory) + realtime | **GATE D** | ⬜ |
 | 7 | Meetings + Google Meet (one-way) + action items → tasks | — | ⬜ |
@@ -414,7 +414,7 @@ cards counting six overdue.
 
 **Tests: 1184 passing, 6280 assertions.**
 
-## Phase 4 — Time & attendance (2 of 3 slices done)
+## Phase 4 — Time & attendance ✅ complete (waiting for GATE C)
 
 **Goal (from the plan):** Tapu's day is timer-tracked per task with the 5h target visible to him
 and Admin; Yaseen and both Admins clock in/out; workload view exists. **Phase 4 ends at GATE C.**
@@ -423,7 +423,7 @@ and Admin; Yaseen and both Admins clock in/out; workload view exists. **Phase 4 
 | --- | --- | --- |
 | 1 | Remote timer, `time_entries`, watchdog, offline replay, the Time page | done |
 | 2 | Office attendance, schedules, roster, month grid, `hq:mark-absent` | done |
-| 3 | Timesheet grid, Workload, the admin Time approval queue, dashboard cards | **not started** |
+| 3 | Timesheet grid, Workload, the admin Time approval queue, dashboard cards | done |
 
 **The timer.** Start / pause / resume / stop with the arithmetic tested to the second, one open
 timer per employee guaranteed by a partial unique index rather than an `if` (4-2), and the
@@ -445,14 +445,30 @@ needs a reason and is audit-logged with old and new values.
 Yaseen — decided on the server from `tracking_mode`. Until this slice both saw the same disabled
 button reading "Arrives in Phase 4".
 
-**Tests: 1296 passing, 6853 assertions.**
+**Tests: 1363 passing, 7317 assertions.**
 
-### The one thing that will bite at GATE C
+**Slice 3.** Admin → Workforce → **Time** is the approval queue, ordered by date and never by
+size or person, each row saying who, when, how long and *why* it is waiting — added by hand,
+edited after the fact, or flagged by the watchdog with its own sentence. Approving makes the
+hours count; rejecting keeps the row, its hours and the reason, and the employee's Time page
+says "Turned down: …" (4-18). That closes 4-16, the thing that would have bitten at GATE C.
 
-`manual_time_requires_approval` defaults **on**, and **there is nowhere to approve** (4-16). A
-manual or edited time entry is written unapproved and does not count toward a total. Those hours
-are reported separately and in words, so nothing is invisible — but slice 3's Admin → Workforce →
-Time queue is what makes them countable, and GATE C should not be called before it exists.
+**`daily_work_summary`** is a view, not a table, as Part C rule 6 insists: a full outer join of
+one CTE per source, so neither the office day nor the remote day can disappear (4-19). The
+roster now reads "Tapu — Remote 4h 18m tracked", and it costs one query per roster rather than
+one per row (4-20). The Company dashboard carries Present today, Absent, and AC2's
+"Tapu 4h 18m / 5h" verbatim; On leave still names Phase 5.
+
+**Timesheet** is a pure view over `time_entries`, with the week starting on the first working
+day of *that employee's* schedule — never Monday by default, and there is a test with a Tue–Thu
+schedule that a hard-coded Monday would fail (4-22). **Workload** is counts only: estimated and
+tracked sit side by side, never divided, never sorted, people ordered by name, because a ratio
+or a league table is the productivity score Part H forbids (4-23).
+
+**Also fixed here, found by reading rather than measuring:** the admin Attendance and Schedule
+pages shipped with **no layout at all** — no sidebar, no top bar, no skip link. Every
+accessibility measurement on them had passed, because a page with no shell has nothing to
+overflow and almost nothing to tab through (4-26).
 
 ## Deployment log
 
@@ -464,25 +480,33 @@ Time queue is what makes them countable, and GATE C should not be called before 
 
 ## Next step
 
-**Phase 4 slice 3**, and then **GATE C**.
+**Stop: GATE C.** Phase 4 is built. The plan's gate is *"user tests timer + attendance on
+desktop and phone"*, so this is yours now.
 
-1. **Admin → Workforce → Time** — the approval queue for flagged and manual entries. This is the
-   blocker above: until it exists, approved-only totals quietly under-count.
-2. **Timesheet** (Part D §7) — the weekly grid, tasks x days with row, day and week totals and
-   the target line, "Add time" per cell. Employee sees their own week; Admin sees anyone's.
-3. **Workload** — task count per employee, overdue per employee, estimated vs tracked, projects
-   with the most pending work. Counts only; no score, no ranking, no comparison between people.
-4. **The `daily_work_summary` SQL view**, which the plan names as the one place the two sources
-   (timer and attendance) are read together.
-5. **Admin Company dashboard cards** — Present today, Absent, and AC2's "Tapu 4h 18m / 5h". The
-   roster already leaves a clean seam for the tracked half (`trackedMinutes()` returns null, and
-   every surface prints the clause only when it is not).
-6. Then **GATE C**: you test the timer and attendance on desktop **and** phone.
+What to walk, as Tapu (`tapu@goodtechies.test`, remote):
 
-**Still open:** the GATE A questions (real email addresses, VPS and backup bucket, Google
-Workspace, spec §46, the ClickUp export, holidays) and the GATE B ones (contacts per client,
-employee priority visibility, the unarchive target status, the "Internal" label). The working
-week is **not** blocking — Sun-Thu is seeded per employee and editable in the schedule editor.
+1. Start a timer on a task, pause, resume, stop — check the arithmetic.
+2. Start one and close the tab, or drop the network. Come back: it should replay, not
+   double-count, and never end later than its last check-in.
+3. Leave one running with the laptop shut. `hq:timer-watchdog` should stop it **at the last
+   check-in** and flag it with a readable sentence.
+4. Add a manual entry. It will say "waiting for approval" and not count — that is correct.
+5. Your Timesheet: row, day and week totals against the 5h/day target.
+
+As Yaseen (`yaseen@goodtechies.test`, office): clock in and out on a **phone**; check Late
+against his 09:00 start and the 15-minute grace; look at your month.
+
+As Shahadat (Admin): the roster, the month grid, an edit with a reason; Work Schedule;
+**Workforce → Time** to approve Tapu's manual entry and watch his total move; Workload; and the
+Company dashboard's Present / Absent / "Tapu Xh Ym / 5h".
+
+**Then Phase 5 — Leave management + holidays.** It needs the GATE A answer about **holidays**:
+`hq:mark-absent` already has the seam for "skip approved leave and holidays" (4-12) and Phase 5
+fills it, so the list of company holidays is the one input it cannot invent.
+
+**Still open:** the rest of GATE A (real email addresses, VPS and backup bucket, Google
+Workspace, spec §46, the ClickUp export) and GATE B (contacts per client, employee priority
+visibility, the unarchive target status, the "Internal" label).
 
 **One thing only you can do:** the file bridge refuses to write `.env` (it holds the database and
 seed passwords), so line 1 of `D:\goodtechies-hq\.env` still reads `APP_NAME="GoodTechies HQ"`.

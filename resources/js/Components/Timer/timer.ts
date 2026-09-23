@@ -63,10 +63,35 @@ export interface TimeEntry {
     flag_reason: string | null;
     counts: boolean;
     awaits_approval: boolean;
+    /**
+     * Where this entry stands with an approver — `TimeEntry::approvalKey()`.
+     *
+     * `counted` covers both an auto entry the system signed off at stop and a manual one an
+     * Admin approved; the difference is who, not whether it counts. `rejected` means somebody
+     * looked and said no: the hours are still on the row and still shown, they simply are not
+     * in any total. Never derived here from `counts` and `awaits_approval` — the server's word
+     * is the word (decision 2-37).
+     */
+    approval: 'open' | 'pending' | 'counted' | 'rejected';
     approval_label: string | null;
+    /**
+     * Why this entry is waiting, as sentences: added by hand, edited after the fact, or flagged
+     * by the timer with the flag's own words. Empty for an entry that is not waiting.
+     */
+    waiting_because: { key: string; label: string; detail: string | null }[];
     reason: string | null;
     edited_at: string | null;
-    permissions: { can_update: boolean };
+    edited_by?: string | null;
+    /** A refusal is not a deletion: the row stays, and this is why it does not count. */
+    rejected_at: string | null;
+    rejected_by?: string | null;
+    rejection_reason: string | null;
+    approved_at: string | null;
+    /** Null with `approved_at` set means the system signed off an auto entry at stop. */
+    approved_by?: string | null;
+    /** Only on the Admin queue, where the rows are other people's. */
+    employee?: { id: number; name: string };
+    permissions: { can_update: boolean; can_decide?: boolean };
 }
 
 /** The whole answer to "what is my timer doing", from `BuildsTimerState`. */

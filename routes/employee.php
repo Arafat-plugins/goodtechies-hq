@@ -11,6 +11,7 @@ use App\Http\Controllers\Employee\TaskFileController;
 use App\Http\Controllers\Employee\TimeController;
 use App\Http\Controllers\Employee\TimeEntryController;
 use App\Http\Controllers\Employee\TimerController;
+use App\Http\Controllers\Employee\TimesheetController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('employee')
@@ -109,6 +110,27 @@ Route::prefix('employee')
             Route::post('/entries', [TimeEntryController::class, 'store'])->name('entries.store');
             Route::put('/entries/{timeEntry}', [TimeEntryController::class, 'update'])->name('entries.update');
         });
+
+        // The weekly timesheet (Part D §7): the same week the Admin reads, from the other end.
+        //
+        // It is OUTSIDE the `time` prefix on purpose. `/employee/time/{employee}` would put a
+        // second kind of parameter on a prefix whose every other route deliberately carries no
+        // id at all — "pause my timer" has exactly one referent — and `timesheet` would bind as
+        // one the first time somebody reordered the group.
+        //
+        // `{employee?}` is Part C's record rule made real on this surface: no parameter means
+        // yours, and a parameter is re-resolved through `Employee::attendanceVisibleTo()`, so
+        // Tapu asking for a colleague's week gets **404** and never learns whether that id
+        // existed. Nobody here holds `attendance.manage_others`, so in practice the only id
+        // that answers is their own — coded rather than argued.
+        //
+        // The 403 is the surface's and the policy's, exactly as on the timer routes above:
+        // `TimeEntryPolicy::viewAny` wants `timer.use` AND `tracking_mode = remote_timer`, so
+        // an office employee or a Manager who reaches this URL is refused rather than shown an
+        // empty grid.
+        Route::get('/timesheet/{employee?}', [TimesheetController::class, 'index'])
+            ->whereNumber('employee')
+            ->name('timesheet');
 
         // Tag management, here because this is the surface a MANAGER reaches — the plan gives
         // tag creation to Admin/Manager, and a route only on the Admin shell would have made

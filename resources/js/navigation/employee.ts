@@ -4,6 +4,7 @@ import {
     CalendarClock,
     CalendarDays,
     CalendarOff,
+    CalendarRange,
     ChartColumn,
     CircleAlert,
     FolderKanban,
@@ -35,6 +36,15 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
               // and it picks its layout from the viewer's surface. See routes/shared.php.
               { label: 'Attendance', href: '/attendance', icon: CalendarCheck };
 
+    // The weekly grid, and only for somebody whose work the timer measures: a timesheet is a
+    // view over `time_entries`, so an office employee's could only ever be empty. This is the
+    // same navigation-not-authorisation decision the row above is — `/employee/timesheet` is
+    // gated by `TimeEntryPolicy::viewAny` on the server either way.
+    const timesheet: NavItem[] =
+        trackingMode === 'remote_timer'
+            ? [{ label: 'Timesheet', href: '/employee/timesheet', icon: CalendarRange }]
+            : [];
+
     return [
         {
             label: 'Menu',
@@ -58,6 +68,7 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
                 { label: 'Messages', icon: MessagesSquare, phase: 6 },
                 { label: 'Notifications', icon: Bell, phase: 2 },
                 tracking,
+                ...timesheet,
                 { label: 'Leave', icon: CalendarOff, phase: 5 },
                 { label: 'My Reports', icon: ChartColumn, phase: 10 },
                 { label: 'Profile', href: '/profile', icon: UserRound },

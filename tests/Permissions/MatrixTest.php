@@ -432,6 +432,45 @@ function permissionMatrix(): array
         ['GET', 'admin/schedules', $admin],
         ['PUT', 'admin/schedules/{employee}', $adminAction],
 
+        // Admin surface — Workforce → Time (Phase 4): the approval queue, and hours today and
+        // this week. Decision 4-16's answer.
+        //
+        // Every cell but the Admin's is 403, from two gates that agree: `surface:admin` stops
+        // the other shells before anything is resolved, and `TimeEntryPolicy::review` /
+        // `::approve` sit behind it, so widening the surface one day would not quietly hand
+        // somebody the power to sign off other people's hours. Tapu's 403 is the one worth
+        // reading twice — the entry these rows point at is HIS, and he still may not rule on
+        // it, which is the self-approval rule the policy states and
+        // tests/Feature/Admin/TimeApprovalTest.php asserts directly.
+        //
+        // The 404 half — an entry id that does not exist, or one outside the requester's scope
+        // — is asserted in that same file, because every role that could show it here is
+        // refused by the surface first.
+        ['GET', 'admin/time', $admin],
+        // These two run in order against ONE entry, and that is deliberate rather than
+        // incidental: the Admin's approve lands (302), and the Admin's reject then arrives
+        // body-less and stops at the Form Request's missing `reason` — also 302, and proof both
+        // that it got past every gate and that a refusal cannot be made without a sentence.
+        ['POST', 'admin/time/entries/{timeEntry}/approve', $adminAction],
+        ['POST', 'admin/time/entries/{timeEntry}/reject', $adminAction],
+
+        // Admin surface — Workforce → Timesheet and Workload (Phase 4).
+        //
+        // Both are reads and both are 403 for everybody but the Admin, and for two different
+        // reasons that happen to agree: `surface:admin` stops the other roles before anything
+        // is looked up, and the Timesheet carries `can:attendance.manage_others` behind that,
+        // so widening the surface one day would not quietly open somebody's hours.
+        //
+        // The Timesheet row points at Tapu's employee record, which is the whole point of the
+        // parameter: the Admin reads somebody else's week. The 404 half — an id outside the
+        // requester's scope, and an employee asking for a colleague's — is asserted directly
+        // in tests/Feature/Workforce/TimesheetTest.php, because every role that could show it
+        // here is refused by the surface first.
+        ['GET', 'admin/timesheet/{employee?}', $admin],
+        // No parameter at all: the agency's own counts, so there is no record to be absent and
+        // no 404 to have. An employee the viewer may not see is missing from the list.
+        ['GET', 'admin/workload', $admin],
+
         // Admin surface — one file. The history GET has no Form Request in front of it, so it
         // reads the visibility rule out loud: an Admin sees the chain of a file on any task,
         // and everybody else is stopped by the surface before the question arises. It consumes
@@ -540,6 +579,17 @@ function permissionMatrix(): array
         // Tapu's own entry. Every field is required, so his cell is the validation redirect and
         // the other cells are the gate.
         ['PUT', 'employee/time/entries/{timeEntry}', $timerAction],
+
+        // Employee surface — the weekly timesheet (Phase 4). The same cell shape as the ten
+        // timer rows above, and for the same reason: `TimeEntryPolicy::viewAny` wants
+        // `timer.use` AND `tracking_mode = remote_timer`, so only Tapu has a week here and
+        // every office role is refused about WHO THEY ARE — a 403, not an empty grid.
+        //
+        // The parameter is Tapu's own employee record, so this row is "he reads his own week".
+        // The other half of Part C's rule, a colleague's week answering 404 rather than 403,
+        // cannot be shown here — every role that would ask is stopped by the policy first — so
+        // it is asserted directly in tests/Feature/Workforce/TimesheetTest.php.
+        ['GET', 'employee/timesheet/{employee?}', $timer],
 
         // Employee surface — tag management, which is here because this is where a MANAGER is.
         // The GET and the DELETE carry no body, so both read the policy out loud: the Manager

@@ -200,8 +200,12 @@ it('shows the roster with Yaseen present and Tapu remote, never absent', functio
                 ->and($yaseen['clock_in'])->toBe('08:58')
                 ->and($tapu['status'])->toBe('remote')
                 ->and($tapu['status_label'])->toBe('Remote')
-                // The seam: null, not 0 — nothing in this half of the phase measured it.
-                ->and($tapu['tracked_minutes'])->toBeNull()
+                // The seam is wired (slice 3). It is 0 rather than null now, and the
+                // difference is the whole point: null meant "nobody measured this", 0 means
+                // "measured, and nothing was tracked" — which is the true answer for a Monday
+                // nobody ran a timer on. The roster prints "Remote — 0m tracked".
+                // `tests/Feature/Admin/TrackedMinutesTest.php` asserts the non-zero case.
+                ->and($tapu['tracked_minutes'])->toBe(0)
                 // The Accountant is tracked by neither clock nor timer, so the roster has
                 // nothing to say about them and does not invent a row.
                 ->and($rows->firstWhere('employee.name', 'Accountant'))->toBeNull();

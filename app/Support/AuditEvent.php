@@ -35,6 +35,17 @@ enum AuditEvent: string
     // here with the old and the new values. The two watchdog rules write their own entries and
     // are not edits: they carry their reason on the row itself.
     case TimeEntryEdited = 'time_entry.edited';
+    // Signing off hours, and refusing them. Both are recorded for the same reason the edit above
+    // is: an approval is what turns a claimed afternoon into hours Phase 9 pays, and a refusal
+    // is what takes somebody's afternoon back out of their total. Each carries old and new
+    // values, so a reader can see what the row said before the decision and what it says after
+    // — including the refusal's reason, which is the whole of the case for it.
+    //
+    // The SYSTEM's approval of an auto entry at stop is deliberately NOT here. That is the timer
+    // recording its own measurement, not a person ruling on a claim, and a row per stop would
+    // be one log entry per session recording that the software worked.
+    case TimeEntryApproved = 'time_entry.approved';
+    case TimeEntryRejected = 'time_entry.rejected';
     // Part C §4 does not name attendance, and that is an omission rather than a decision: the
     // list it gives is "events that must be recorded", and an attendance record is what Phase 9
     // pays somebody from. An Admin correcting one is the same shape of act as changing a salary

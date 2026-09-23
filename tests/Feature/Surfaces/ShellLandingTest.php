@@ -84,7 +84,10 @@ it('gives each dashboard exactly its documented props', function (string $email,
     // `attention` and `taskStatuses` arrive with decision 2-50: the "Needs your attention"
     // panel's task feed and the "Tasks by status" donut, both server-counted and both scoped
     // by `Task::visibleTo()`.
-    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats', 'attention', 'taskStatuses']],
+    // `attendance` is Phase 4's: Present today, Absent, and the remote time per remote
+    // employee (AC2). Absent entirely — not zeroed — for anyone without
+    // `attendance.manage_others`, which is why it is asserted on the Admin row only.
+    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats', 'attention', 'taskStatuses', 'attendance']],
     'accountant' => ['accountant@goodtechies.test', '/accountant/dashboard', ['greetingName', 'today']],
     // `timer` and `attendance` are Phase 4's hero: exactly one of them is non-null, and which
     // one the server decides from `tracking_mode`. Both keys are always present, because a

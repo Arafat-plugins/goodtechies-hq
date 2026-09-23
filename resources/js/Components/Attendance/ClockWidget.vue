@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { router } from '@inertiajs/vue3';
 import { LogIn, LogOut } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { AttendanceDay } from '@/Components/Attendance/attendance';
 import { attendanceRoutes, formatMinutes, noStatusLabel } from '@/Components/Attendance/attendance';
 import StatusBadge from '@/Components/StatusBadge.vue';
@@ -29,6 +29,15 @@ import { Card } from '@/Components/ui/card';
  * (decisions 2-28, 2-31). When it is false this renders nothing at all rather than a disabled
  * button: a control somebody can never use is hidden, not greyed out (DESIGN.md §5.12).
  *
+ * ## While the day is open, it counts
+ *
+ * `worked_minutes` is null until a clock-out — it is a difference and one end has not
+ * happened yet — so until then this counts up from `clock_in_at` in the browser. It ticks once
+ * a minute, not once a second: this figure is read in minutes, a seconds hand on it would be a
+ * moving thing nobody asked to watch, and the ticking number is `aria-hidden` with the spoken
+ * text carried beside it. The moment a clock-out lands, the server's `worked_minutes` takes
+ * over and the browser stops guessing.
+ *
  * ## It announces nothing itself
  *
  * Both writes come back `back()->with(...)` carrying the server's own sentence — *"Clocked in
@@ -52,6 +61,51 @@ const isOpen = computed(() => props.today.clock_in !== null && props.today.clock
 const isFinished = computed(() => props.today.clock_out !== null);
 
 const statusLabel = computed(() => props.today.status_label ?? noStatusLabel(props.today));
+
+/**
+ * Now, re-read once a minute while the day is open. A plain `Date.now()` in a computed would
+ * be read once and never again, because nothing reactive changes when time passes.
+ */
+const now = ref(Date.now());
+let tick: ReturnType<typeof setInterval> | null = null;
+
+onMounted(() => {
+    tick = setInterval(() => {
+        now.value = Date.now();
+    }, 60_000);
+});
+
+onBeforeUnmount(() => {
+    if (tick !== null) {
+        clearInterval(tick);
+        tick = null;
+    }
+});
+
+/**
+ * How long they have been here — the server's figure once the day is closed, and the live
+ * count from `clock_in_at` while it is open. Never both, and never a guess once a real
+ * number exists.
+ */
+const elapsedMinutes = computed<number | null>(() => {
+    if (props.today.worked_minutes !== null) {
+        return props.today.worked_minutes;
+    }
+
+    if (!isOpen.value || props.today.clock_in_at === null) {
+        return null;
+    }
+
+    const started = new Date(props.today.clock_in_at).getTime();
+
+    if (Number.isNaN(started)) {
+        return null;
+    }
+
+    // A clock skew between the browser and the server could make this negative for a moment
+    // after a clock-in; zero is the honest floor, not a minus sign.
+    return Math.max(0, Math.floor((now.value - started) / 60_000));
+});
 
 function clock(url: string): void {
     if (busy.value) {
@@ -89,8 +143,13 @@ function clock(url: string): void {
                 </span>
             </div>
 
-            <p v-if="today.worked_minutes !== null" class="text-xs tabular-nums text-muted-foreground">
-                {{ formatMinutes(today.worked_minutes) }} worked
+            <p v-if="elapsedMinutes !== null" class="text-xs tabular-nums text-muted-foreground">
+                <span aria-hidden="true">
+                    {{ formatMinutes(elapsedMinutes) }} {{ isFinished ? 'worked' : 'so far today' }}
+                </span>
+                <span class="sr-only">
+                    {{ isFinished ? 'Worked' : 'Clocked in for' }} {{ formatMinutes(elapsedMinutes) }}
+                </span>
             </p>
         </div>
 

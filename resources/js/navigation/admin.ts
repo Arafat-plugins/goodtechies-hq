@@ -7,6 +7,7 @@ import {
     CalendarClock,
     CalendarDays,
     CalendarOff,
+    CalendarRange,
     ChartPie,
     CircleAlert,
     ClipboardCheck,
@@ -86,8 +87,15 @@ export const adminNav: NavGroup[] = [
             // page belongs to My Attendance's claim or to no row at all, which is correct:
             // it is one employee's page reached from here, not a second Workforce screen.
             { label: 'Attendance', href: '/admin/attendance', icon: CalendarCheck },
-            { label: 'Time', icon: Timer, phase: 4 },
-            { label: 'Workload', icon: Weight, phase: 4 },
+            // The approval queue and hours today/week. `activePrefix` is `/admin/time`, which
+            // also claims the entry decisions' POST paths — they never render a page, but a
+            // redirect back after one must not unlight the row it was made from.
+            { label: 'Time', href: '/admin/time', activePrefix: '/admin/time', icon: Timer },
+            // One employee's week, tasks × days. No id in the href: the controller opens on the
+            // first timer-tracked name and the page's own picker moves between people, so the
+            // nav row does not have to know who exists.
+            { label: 'Timesheet', href: '/admin/timesheet', icon: CalendarRange },
+            { label: 'Workload', href: '/admin/workload', icon: Weight },
             { label: 'Leave', icon: CalendarOff, phase: 5 },
             { label: 'Work Schedule', href: '/admin/schedules', icon: AlarmClock },
         ],

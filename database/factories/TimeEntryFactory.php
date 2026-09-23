@@ -114,6 +114,23 @@ class TimeEntryFactory extends Factory
         return $this->state(fn (array $attributes): array => ['approved_at' => Carbon::now()]);
     }
 
+    /**
+     * Somebody looked and said no. The hours stay on the row; they do not count.
+     *
+     * `approved_at` is cleared alongside, because the CHECK constraint
+     * `time_entries_not_approved_and_rejected` forbids both at once — a row that both counted
+     * and had been turned down is the contradiction decision 4-7 exists to prevent.
+     */
+    public function rejected(string $reason = 'These hours are already on another entry.'): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'approved_at' => null,
+            'approved_by' => null,
+            'rejected_at' => Carbon::now(),
+            'rejection_reason' => $reason,
+        ]);
+    }
+
     public function flagged(string $reason = 'Stopped automatically: the timer stopped checking in.'): static
     {
         return $this->state(fn (array $attributes): array => [

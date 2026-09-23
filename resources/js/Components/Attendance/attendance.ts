@@ -48,6 +48,9 @@ export interface AttendanceDay {
     /** `HH:mm`, or null. */
     clock_in: string | null;
     clock_out: string | null;
+    /** The same moment as `clock_in`, whole — what a live "in for 4h 26m" counts up from. */
+    clock_in_at: string | null;
+    /** Null until a clock-out: it is a difference and one end has not happened yet. */
     worked_minutes: number | null;
     /**
      * Minutes the remote timer recorded. **Null means not known**, not zero: the timer is the

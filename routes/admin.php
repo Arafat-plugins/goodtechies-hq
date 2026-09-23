@@ -18,6 +18,9 @@ use App\Http\Controllers\Admin\TagController;
 use App\Http\Controllers\Admin\TaskController;
 use App\Http\Controllers\Admin\TaskDiscussionController;
 use App\Http\Controllers\Admin\TaskFileController;
+use App\Http\Controllers\Admin\TimeController;
+use App\Http\Controllers\Admin\TimesheetController;
+use App\Http\Controllers\Admin\WorkloadController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('admin')
@@ -197,6 +200,59 @@ Route::prefix('admin')
             Route::get('/', [ScheduleController::class, 'index'])->name('index');
             Route::put('/{employee}', [ScheduleController::class, 'update'])->name('update');
         });
+
+        // Admin → Workforce → Time (Part D §7): hours today and this week by employee, project
+        // and task, and the approval queue that decision 4-16 says would otherwise bite at
+        // GATE C — `manual_time_requires_approval` is seeded ON, so until this existed a manual
+        // entry was written unapproved and counted toward nothing, with nowhere to sign it off.
+        //
+        // The two decisions hang off the ENTRY, not off an employee or a day: approving is an
+        // act on one row, and the row already knows whose it is. `{timeEntry}` is re-resolved
+        // through `TimeEntry::visibleTo()` in the controller before `TimeEntryPolicy::approve`
+        // is asked, so an entry outside the requester's scope is ABSENT (404) rather than
+        // refused — the same ordering every parameterised admin route here keeps.
+        //
+        // Approve carries no body; Reject requires a reason, because a refusal takes hours off
+        // somebody's record and they will read the sentence. Both write `audit_logs` with old
+        // and new values (`TimerService`), and neither deletes anything.
+        //
+        // Gated by `TimeEntryPolicy` rather than by middleware, because `::review` and
+        // `::approve` are two different questions — the page and the verb — and `surface:admin`
+        // has already refused every other shell before either is asked.
+        Route::prefix('time')->name('time.')->group(function () {
+            Route::get('/', [TimeController::class, 'index'])->name('index');
+            Route::post('/entries/{timeEntry}/approve', [TimeController::class, 'approve'])->name('approve');
+            Route::post('/entries/{timeEntry}/reject', [TimeController::class, 'reject'])->name('reject');
+        });
+
+        // Admin → Workforce → Timesheet (Part D §7): one employee's week, tasks × days.
+        //
+        // `{employee?}` rather than two routes, and the SAME optional-parameter shape the
+        // shared attendance page uses — because it is the same question in the same words:
+        // no parameter means "open on somebody sensible", a parameter is re-resolved through
+        // `Employee::attendanceVisibleTo()`, and an id outside that scope is ABSENT (404) and
+        // never a refusal that would confirm the record exists.
+        //
+        // `can:attendance.manage_others` is the gate, not a role: reading somebody else's
+        // hours is the same privilege as reading their attendance, which is what
+        // `TimeEntry::visibleTo()` already says in SQL. Everybody else is stopped by
+        // `surface:admin` before it is asked.
+        //
+        // It is a READ, and the only one: adding time by hand belongs to the person whose week
+        // it is and lives on the Employee surface. There is no write here to forget to audit.
+        Route::get('/timesheet/{employee?}', [TimesheetController::class, 'index'])
+            ->whereNumber('employee')
+            ->middleware('can:attendance.manage_others')
+            ->name('timesheet');
+
+        // Admin → Workforce → Workload (Part D §7): counts only — task count per employee,
+        // overdue per employee, estimated vs tracked, projects with most pending work.
+        //
+        // No parameter, because there is no record to name: it is the agency's own numbers,
+        // scoped by `Task::visibleTo()` and `Employee::attendanceVisibleTo()`. Somebody the
+        // viewer may not see is missing from the list rather than refused, which is the
+        // absence rule expressed as a scope and needs no 404.
+        Route::get('/workload', [WorkloadController::class, 'index'])->name('workload');
 
         // One file, whatever owns it. Downloading is not here: it is `GET /files/{file}` in
         // routes/shared.php, signed, because the answer does not depend on the surface.

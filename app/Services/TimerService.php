@@ -10,6 +10,8 @@ use App\Models\User;
 use App\Support\AuditEvent;
 use App\Support\TimeEntryType;
 use App\Support\TimerFlag;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -540,11 +542,16 @@ class TimerService
     ): TimeEntry {
         $this->assertSaneRange($startedAt, $endedAt);
 
+        // `rejection_reason` is in here because an edit CLEARS one (see the write below). A
+        // refusal that disappeared from the row with nothing in the log saying it ever existed
+        // would be a hole in exactly the trail this event was added for.
         $old = [
             'started_at' => $entry->started_at?->toIso8601String(),
             'ended_at' => $entry->ended_at?->toIso8601String(),
             'duration_seconds' => $entry->duration_seconds,
             'reason' => $entry->reason,
+            'rejection_reason' => $entry->rejection_reason,
+            'counts' => $entry->counts(),
         ];
 
         $requiresApproval = (bool) $this->settings->get('manual_time_requires_approval');
@@ -564,6 +571,14 @@ class TimerService
             'edited_by' => $actor->getKey(),
             'approved_at' => $requiresApproval ? null : ($entry->approved_at ?? Carbon::now()),
             'approved_by' => $requiresApproval ? null : $entry->approved_by,
+            // A correction answers a refusal. The figure somebody turned down is not the figure
+            // on the row any more, so the refusal — and its sentence, which was about the old
+            // hours — goes with it and the entry re-enters the queue on its new numbers. Leaving
+            // it would also break `time_entries_not_approved_and_rejected` whenever the setting
+            // is off and the edit approves the row on the spot.
+            'rejected_at' => null,
+            'rejected_by' => null,
+            'rejection_reason' => null,
         ])->save();
 
         $new = [
@@ -571,6 +586,8 @@ class TimerService
             'ended_at' => $entry->ended_at?->toIso8601String(),
             'duration_seconds' => $entry->duration_seconds,
             'reason' => $entry->reason,
+            'rejection_reason' => $entry->rejection_reason,
+            'counts' => $entry->counts(),
         ];
 
         $this->audit->record(AuditEvent::TimeEntryEdited, $entry, $old, $new, $actor);
@@ -578,6 +595,265 @@ class TimerService
         $this->refreshTaskTotal((int) $entry->task_id);
 
         return $entry;
+    }
+
+    /* ============================================ Admin → Workforce → Time: the read model */
+
+    /**
+     * The approval queue: every finished entry nobody has ruled on, oldest first.
+     *
+     * **Oldest first, and that is the whole of the ordering.** A queue sorted by size, by who
+     * recorded it or by how far over a target it puts somebody would be a ranking of people,
+     * which Part H forbids outright — and it would also be the wrong queue: the entry that has
+     * been waiting longest is the one holding up somebody's record. Date, then id, so two
+     * entries from the same day come back in the order they were made and the list does not
+     * reshuffle between page loads.
+     *
+     * Scoped by `TimeEntry::visibleTo()`, like every other count on the screen. Bounded, because
+     * a queue is something you clear: if it ever runs past the limit the screen says so rather
+     * than paginating a backlog nobody is reading to the end of.
+     *
+     * @return Collection<int, TimeEntry>
+     */
+    public function awaitingDecision(User $viewer, int $limit): Collection
+    {
+        return TimeEntry::query()
+            ->visibleTo($viewer)
+            ->awaitingDecision()
+            ->with(['employee.user:id,name', 'task:id,title,project_id', 'project:id,name', 'editor:id,name'])
+            ->orderBy('work_date')
+            ->orderBy('id')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * How many are waiting in total — the number the bounded list above may have cut off.
+     */
+    public function awaitingDecisionCount(User $viewer): int
+    {
+        return TimeEntry::query()->visibleTo($viewer)->awaitingDecision()->count();
+    }
+
+    /**
+     * Entries the watchdog flagged that **already count**, newest first.
+     *
+     * A separate list from the queue, and deliberately so. An entry the timer stopped at a lost
+     * heartbeat is approved by the system at stop (see `stop()`), so it is in somebody's total
+     * already and is not waiting for anybody — but it carries a sentence saying the hours may
+     * not be right, and a screen that only showed what was *waiting* would never surface it. It
+     * gets a Reject and no Approve: there is nothing to approve, only hours to take back out.
+     *
+     * @return Collection<int, TimeEntry>
+     */
+    public function flaggedAndCounted(User $viewer, Carbon $from, Carbon $to, int $limit): Collection
+    {
+        return TimeEntry::query()
+            ->visibleTo($viewer)
+            ->flagged()
+            ->counted()
+            ->whereBetween('work_date', [$from->toDateString(), $to->toDateString()])
+            ->with(['employee.user:id,name', 'task:id,title,project_id', 'project:id,name'])
+            ->orderByDesc('work_date')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * What has been ruled on lately, newest decision first.
+     *
+     * The screen needs it for one reason: **a refusal is not a deletion**, and the person who
+     * made it has to be able to see what they turned down and why, rather than watching a row
+     * disappear and having to take it on trust. It is also how an Admin undoes a mistake — a
+     * refused entry can be approved from here.
+     *
+     * @return Collection<int, TimeEntry>
+     */
+    public function recentlyDecided(User $viewer, int $limit): Collection
+    {
+        return TimeEntry::query()
+            ->visibleTo($viewer)
+            ->stopped()
+            ->where(fn (Builder $query) => $query->whereNotNull('rejected_at')->orWhereNotNull('approved_by'))
+            ->with(['employee.user:id,name', 'task:id,title,project_id', 'project:id,name', 'approver:id,name', 'rejector:id,name'])
+            ->orderByRaw('greatest(coalesce(approved_at, \'-infinity\'::timestamptz), coalesce(rejected_at, \'-infinity\'::timestamptz)) desc')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Counted and pending seconds per group, for one day and for the week that contains it.
+     *
+     * The plan's "hours today/week by employee/project/task" is this method called three times
+     * with a different column. Two queries per call and not one, so that **"counts" and "is
+     * waiting" stay `scopeCounted()` and `scopeAwaitingDecision()`** rather than being respelled
+     * as raw SQL here — decision 2-37 applied to the predicate this whole phase turns on. Only
+     * the today/week split is conditional arithmetic, and a date is not a predicate anybody else
+     * states.
+     *
+     * Pending is reported beside the total and never inside it (decision 4-7): hours nobody has
+     * signed off are not hours, but an employee whose afternoon is simply missing from the
+     * Admin's screen has no way to find out that it is waiting.
+     *
+     * @return array<int, array{today: int, week: int, pending_week: int}>
+     */
+    public function secondsByGroup(User $viewer, string $column, Carbon $from, Carbon $to, Carbon $today): array
+    {
+        $base = fn (): Builder => TimeEntry::query()
+            ->visibleTo($viewer)
+            ->whereBetween('work_date', [$from->toDateString(), $to->toDateString()])
+            ->whereNotNull($column)
+            ->groupBy($column);
+
+        $totals = [];
+
+        $counted = $base()
+            ->stopped()
+            ->counted()
+            ->selectRaw(
+                "{$column} as group_id, "
+                .'sum(case when work_date = ? then duration_seconds else 0 end) as today_seconds, '
+                .'sum(duration_seconds) as week_seconds',
+                [$today->toDateString()],
+            )
+            ->get();
+
+        foreach ($counted as $row) {
+            $totals[(int) $row->group_id] = [
+                'today' => (int) $row->today_seconds,
+                'week' => (int) $row->week_seconds,
+                'pending_week' => 0,
+            ];
+        }
+
+        $pending = $base()
+            ->awaitingDecision()
+            ->selectRaw("{$column} as group_id, sum(duration_seconds) as pending_seconds")
+            ->get();
+
+        foreach ($pending as $row) {
+            $id = (int) $row->group_id;
+
+            $totals[$id] ??= ['today' => 0, 'week' => 0, 'pending_week' => 0];
+            $totals[$id]['pending_week'] = (int) $row->pending_seconds;
+        }
+
+        return $totals;
+    }
+
+    /* ================================================================== the approval queue */
+
+    /**
+     * Sign an entry off: from here on these hours count.
+     *
+     * One write and one predicate. `approved_at` is set, and every total in the application
+     * starts including this entry the moment it is — decision 4-7's whole point is that nothing
+     * else had to be told. `tasks.tracked_seconds` is recomputed for the same reason (4-8): it
+     * is a cache of exactly this query.
+     *
+     * A previously REFUSED entry is approved by clearing the refusal, not by layering an
+     * approval on top of it. The CHECK constraint `time_entries_not_approved_and_rejected`
+     * makes that mandatory rather than a habit — an entry that both counted and had been turned
+     * down is the contradiction the constraint exists to prevent. The refusal's reason goes into
+     * the audit row's old value on the way out, so changing one's mind is not how a refusal gets
+     * erased from the record.
+     *
+     * Idempotent on an entry that already counts: no second write and no second audit row, so a
+     * double-clicked button does not produce two sign-offs of the same afternoon.
+     */
+    public function approve(TimeEntry $entry, User $actor, ?Carbon $at = null): TimeEntry
+    {
+        $this->assertDecidable($entry);
+
+        if ($entry->counts()) {
+            return $entry;
+        }
+
+        $old = $entry->approvalAuditValues();
+
+        $entry->forceFill([
+            'approved_at' => $this->notInTheFuture($at ?? Carbon::now()),
+            'approved_by' => $actor->getKey(),
+            // Clearing all three together: a row that kept the refusal's author and sentence
+            // beside a live approval would read as refused on any screen that asked the wrong
+            // one of the two questions.
+            'rejected_at' => null,
+            'rejected_by' => null,
+            'rejection_reason' => null,
+        ])->save();
+
+        $this->audit->record(
+            AuditEvent::TimeEntryApproved,
+            $entry,
+            $old,
+            $entry->approvalAuditValues(),
+            $actor,
+        );
+
+        $this->refreshTaskTotal((int) $entry->task_id);
+
+        return $entry;
+    }
+
+    /**
+     * Refuse an entry, with the reason kept on the row.
+     *
+     * **Rejecting is not deleting.** The row stays exactly where it was, the hours stay on it,
+     * and the employee's Time page still shows the afternoon they recorded — with the sentence
+     * saying why it does not count. The alternative, deleting it, loses the only evidence of
+     * what was claimed, and an afternoon that simply vanishes is one the employee reports as
+     * lost time a fortnight later with nothing to point at.
+     *
+     * It does not count because `approved_at` is null, which is what it was before anybody
+     * ruled. No total learned a new word; `rejected_at` only records that the waiting is over
+     * (decision 4-7).
+     *
+     * An entry that already COUNTS can be refused — that is an Admin taking hours back out of a
+     * total, which is precisely what they open this screen to be able to do — and
+     * `refreshTaskTotal()` therefore runs on this path too.
+     */
+    public function reject(TimeEntry $entry, string $reason, User $actor, ?Carbon $at = null): TimeEntry
+    {
+        $this->assertDecidable($entry);
+
+        $old = $entry->approvalAuditValues();
+
+        $entry->forceFill([
+            'approved_at' => null,
+            'approved_by' => null,
+            'rejected_at' => $this->notInTheFuture($at ?? Carbon::now()),
+            'rejected_by' => $actor->getKey(),
+            'rejection_reason' => $reason,
+        ])->save();
+
+        $this->audit->record(
+            AuditEvent::TimeEntryRejected,
+            $entry,
+            $old,
+            $entry->approvalAuditValues(),
+            $actor,
+        );
+
+        $this->refreshTaskTotal((int) $entry->task_id);
+
+        return $entry;
+    }
+
+    /**
+     * A decision can only be made about a finished entry.
+     *
+     * A session still going has no agreed length to approve — the number would keep moving after
+     * the sign-off — which is the same reason `TimeEntryPolicy::update()` refuses to correct an
+     * open entry. The policy refuses it first; this is the rule stated where every caller passes,
+     * so a command or a seeder cannot route around it.
+     */
+    private function assertDecidable(TimeEntry $entry): void
+    {
+        if (! $entry->isStopped()) {
+            throw TimerStateException::stillRunning();
+        }
     }
 
     /* ==================================================================== the watchdog */

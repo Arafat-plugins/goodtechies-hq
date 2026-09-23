@@ -234,9 +234,11 @@ it('derives Remote for a remote-timer employee and never asks them to clock in',
         ->and($working->status)->toBe(AttendanceStatus::Remote)
         // The day off is the day off, remote or not: the schedule is everybody's calendar.
         ->and($off->status)->toBe(AttendanceStatus::OffDay)
-        // The seam. Null is "not measured here", not zero — see AttendanceService::trackedMinutes().
-        ->and($working->trackedMinutes)->toBeNull()
-        ->and($working->toArray()['tracked_minutes'])->toBeNull();
+        // The seam, now wired: 0 is a MEASUREMENT of a day with no timer entries on it, where
+        // null used to mean "this half of the phase has not looked". Null is still what a
+        // non-timer employee's day carries, which `dayFor()` decides and not this method.
+        ->and($working->trackedMinutes)->toBe(0)
+        ->and($working->toArray()['tracked_minutes'])->toBe(0);
 
     expect(attendance()->clocks($tapu))->toBeFalse()
         ->and(fn () => attendance()->clockIn($tapu, Carbon::parse(ATTENDANCE_MONDAY)->setTime(9, 0)))
@@ -283,3 +285,44 @@ it('builds a whole month in order, with one row per day and no query per cell', 
         ->and($days->firstWhere(fn ($day) => $day->date->toDateString() === ATTENDANCE_FRIDAY)->status)
         ->toBe(AttendanceStatus::OffDay);
 });
+
+it('carries the whole clock-in moment, so a screen can count up from it', function () {
+    // `worked_minutes` is null until a clock-out — it is a difference and one end has not
+    // happened yet. Without the full timestamp the widget could say when somebody arrived and
+    // not how long they have been here, which is the thing they opened it to find out.
+    $employee = officeEmployee();
+
+    $this->travelTo(Carbon::parse(ATTENDANCE_MONDAY.' 09:04:00'));
+    $record = attendance()->clockIn($employee);
+
+    // `dayFor()` takes the record rather than looking one up — its callers batch-load a month
+    // or a roster in one query, and a lookup per day would be a query per cell.
+    $open = attendance()->dayFor($employee, Carbon::parse(ATTENDANCE_MONDAY), $record)->toArray();
+
+    expect($open['clock_in'])->toBe('09:04')
+        ->and($open['clock_in_at'])->not->toBeNull()
+        ->and(Carbon::parse($open['clock_in_at'])->format('H:i'))->toBe('09:04')
+        // Still open, so the server has no figure and the browser counts.
+        ->and($open['worked_minutes'])->toBeNull();
+
+    $this->travelTo(Carbon::parse(ATTENDANCE_MONDAY.' 17:34:00'));
+    $closed = attendance()->clockOut($employee->fresh());
+
+    $closed = attendance()->dayFor($employee, Carbon::parse(ATTENDANCE_MONDAY), $closed)->toArray();
+
+    // Closed: the server's number takes over and the browser stops guessing.
+    expect($closed['worked_minutes'])->toBe(8 * 60 + 30)
+        ->and($closed['clock_in_at'])->not->toBeNull();
+
+    $this->travelBack();
+})->group('phase4');
+
+it('leaves clock_in_at null on a day nobody clocked', function () {
+    $day = attendance()
+        ->dayFor(officeEmployee(), Carbon::parse(ATTENDANCE_MONDAY))
+        ->toArray();
+
+    expect($day['clock_in'])->toBeNull()
+        ->and($day['clock_in_at'])->toBeNull()
+        ->and($day['worked_minutes'])->toBeNull();
+})->group('phase4');

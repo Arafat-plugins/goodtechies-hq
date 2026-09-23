@@ -41,6 +41,16 @@ const props = defineProps<{
     tasks: TimeableTask[];
     /** `settings.manual_time_requires_approval`, from the server. */
     requiresApproval: boolean;
+    /**
+     * The day the entry should land on, `YYYY-MM-DD` — the timesheet cell that was clicked.
+     *
+     * Only a DEFAULT: the two fields stay editable, and the server still decides what it will
+     * accept. A cell on an earlier day opens 09:00–10:00 on that day, because "an hour ending
+     * now" on last Tuesday would be an hour that has not happened yet.
+     */
+    defaultDate?: string | null;
+    /** The task the clicked cell's row is, so a cell in a row does not re-ask which task. */
+    defaultTaskId?: number | null;
 }>();
 
 const emit = defineEmits<{ 'update:open': [boolean]; saved: [] }>();
@@ -71,6 +81,13 @@ function toLocalInput(iso: string | null | undefined): string {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/** A Date as `YYYY-MM-DD` in the browser's own timezone, to compare with a `work_date`. */
+function localDate(date: Date): string {
+    const pad = (value: number): string => String(value).padStart(2, '0');
+
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 watch(
     () => props.open,
     (open) => {
@@ -89,11 +106,26 @@ watch(
             return;
         }
 
-        taskId.value = props.tasks[0]?.id ?? null;
+        // A caller that knows which row was clicked says so; anything else falls back to the
+        // first option, which is what the Time page has always opened on.
+        const suggested = props.defaultTaskId ?? null;
+        taskId.value = props.tasks.some((task) => task.id === suggested) ? suggested : (props.tasks[0]?.id ?? null);
+
+        const now = new Date();
+
+        if (props.defaultDate && props.defaultDate !== localDate(now)) {
+            // An earlier day, opened from a timesheet cell: 09:00–10:00 on that day. Not "an
+            // hour ending now" transplanted onto it, which would put the finish time in a
+            // future that day never had.
+            startedAt.value = `${props.defaultDate}T09:00`;
+            endedAt.value = `${props.defaultDate}T10:00`;
+            reason.value = '';
+
+            return;
+        }
 
         // Default to an hour ending now, which is the shape of the case this exists for:
         // "I worked on this and forgot to start the timer."
-        const now = new Date();
         const hourAgo = new Date(now.getTime() - 3600_000);
 
         startedAt.value = toLocalInput(hourAgo.toISOString());

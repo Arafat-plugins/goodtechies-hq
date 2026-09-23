@@ -74,6 +74,12 @@ final readonly class AttendanceDay
 
             'clock_in' => $this->record?->clock_in?->format('H:i'),
             'clock_out' => $this->record?->clock_out?->format('H:i'),
+            // The full moment, not just the wall clock above, so a screen can count up from
+            // it while the day is still open. `worked_minutes` is null until a clock-out, by
+            // definition — it is a difference, and one end of it has not happened yet — and
+            // without this the widget could say when somebody arrived but not how long they
+            // have been here, which is the one thing they are looking at it to find out.
+            'clock_in_at' => $this->record?->clock_in?->toIso8601String(),
             'worked_minutes' => $this->workedMinutes,
             'tracked_minutes' => $this->trackedMinutes,
 

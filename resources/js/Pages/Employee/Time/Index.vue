@@ -194,9 +194,15 @@ function correct(entry: TimeEntry): void {
                                     :label="entry.entry_type_label"
                                     size="sm"
                                 />
+                                <!--
+                                    Waiting and turned down are different answers and wear
+                                    different words AND different tones — but the word is what
+                                    carries it, because four of eight status fills fail 3:1
+                                    without their label (DESIGN.md §5.6).
+                                -->
                                 <StatusBadge
                                     v-if="entry.approval_label"
-                                    status="waiting"
+                                    :status="entry.approval === 'rejected' ? 'cancelled' : 'waiting'"
                                     :label="entry.approval_label"
                                     size="sm"
                                 />
@@ -217,6 +223,21 @@ function correct(entry: TimeEntry): void {
                                 class="rounded-md bg-status-review-bg px-3 py-2 text-xs text-status-review-fg"
                             >
                                 {{ entry.flag_reason }}
+                            </p>
+
+                            <!--
+                                A refusal is not a deletion. The entry stays on this page with
+                                its hours on it, and this is the sentence the Admin wrote saying
+                                why they do not count — because an afternoon that simply vanished
+                                is one somebody reports as lost a fortnight later with nothing to
+                                point at.
+                            -->
+                            <p
+                                v-if="entry.approval === 'rejected'"
+                                class="rounded-md bg-status-cancelled-bg px-3 py-2 text-xs text-status-cancelled-fg"
+                            >
+                                <span class="font-medium">Turned down:</span>
+                                {{ entry.rejection_reason ?? 'No reason was given.' }}
                             </p>
 
                             <p v-if="entry.reason" class="text-xs text-muted-foreground">

@@ -20,6 +20,17 @@ import {
 import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
+import AdminLayout from '@/Layouts/AdminLayout.vue';
+
+/**
+ * Shipped without a layout: this page and the schedule editor were the only two under
+ * `Pages/**` with no `defineOptions({ layout })`, so both rendered bare — no sidebar, no top
+ * bar, no skip link. Every accessibility measurement on them passed, because a page with no
+ * shell has nothing to overflow and almost nothing to tab through. Found by reading, not by
+ * measuring.
+ */
+defineOptions({ layout: AdminLayout });
+
 
 /**
  * Admin → Workforce → Work Schedule: the per-employee schedule editor.
