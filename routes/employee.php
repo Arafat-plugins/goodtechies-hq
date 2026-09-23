@@ -8,6 +8,9 @@ use App\Http\Controllers\Employee\TagController;
 use App\Http\Controllers\Employee\TaskController;
 use App\Http\Controllers\Employee\TaskDiscussionController;
 use App\Http\Controllers\Employee\TaskFileController;
+use App\Http\Controllers\Employee\TimeController;
+use App\Http\Controllers\Employee\TimeEntryController;
+use App\Http\Controllers\Employee\TimerController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('employee')
@@ -70,6 +73,41 @@ Route::prefix('employee')
             // answers 404, exactly as its attachments and the task itself do.
             Route::get('/{task}/discussion', [TaskDiscussionController::class, 'index'])->name('discussion.index');
             Route::post('/{task}/discussion', [TaskDiscussionController::class, 'store'])->name('discussion.store');
+        });
+
+        // The remote timer and this person's own time (master prompt Part D §7, Phase 4).
+        //
+        // Every one of these is gated by `TimeEntryPolicy::track` — the `timer.use` key AND
+        // `tracking_mode = remote_timer` — so an office employee or a Manager reaching this
+        // surface gets a 403 from all of them, and sees no timer UI to click in the first
+        // place. That is Part C §1's rule for a route a role may not use; it is not about a
+        // record, so it is not a 404.
+        //
+        // Pause, resume and stop carry no id on purpose: an employee has at most one open
+        // entry — a partial unique index guarantees it — so "pause my timer" has exactly one
+        // referent and the server resolves it. An id here would be a second way to name the
+        // same thing, and a chance to name somebody else's.
+        Route::prefix('time')->name('time.')->group(function () {
+            Route::get('/', [TimeController::class, 'index'])->name('index');
+
+            // JSON, polled by the persistent bar beside whatever page the person is on. An
+            // Inertia visit would re-render that page every minute.
+            Route::get('/current', [TimeController::class, 'current'])->name('current');
+
+            Route::post('/start', [TimerController::class, 'start'])->name('start');
+            Route::post('/pause', [TimerController::class, 'pause'])->name('pause');
+            Route::post('/resume', [TimerController::class, 'resume'])->name('resume');
+            Route::post('/stop', [TimerController::class, 'stop'])->name('stop');
+
+            // The two background calls, both JSON for the same reason `current` is. `heartbeat`
+            // is the once-a-minute ping AND the channel the browser learns on that the watchdog
+            // stopped its session; `replay` is the buffered batch after an offline spell.
+            Route::post('/heartbeat', [TimerController::class, 'heartbeat'])->name('heartbeat');
+            Route::post('/replay', [TimerController::class, 'replay'])->name('replay');
+
+            // Added by hand, and corrected by hand. Both need a reason; an edit is audit-logged.
+            Route::post('/entries', [TimeEntryController::class, 'store'])->name('entries.store');
+            Route::put('/entries/{timeEntry}', [TimeEntryController::class, 'update'])->name('entries.update');
         });
 
         // Tag management, here because this is the surface a MANAGER reaches — the plan gives

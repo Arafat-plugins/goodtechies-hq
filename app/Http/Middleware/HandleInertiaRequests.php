@@ -2,8 +2,10 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\TimeEntry;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -54,7 +56,7 @@ class HandleInertiaRequests extends Middleware
     /**
      * The only user fields every page receives. Secrets and hashes never go here.
      *
-     * @return array{id: int, name: string, email: string, role: string|null, surface: string|null, trackingMode: string|null, twoFactorEnabled: bool}|null
+     * @return array{id: int, name: string, email: string, role: string|null, surface: string|null, trackingMode: string|null, twoFactorEnabled: bool, canTrackTime: bool}|null
      */
     private function sharedUser(Request $request): ?array
     {
@@ -72,6 +74,15 @@ class HandleInertiaRequests extends Middleware
             'surface' => $user->surface()?->value,
             'trackingMode' => $user->employee?->tracking_mode?->value,
             'twoFactorEnabled' => $user->hasConfirmedTwoFactor(),
+            // Phase 4. The timer bar and the task-detail timer are mounted on THIS and on
+            // nothing else — it is `TimeEntryPolicy::track`, the same gate the endpoints run,
+            // resolved on the server per user.
+            //
+            // It is here rather than derived in Vue from `role` or `trackingMode` for the
+            // reason decisions 2-28 and 2-31 were both recorded: a policy restated in a
+            // component is a second copy of the rule, and the copy is the one nobody updates.
+            // An office employee therefore gets no timer UI at all, not a disabled one.
+            'canTrackTime' => Gate::forUser($user)->allows('track', TimeEntry::class),
         ];
     }
 }

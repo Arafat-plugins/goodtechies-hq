@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Shared\AttendanceController;
 use App\Http\Controllers\Shared\FileDownloadController;
 use App\Http\Controllers\Shared\NotificationController;
 use App\Http\Controllers\Shared\ProfileController;
@@ -50,6 +51,27 @@ Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
             Route::post('/read-all', [NotificationController::class, 'readAll'])->name('read-all');
             Route::post('/{notification}/read', [NotificationController::class, 'read'])->name('read');
         });
+
+    // Somebody's attendance, and the clock (master prompt Part D §8, Phase 4). Shared rather
+    // than one set per surface for the reason the notification routes above are: BOTH Admins
+    // clock in and out — Part D §8 says so in its title — and so does Yaseen, so three copies
+    // of these three routes would be three places for "whose day is this" to be answered
+    // differently. The page picks its layout from `auth.user.surface`, as Profile does.
+    //
+    // `{employee?}` is what makes Part C's rule real on this surface: no parameter means
+    // yours, and a parameter is resolved through `Employee::attendanceVisibleTo()` — so an
+    // employee asking for a colleague's month gets **404**, not 403, and a Manager reaches
+    // their own team's. The Admin's roster and the edit are NOT here; correcting somebody's
+    // pay record is an Admin act on the Admin surface.
+    //
+    // Declared before the clock routes would be needed only if they collided; they cannot,
+    // because `{employee}` is bound to a model and `clock-in` is not a numeric id. It is
+    // still written this way round so the page reads as the subject and the clock as the verb.
+    Route::get('/attendance/{employee?}', [AttendanceController::class, 'show'])
+        ->whereNumber('employee')
+        ->name('attendance.show');
+    Route::post('/attendance/clock-in', [AttendanceController::class, 'clockIn'])->name('attendance.clock-in');
+    Route::post('/attendance/clock-out', [AttendanceController::class, 'clockOut'])->name('attendance.clock-out');
 
     // Downloading a file. Shared rather than one route per surface, because who may fetch a
     // file is a fact about the requester and the record it hangs off, not about the shell they

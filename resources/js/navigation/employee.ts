@@ -25,8 +25,15 @@ import type { NavGroup, NavItem } from './types';
 export function employeeNav(trackingMode: TrackingMode | null | undefined): NavGroup[] {
     const tracking: NavItem =
         trackingMode === 'remote_timer'
-            ? { label: 'Time', icon: Timer, phase: 4 }
-            : { label: 'Attendance', icon: CalendarCheck, phase: 4 };
+            ? // Shipped in Phase 4. Which of the two words this person's sidebar uses is a
+              // navigation decision, never an authorisation one: `/employee/time` is gated by
+              // `TimeEntryPolicy::track` on the server, so somebody who reached the URL another
+              // way is refused whatever this file says.
+              { label: 'Time', href: '/employee/time', icon: Timer }
+            : // The SHARED route, not an employee-surface one: clocking in is a fact about the
+              // person and not about the shell, so Yaseen and both Admins reach the same page
+              // and it picks its layout from the viewer's surface. See routes/shared.php.
+              { label: 'Attendance', href: '/attendance', icon: CalendarCheck };
 
     return [
         {

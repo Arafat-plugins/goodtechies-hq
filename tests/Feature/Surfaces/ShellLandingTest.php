@@ -86,7 +86,10 @@ it('gives each dashboard exactly its documented props', function (string $email,
     // by `Task::visibleTo()`.
     'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats', 'attention', 'taskStatuses']],
     'accountant' => ['accountant@goodtechies.test', '/accountant/dashboard', ['greetingName', 'today']],
-    'employee' => ['yaseen@goodtechies.test', '/employee/dashboard', ['greetingName', 'today', 'trackingMode', 'taskStats']],
+    // `timer` and `attendance` are Phase 4's hero: exactly one of them is non-null, and which
+    // one the server decides from `tracking_mode`. Both keys are always present, because a
+    // payload whose shape depended on the reader is a payload no screen can be typed against.
+    'employee' => ['yaseen@goodtechies.test', '/employee/dashboard', ['greetingName', 'today', 'trackingMode', 'taskStats', 'timer', 'attendance']],
 ])->group('phase0');
 
 it('passes the greeting name and tracking mode to the employee dashboard', function (string $email, string $name, string $mode) {
@@ -114,6 +117,11 @@ it('shares only the documented auth.user keys', function () {
                 'surface' => 'admin',
                 'trackingMode' => 'office_attendance',
                 'twoFactorEnabled' => true,
+                // Phase 4. `TimeEntryPolicy::track` resolved on the server, and false here
+                // because an Admin tracks by attendance — which is what makes the Admin shell
+                // carry no timer at all rather than a disabled one. The screens read this and
+                // never a role; see HandleInertiaRequests.
+                'canTrackTime' => false,
             ])
             ->where('greetingName', 'Shahadat')
             ->where('app.name', config('app.name'))
@@ -121,7 +129,7 @@ it('shares only the documented auth.user keys', function () {
             ->where('flash.error', null));
 
     expect(array_keys($response->inertiaProps('auth.user')))
-        ->toBe(['id', 'name', 'email', 'role', 'surface', 'trackingMode', 'twoFactorEnabled']);
+        ->toBe(['id', 'name', 'email', 'role', 'surface', 'trackingMode', 'twoFactorEnabled', 'canTrackTime']);
     assertNoSecretsInPayload($response);
 })->group('phase0');
 
@@ -168,3 +176,29 @@ it('keeps secrets out of the profile page', function (string $email) {
     'admin' => ['shahadat@goodtechies.test'],
     'employee' => ['yaseen@goodtechies.test'],
 ])->group('phase0');
+
+it('gives the employee dashboard the hero their tracking mode calls for', function () {
+    // Yaseen clocks in at a door; Tapu runs a timer. The card each of them gets is decided
+    // here, from `tracking_mode`, and never in Vue from a role — the mistake this repo has
+    // caught twice (decisions 2-28 and 2-31). Until Phase 4 both of them saw the same disabled
+    // button reading "Arrives in Phase 4".
+    loginThroughForms($this, 'yaseen@goodtechies.test');
+    $office = $this->get('/employee/dashboard')->assertOk()->inertiaProps();
+
+    expect($office['timer'])->toBeNull()
+        ->and($office['attendance'])->not->toBeNull()
+        ->and(array_keys($office['attendance']))->toEqualCanonicalizing(['today', 'can_clock'])
+        ->and($office['attendance']['can_clock'])->toBeTrue();
+
+    $this->post('/logout');
+
+    loginThroughForms($this, 'tapu@goodtechies.test');
+    $remote = $this->get('/employee/dashboard')->assertOk()->inertiaProps();
+
+    expect($remote['attendance'])->toBeNull()
+        ->and($remote['timer'])->not->toBeNull()
+        ->and(array_keys($remote['timer']))
+        ->toEqualCanonicalizing(['counted_seconds', 'pending_seconds', 'target_seconds'])
+        // Five hours a day, from HIS schedule — not a constant, and not the office eight.
+        ->and($remote['timer']['target_seconds'])->toBe(5 * 3600);
+})->group('phase4');

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AttendanceController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\ClientFileController;
 use App\Http\Controllers\Admin\DashboardController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\Admin\ProjectFinanceController;
 use App\Http\Controllers\Admin\ProjectMemberController;
 use App\Http\Controllers\Admin\ProjectStatusController;
 use App\Http\Controllers\Admin\RecurringTaskController;
+use App\Http\Controllers\Admin\ScheduleController;
 use App\Http\Controllers\Admin\SettingsController;
 use App\Http\Controllers\Admin\TagController;
 use App\Http\Controllers\Admin\TaskController;
@@ -166,6 +168,34 @@ Route::prefix('admin')
             Route::post('/', [TagController::class, 'store'])->name('store');
             Route::put('/{tag}', [TagController::class, 'update'])->name('update');
             Route::delete('/{tag}', [TagController::class, 'destroy'])->name('destroy');
+        });
+
+        // Admin → Workforce → Attendance (master prompt Part D §8, Phase 4). Two routes, and
+        // the month grid of one employee is deliberately not among them: it is the shared
+        // `GET /attendance/{employee}`, because an Admin reading somebody's month and that
+        // person reading their own are the same screen and the same query, differing only in
+        // whether the edit control is drawn. The roster links each row to it.
+        //
+        // The correction is an UPSERT keyed by (employee, date) — the row's own identity,
+        // which is `unique(employee_id, date)`. Marking a Half Day on a day nobody clocked
+        // into and correcting one the 23:55 sweep wrote are the same act to the Admin making
+        // it, and two endpoints would have been two places for the audit row to be forgotten.
+        // The reason is required by the Form Request; the audit row carries old and new.
+        Route::prefix('attendance')->name('attendance.')->group(function () {
+            Route::get('/', [AttendanceController::class, 'index'])->name('index');
+            Route::put('/{employee}/{date}', [AttendanceController::class, 'update'])
+                ->where('date', '\d{4}-\d{2}-\d{2}')
+                ->name('update');
+        });
+
+        // Admin → Workforce → Work Schedule. The working week is per employee and editable,
+        // which is what stops it being a constant anywhere else: every rule that reads it —
+        // Off Day, Late, and which days `hq:mark-absent` marks — is stated once in
+        // AttendanceService and follows whatever is saved here. Audit-logged, because moving a
+        // start time rewrites what a fortnight of past arrivals will be called.
+        Route::prefix('schedules')->name('schedules.')->group(function () {
+            Route::get('/', [ScheduleController::class, 'index'])->name('index');
+            Route::put('/{employee}', [ScheduleController::class, 'update'])->name('update');
         });
 
         // One file, whatever owns it. Downloading is not here: it is `GET /files/{file}` in

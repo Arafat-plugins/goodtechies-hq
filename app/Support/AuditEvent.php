@@ -28,6 +28,27 @@ enum AuditEvent: string
     // task that was wearing it, and those tasks belong to other people — so it goes here, with
     // the ids of the tasks it touched, where nobody can tidy it away afterwards.
     case TagDeleted = 'tag.deleted';
+    // Editing a time entry is the one write on `time_entries` that changes what a day already
+    // said. Starting, pausing and stopping a timer record what happened and are the employee's
+    // own timeline; changing the hours afterwards — by the employee with a reason, or by an
+    // Admin on somebody else's day — is a correction to a record payroll will read, so it goes
+    // here with the old and the new values. The two watchdog rules write their own entries and
+    // are not edits: they carry their reason on the row itself.
+    case TimeEntryEdited = 'time_entry.edited';
+    // Part C §4 does not name attendance, and that is an omission rather than a decision: the
+    // list it gives is "events that must be recorded", and an attendance record is what Phase 9
+    // pays somebody from. An Admin correcting one is the same shape of act as changing a salary
+    // — it moves money, quietly, on somebody else's record — so it is recorded with the reason
+    // the Form Request required and with old and new values.
+    //
+    // A clock-in is NOT here. It is the employee's own record of their own day, made by the
+    // person it is about, and the row itself is the evidence; an audit entry per clock-in would
+    // be one row per person per day recording that the system worked.
+    case AttendanceEdited = 'attendance.edited';
+    // Changing somebody's schedule changes what counts as Late and which days the absent sweep
+    // will mark for every day after it — so it is a configuration change about one person, and
+    // it goes in the log for the same reason `configuration.changed` does.
+    case ScheduleChanged = 'schedule.changed';
     case LeaveApproved = 'leave.approved';
     case LeaveRejected = 'leave.rejected';
     case SalaryChanged = 'salary.changed';

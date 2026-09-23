@@ -10,6 +10,7 @@ use App\Models\Tag;
 use App\Models\Task;
 use App\Models\TaskChecklistItem;
 use App\Models\TaskLink;
+use App\Models\TimeEntry;
 use App\Models\User;
 use App\Support\RoleName;
 use Illuminate\Routing\Route as RoutingRoute;
@@ -100,7 +101,57 @@ function matrixParameters(): array
         // RecurringTaskSeeder's three, which is also what keeps the generate row honest: it
         // runs the real engine against a real rule.
         '{recurringTask}' => matrixRecurringTaskId(MATRIX_RECURRING_TEMPLATE),
+
+        // A finished entry of Tapu's, on the same task the task rows point at. Not seeded —
+        // `migrate:fresh --seed` starts no timers — so it is made here, the way the file and
+        // notification rows make theirs.
+        '{timeEntry}' => matrixTimeEntryId(),
+
+        // Attendance (Phase 4). Tapu's EMPLOYEE record — not his user — so the
+        // `attendance/{employee?}` row states Part C's rule in one line: he reads his own
+        // month, an Admin reads everybody's, and for everyone else it is ABSENT rather than
+        // refused. `{employee?}` is spelled separately because the shared route's parameter is
+        // optional and the uri carries the question mark; strtr matches the longer key first,
+        // so the two cannot collide.
+        '{employee?}' => matrixEmployeeId('tapu@goodtechies.test'),
+        '{employee}' => matrixEmployeeId('tapu@goodtechies.test'),
+
+        // The day the attendance edit row aims at. In the past, because a day that has not
+        // happened cannot be recorded — though the row is body-less and stops at the Form
+        // Request long before that check.
+        '{date}' => '2026-09-14',
     ];
+}
+
+/**
+ * An employee record by the user's email, for the attendance rows.
+ */
+function matrixEmployeeId(string $email): string
+{
+    return (string) User::where('email', $email)->firstOrFail()->employee->id;
+}
+
+/**
+ * A stopped time entry belonging to Tapu, created once and remembered.
+ *
+ * It is Tapu's because Tapu is the only person in the company with a timer, which is exactly
+ * what the rows pointing at it are about. The existence check keeps the memo honest across a
+ * rolled-back database, as matrixFileId's does.
+ */
+function matrixTimeEntryId(): string
+{
+    static $id = null;
+
+    if ($id === null || ! TimeEntry::whereKey($id)->exists()) {
+        $tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
+
+        $id = (string) TimeEntry::factory()
+            ->forEmployee($tapu->employee)
+            ->onTask(Task::where('title', MATRIX_TASK)->firstOrFail())
+            ->create()->id;
+    }
+
+    return $id;
 }
 
 /** The retainer template the Recurring rows point at. */
@@ -220,6 +271,10 @@ function permissionMatrix(): array
     // surface middleware — so every cell after the one that is allowed sees 404 where it would
     // otherwise have seen 403. The surface guard on these routes is asserted directly instead,
     // in tests/Feature/Admin/TaskWriteEndpointsTest.php.
+    // Phase 4's timer: Tapu and nobody else. See the block of rows this pair labels.
+    $timer = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403];
+    $timerAction = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403];
+
     $consumed = ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404];
     $consumedByManager = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404];
 
@@ -359,6 +414,24 @@ function permissionMatrix(): array
         // other row's picker loses an option it was counting on.
         ['DELETE', 'admin/tags/{tag}', $consumed, ['{tag}' => 'tag:Maintenance']],
 
+        // Admin surface — Workforce → Attendance and Work Schedule (Phase 4).
+        //
+        // Every cell here is 403 and not 404, and that is the shape of the rule on this
+        // surface: reading the agency's morning and rewriting somebody's pay record are Admin
+        // acts, so everybody else is stopped by `surface:admin` before a record is looked up.
+        // The 404 that DOES exist — an employee outside the requester's scope, and an unknown
+        // id — is asserted directly in tests/Feature/Attendance/AttendanceEndpointsTest.php,
+        // and its *employee-facing* half is the `attendance/{employee?}` row below.
+        //
+        // The month grid of one employee is not here because it is not an Admin route: it is
+        // the shared `GET /attendance/{employee}`, one screen for the person and the Admin.
+        ['GET', 'admin/attendance', $admin],
+        // Body-less, so an Admin stops at the Form Request's missing `status` and `note` —
+        // which is proof it got past every gate, and proof the reason is required.
+        ['PUT', 'admin/attendance/{employee}/{date}', $adminAction],
+        ['GET', 'admin/schedules', $admin],
+        ['PUT', 'admin/schedules/{employee}', $adminAction],
+
         // Admin surface — one file. The history GET has no Form Request in front of it, so it
         // reads the visibility rule out loud: an Admin sees the chain of a file on any task,
         // and everybody else is stopped by the surface before the question arises. It consumes
@@ -428,6 +501,46 @@ function permissionMatrix(): array
         // Delete is ADMIN/MANAGER too, and a Manager can only reach it here. Its own task.
         ['DELETE', 'employee/tasks/{task}', $consumedByManager, ['{task}' => 'task:Refresh the agency case-study deck']],
 
+        // Employee surface — the remote timer and the Time page (Phase 4).
+        //
+        // One cell shape runs through all ten rows and it is the phase's whole privacy rule:
+        // **only a REMOTE_EMPLOYEE may time, and every office role gets 403.** Not a 404, and
+        // not a disabled button — `TimeEntryPolicy::track` asks for the `timer.use` key AND
+        // `tracking_mode = remote_timer`, and a route a role may not use is Part C §1's 403.
+        //
+        //   ADMIN / ACCOUNTANT  403 — stopped by `surface:employee` before the policy is asked
+        //   MANAGER / EMPLOYEE  403 — on the surface, refused by the policy: no timer.use key,
+        //                             and office_attendance rather than remote_timer
+        //   REMOTE_EMPLOYEE     200 / 302 — Tapu, the one person in the company with a timer
+        //
+        // The refusal lands BEFORE validation on every row that has a Form Request, because
+        // `authorize()` runs first — see `TimerRequest`. Without that these rows would read 302
+        // for everybody on the surface and the 403 the plan asks for would be untested.
+        //
+        // The 404 half of the rule — another employee's entry — cannot be shown here, because
+        // the matrix's entry belongs to Tapu and every other role is refused before the lookup.
+        // It is asserted directly in tests/Feature/Employee/TimeEndpointsTest.php.
+        ['GET', 'employee/time', $timer],
+        // JSON, and 200 for Tapu whether or not a timer is going: "nothing is running" is an
+        // answer, not an error.
+        ['GET', 'employee/time/current', $timer],
+        // `task_id` and `client_uuid` are required, so Tapu stops at the validation redirect —
+        // which is proof it got past the gate that refused everybody else.
+        ['POST', 'employee/time/start', $timerAction],
+        // No body at all on these three: Tapu reaches the controller, has no timer going, and
+        // is told so in a flash. A 302 either way, and the row is about the gate.
+        ['POST', 'employee/time/pause', $timerAction],
+        ['POST', 'employee/time/resume', $timerAction],
+        ['POST', 'employee/time/stop', $timerAction],
+        // A ping for a session that is not there is not an error — it is how the browser finds
+        // out the watchdog stopped it. 200 with `running: null`.
+        ['POST', 'employee/time/heartbeat', $timer],
+        ['POST', 'employee/time/replay', $timerAction],
+        ['POST', 'employee/time/entries', $timerAction],
+        // Tapu's own entry. Every field is required, so his cell is the validation redirect and
+        // the other cells are the gate.
+        ['PUT', 'employee/time/entries/{timeEntry}', $timerAction],
+
         // Employee surface — tag management, which is here because this is where a MANAGER is.
         // The GET and the DELETE carry no body, so both read the policy out loud: the Manager
         // manages tags and an employee does not, as a 403 about their role rather than a 404
@@ -468,6 +581,30 @@ function permissionMatrix(): array
         ['DELETE', 'profile/two-factor', $everyone(302)],
         ['POST', 'profile/two-factor/recovery-codes', $everyone(302)],
         ['DELETE', 'profile/sessions/{session}', $everyone(404)],
+
+        // Shared — somebody's attendance, and the clock (Phase 4). No surface, like the bell
+        // and the file download below: clocking in is a fact about the person and not about
+        // the shell, and Part D §8's office employees include BOTH Admins.
+        //
+        // This row is the one that states Part C's record rule out loud. It points at TAPU's
+        // employee record, so:
+        //   ADMIN             200 — an Admin sees everybody's month
+        //   MANAGER           404 — the factory Manager has nobody on their team, so Tapu's
+        //                           attendance is ABSENT to them, not refused
+        //   EMPLOYEE          404 — Yaseen asking for a colleague's month is told it is not
+        //                           there, and never learns whether the id exists
+        //   REMOTE_EMPLOYEE   200 — it is Tapu's own
+        //   ACCOUNTANT        404 — holds `attendance.view_own` and nothing else, so their own
+        //                           month is all there is, and this is not it
+        ['GET', 'attendance/{employee?}', ['guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 404]],
+        // The clock. 403 for the two roles the office clock does not track — Tapu, whose work
+        // is the timer's, and the Accountant, whose work is tracked by neither — and that is
+        // `AttendanceRecordPolicy::clock` reading `tracking_mode`, never a role name. Everybody
+        // else gets a 302: a refusal from the day's own state (already clocked in, not a
+        // working day) is a flash on the page they came from, not a status code, because the
+        // person holding the phone at the door needs a sentence.
+        ['POST', 'attendance/clock-in', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
+        ['POST', 'attendance/clock-out', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
 
         // Shared — the bell and the Notification Center. No surface, like the file download
         // above: a person's own mail is a fact about the person, not about the shell they are

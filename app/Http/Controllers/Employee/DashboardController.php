@@ -3,8 +3,12 @@
 namespace App\Http\Controllers\Employee;
 
 use App\Http\Controllers\Controller;
+use App\Models\AttendanceRecord;
+use App\Models\Employee;
 use App\Models\Task;
+use App\Services\AttendanceService;
 use App\Services\TaskService;
+use App\Services\TimerService;
 use App\Support\TaskBucket;
 use App\Support\TrackingMode;
 use Illuminate\Http\Request;
@@ -32,6 +36,8 @@ class DashboardController extends Controller
 
     public function __construct(
         private readonly TaskService $tasks,
+        private readonly TimerService $timers,
+        private readonly AttendanceService $attendance,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -43,7 +49,61 @@ class DashboardController extends Controller
             'today' => now(config('app.timezone'))->toDateString(),
             'trackingMode' => ($user->employee?->tracking_mode ?? TrackingMode::None)->value,
             'taskStats' => $this->taskStats($request),
+            // The hero, whichever kind of day this person has. One of the two is null, and
+            // which one is decided by `tracking_mode` on the server — never in Vue from a
+            // role, and never by the card itself.
+            'timer' => $this->timerHero($user?->employee),
+            'attendance' => $this->attendanceHero($user?->employee),
         ]);
+    }
+
+    /**
+     * Today's tracked time, for the employee who tracks it.
+     *
+     * The figures are `TimerService`'s, which is the only thing that knows what counts:
+     * `countedSecondsOn()` asks `approved_at is not null` and nothing else, and
+     * `pendingSecondsOn()` is the rest — hours that are recorded but not yet counted, because
+     * `manual_time_requires_approval` is on. Printing only the counted half would quietly lose
+     * them, which is the one way this card could mislead.
+     *
+     * The controls are not here. The timer bar is on every page of this shell and owns
+     * start/pause/stop; a second set of buttons would be a second thing to keep in step.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function timerHero(?Employee $employee): ?array
+    {
+        if ($employee === null || $employee->tracking_mode !== TrackingMode::RemoteTimer) {
+            return null;
+        }
+
+        return [
+            'counted_seconds' => $this->timers->countedSecondsOn($employee),
+            'pending_seconds' => $this->timers->pendingSecondsOn($employee),
+            'target_seconds' => $this->timers->targetSecondsFor($employee),
+        ];
+    }
+
+    /**
+     * Today's attendance, for the employee who clocks.
+     *
+     * `dayFor()` is the single derivation of what a day is — Present, Late, Off day, or no
+     * record yet — so this card cannot disagree with the roster the Admin is looking at.
+     * `canClock` is the policy's answer, resolved here, because a button drawn from a role in
+     * Vue is the mistake this repo has already caught twice.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function attendanceHero(?Employee $employee): ?array
+    {
+        if ($employee === null || ! $this->attendance->clocks($employee)) {
+            return null;
+        }
+
+        return [
+            'today' => $this->attendance->dayFor($employee, Carbon::today(config('app.timezone')))->toArray(),
+            'can_clock' => Gate::allows('clock', [AttendanceRecord::class, $employee]),
+        ];
     }
 
     /**

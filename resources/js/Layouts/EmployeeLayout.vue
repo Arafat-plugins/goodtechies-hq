@@ -5,6 +5,7 @@ import FlashMessage from '@/Components/FlashMessage.vue';
 import AppSidebar from '@/Components/Shell/AppSidebar.vue';
 import AppTopBar from '@/Components/Shell/AppTopBar.vue';
 import SkipToContent from '@/Components/Shell/SkipToContent.vue';
+import TimerBar from '@/Components/Timer/TimerBar.vue';
 import Toaster from '@/Components/Toaster.vue';
 import { cn } from '@/lib/utils';
 import { useSidebarRail } from '@/lib/sidebarState';
@@ -41,6 +42,18 @@ const rail = useSidebarRail();
                 <FlashMessage class="mb-4" />
                 <slot />
             </main>
+
+            <!--
+                Phase 4's persistent timer bar. It renders only for somebody the SERVER says may
+                time (`auth.user.canTrackTime` = `TimeEntryPolicy::track`), so an office
+                employee's shell has no timer in it at all — not a disabled one.
+
+                It is the last child of this column and `sticky bottom-0`, so it occupies layout
+                space rather than lying on top of the page: it follows the viewport while there
+                is page left to scroll, settles at the end, and covers nothing at any width. Last
+                in the DOM also puts it last in the tab order, after the page's own controls.
+            -->
+            <TimerBar />
         </div>
         <Toaster />
     </div>

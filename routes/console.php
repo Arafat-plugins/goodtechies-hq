@@ -31,6 +31,21 @@ Schedule::command('hq:flag-overdue')->dailyAt('08:00')->withoutOverlapping();
 // notifications table here too, so the two running a minute apart cannot double up.
 Schedule::command('hq:notify-due-tomorrow')->dailyAt('08:00')->withoutOverlapping();
 
+// Remote timer (master prompt Part D §7, Phase 4): the two safeguards. Every minute, because
+// `heartbeat_timeout_minutes` defaults to five and a sweep that ran hourly would let a closed
+// laptop log the rest of the hour — the very thing rule 1 exists to prevent. The sweep touches
+// only OPEN entries, of which there is at most one per remote employee, so "every minute" is a
+// handful of rows and a partial index.
+Schedule::command('hq:timer-watchdog')->everyMinute()->withoutOverlapping();
+
+// Office attendance (master prompt Part D §8, Phase 4): every office employee whose schedule
+// says today was a working day and who has no record gets one, status Absent. 23:55 app time,
+// because the day has to be over — somebody who clocks in at 23:40 is not absent, and the
+// unique index on (employee_id, date) is what makes that true rather than the five minutes.
+// What it SKIPS lives in AttendanceService::markAbsent(), including the seam Phase 5 fills
+// with approved leave and holidays; this line is only when.
+Schedule::command('hq:mark-absent')->dailyAt('23:55')->withoutOverlapping();
+
 // Backups (master prompt Part B §4): encrypted daily database dump, weekly restore test.
 Schedule::command('backup:clean')->dailyAt('01:30')->withoutOverlapping();
 Schedule::command('backup:run --only-db')->dailyAt('02:00')->withoutOverlapping();

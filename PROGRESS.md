@@ -414,6 +414,46 @@ cards counting six overdue.
 
 **Tests: 1184 passing, 6280 assertions.**
 
+## Phase 4 — Time & attendance (2 of 3 slices done)
+
+**Goal (from the plan):** Tapu's day is timer-tracked per task with the 5h target visible to him
+and Admin; Yaseen and both Admins clock in/out; workload view exists. **Phase 4 ends at GATE C.**
+
+| Slice | What it is | State |
+| --- | --- | --- |
+| 1 | Remote timer, `time_entries`, watchdog, offline replay, the Time page | done |
+| 2 | Office attendance, schedules, roster, month grid, `hq:mark-absent` | done |
+| 3 | Timesheet grid, Workload, the admin Time approval queue, dashboard cards | **not started** |
+
+**The timer.** Start / pause / resume / stop with the arithmetic tested to the second, one open
+timer per employee guaranteed by a partial unique index rather than an `if` (4-2), and the
+session cached in `localStorage` so a closed laptop loses nothing. On reconnect the batch
+replays: only the heartbeats count as evidence, nothing increments, and the same batch landing
+five times leaves the row unchanged (4-3). `hq:timer-watchdog` runs every minute — a silent
+timer is stopped **at its last heartbeat** and flagged with a sentence a person can read; an
+overlong one is paused and flagged once, not once a minute (4-4, 4-6). Office roles get no timer
+UI and 403 from every endpoint, and the spec's grep test for "score"/"productivity" ships.
+
+**Attendance.** Clock in and out from the dashboard, with Present / Late / Half day derived from
+*that employee's* schedule and `late_grace_minutes` — never a constant. `hq:mark-absent` at 23:55
+marks a missed working day and leaves a Friday alone, and Phase 5's leave and holiday skip plugs
+into one method that returns false today (4-12). Tapu can never be marked Absent, structurally
+(4-11). The Admin roster, the per-employee month grid and the schedule editor are built; an edit
+needs a reason and is audit-logged with old and new values.
+
+**The employee dashboard now shows the right hero** — the timer's figures for Tapu, the clock for
+Yaseen — decided on the server from `tracking_mode`. Until this slice both saw the same disabled
+button reading "Arrives in Phase 4".
+
+**Tests: 1296 passing, 6853 assertions.**
+
+### The one thing that will bite at GATE C
+
+`manual_time_requires_approval` defaults **on**, and **there is nowhere to approve** (4-16). A
+manual or edited time entry is written unapproved and does not count toward a total. Those hours
+are reported separately and in words, so nothing is invisible — but slice 3's Admin → Workforce →
+Time queue is what makes them countable, and GATE C should not be called before it exists.
+
 ## Deployment log
 
 | Date | Commit | Server | Result |
@@ -424,20 +464,25 @@ cards counting six overdue.
 
 ## Next step
 
-**Phase 4 — remote timer, Timesheet, office attendance, schedules, workload.** It is the next
-phase in the table and it ends at **GATE C**, the next place this build stops for you.
+**Phase 4 slice 3**, and then **GATE C**.
 
-Its shape, from the plan (line 660): a timer widget for the remote employee on task detail and
-as a persistent bar, with offline handling and manual entries; the weekly Timesheet grid; clock
-in/out for the office roles; the admin's attendance roster, month grid and per-employee schedule
-editor; the Time approval queue for flagged and manual entries; and the Workload view. Plus the
-dashboard cards those produce — including AC2's "Tapu 4h 18m / 5h" on the Company dashboard.
+1. **Admin → Workforce → Time** — the approval queue for flagged and manual entries. This is the
+   blocker above: until it exists, approved-only totals quietly under-count.
+2. **Timesheet** (Part D §7) — the weekly grid, tasks x days with row, day and week totals and
+   the target line, "Add time" per cell. Employee sees their own week; Admin sees anyone's.
+3. **Workload** — task count per employee, overdue per employee, estimated vs tracked, projects
+   with the most pending work. Counts only; no score, no ranking, no comparison between people.
+4. **The `daily_work_summary` SQL view**, which the plan names as the one place the two sources
+   (timer and attendance) are read together.
+5. **Admin Company dashboard cards** — Present today, Absent, and AC2's "Tapu 4h 18m / 5h". The
+   roster already leaves a clean seam for the tracked half (`trackedMinutes()` returns null, and
+   every surface prints the clause only when it is not).
+6. Then **GATE C**: you test the timer and attendance on desktop **and** phone.
 
-**Still open, and blocking nothing yet:** the GATE A questions (Sun–Thu week, real email
-addresses, VPS and backup bucket, Google Workspace, spec §46, the ClickUp export, holidays) and
-the GATE B ones (contacts per client, employee priority visibility, the unarchive target status,
-the "Internal" label). **Phase 4 will need the GATE A answer about the working week and holidays**
-— attendance cannot be scored without knowing which days are working days.
+**Still open:** the GATE A questions (real email addresses, VPS and backup bucket, Google
+Workspace, spec §46, the ClickUp export, holidays) and the GATE B ones (contacts per client,
+employee priority visibility, the unarchive target status, the "Internal" label). The working
+week is **not** blocking — Sun-Thu is seeded per employee and editable in the schedule editor.
 
 **One thing only you can do:** the file bridge refuses to write `.env` (it holds the database and
 seed passwords), so line 1 of `D:\goodtechies-hq\.env` still reads `APP_NAME="GoodTechies HQ"`.

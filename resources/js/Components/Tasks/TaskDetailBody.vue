@@ -7,7 +7,6 @@ import type { FileRoutes } from '@/Components/Files/files';
 import { fileRoutes } from '@/Components/Files/files';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
-import { formatTracked } from '@/Components/Tasks/TaskList.vue';
 import TaskActivityPanel from '@/Components/Tasks/TaskActivityPanel.vue';
 import TaskChecklistPanel from '@/Components/Tasks/TaskChecklistPanel.vue';
 import TaskDependenciesPanel from '@/Components/Tasks/TaskDependenciesPanel.vue';
@@ -17,6 +16,7 @@ import TaskLinksPanel from '@/Components/Tasks/TaskLinksPanel.vue';
 import TaskPeoplePanel from '@/Components/Tasks/TaskPeoplePanel.vue';
 import TaskStatusActions from '@/Components/Tasks/TaskStatusActions.vue';
 import TaskSummaryPanel from '@/Components/Tasks/TaskSummaryPanel.vue';
+import TimerWidget from '@/Components/Timer/TimerWidget.vue';
 import type {
     TaskActivityEntry,
     TaskDetail,
@@ -274,23 +274,18 @@ function confirmDelete(): void {
                     @settled="emit('settled')"
                 />
 
-                <Card class="min-w-0 gap-4">
-                    <CardHeader>
-                        <CardTitle class="text-sm font-medium">Time</CardTitle>
-                        <CardDescription>Tracked against this task so far.</CardDescription>
-                    </CardHeader>
-                    <CardContent class="flex min-w-0 flex-col gap-1">
-                        <p v-if="task.tracked_seconds > 0" class="text-2xl font-semibold tabular-nums">
-                            {{ formatTracked(task.tracked_seconds) }}
-                        </p>
-                        <p v-else class="text-sm text-muted-foreground">
-                            Nothing tracked yet — the timer arrives in Phase 3.
-                        </p>
-                        <p class="text-xs text-muted-foreground">
-                            Created {{ formatDateTime(task.created_at) }}
-                        </p>
-                    </CardContent>
-                </Card>
+<!--
+                    Phase 4. The timer, for whoever the SERVER says may run one — the widget
+                    asks `auth.user.canTrackTime` (`TimeEntryPolicy::track`) and draws no
+                    controls for anybody else, which is why one component can hang here on both
+                    surfaces and in both mounts. An Admin reading this task sees the total and
+                    no buttons.
+                -->
+                <TimerWidget :task-id="task.id" :tracked-seconds="task.tracked_seconds" />
+
+                <p class="text-xs text-muted-foreground">
+                    Created {{ formatDateTime(task.created_at) }}
+                </p>
 
                 <Card v-if="task.permissions.can_archive || task.permissions.can_delete" class="min-w-0 gap-4">
                     <CardHeader>

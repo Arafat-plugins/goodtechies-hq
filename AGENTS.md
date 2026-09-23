@@ -175,10 +175,14 @@ overloaded so asking for one is a compile error rather than a 404 found in stagi
 The local cloud workspace has PostgreSQL 16 on `127.0.0.1:5432`, superuser `postgres`, trust auth (dev only), and Redis on `127.0.0.1:6379`.
 
 ## Known-failing baseline
-Measured 2026-09-23 at Phase 3 complete (the recurring engine plus its screens) with
-`php vendor/bin/pest`: none failing (**1184 passed, 6280 assertions**).
+Measured 2026-09-24 at Phase 4 slices 1–2 (remote timer, office attendance and schedules) with
+`php vendor/bin/pest`: none failing (**1296 passed, 6853 assertions**).
 `vendor/bin/pint --test`: passed. `npx vue-tsc --noEmit`: passed. `npm run build`: passed. If
-your number is not 1184, that is a finding, not drift.
+your number is not 1296, that is a finding, not drift.
+
+**Two concurrent agents must not share a dev-server port.** `php artisan serve` defaults to
+the same port for both; the loser silently reads the winner's database, and three measurement
+runs went unnoticed that way. Pick a distinct port, and check what answered before trusting it.
 
 **Two suites cannot share this checkout.** `php artisan test` runs in parallel here and
 deadlocks on migration DDL before any test body runs — use `php vendor/bin/pest`. And if a

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { Bell, CalendarDays, History, PartyPopper, Video } from '@lucide/vue';
+import { Bell, History, PartyPopper, Video } from '@lucide/vue';
+import type { AttendanceDay } from '@/Components/Attendance/attendance';
+import ClockWidget from '@/Components/Attendance/ClockWidget.vue';
 import TimerHeroCard from '@/Components/Dashboard/TimerHeroCard.vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import PageShell from '@/Components/PageShell.vue';
@@ -25,6 +27,13 @@ defineProps<{
     today: string;
     trackingMode: TrackingMode;
     taskStats: MyTaskBucket[];
+    /**
+     * The hero, whichever kind of day this person has. Exactly one of the two is non-null and
+     * the server decided which, from `tracking_mode` — a person who tracks neither way gets
+     * no hero rather than an empty card.
+     */
+    timer: { counted_seconds: number; pending_seconds: number; target_seconds: number | null } | null;
+    attendance: { today: AttendanceDay; can_clock: boolean } | null;
 }>();
 
 /**
@@ -38,7 +47,6 @@ defineProps<{
  * it, so 7 is the number the plan itself leaves.
  */
 const panels = [
-    { title: 'My schedule', phase: 4, icon: CalendarDays, description: 'Your working hours and shifts will show here.' },
     { title: 'Upcoming meetings', phase: 7, icon: Video, description: 'Meetings you are invited to will show here.' },
     { title: 'Upcoming holidays', phase: 5, icon: PartyPopper, description: 'Company holidays will show here.' },
     { title: 'Recent activity', phase: 7, icon: History, description: 'Your latest task changes will show here.' },
@@ -53,7 +61,13 @@ const panels = [
         header stays the greeting and nothing else.
     -->
     <PageShell title="Dashboard" :greeting="{ name: greetingName, today }">
-        <TimerHeroCard :mode="trackingMode" />
+        <TimerHeroCard
+            v-if="timer"
+            :counted-seconds="timer.counted_seconds"
+            :pending-seconds="timer.pending_seconds"
+            :target-seconds="timer.target_seconds"
+        />
+        <ClockWidget v-else-if="attendance" :today="attendance.today" :can-clock="attendance.can_clock" />
 
         <!--
             Cards rather than the read-only row this used to be: every one of them is now a

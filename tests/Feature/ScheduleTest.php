@@ -24,6 +24,17 @@ it('schedules the recurring sweep, the two task reminders, the backups, the clea
         // sweep, and "once per task" is answered by the notifications table here too, so the two
         // running a minute apart cannot double up.
         'hq:notify-due-tomorrow' => '0 8 * * *',
+        // Phase 4: the remote timer's two safeguards. Every minute, because the heartbeat
+        // timeout defaults to five — an hourly sweep would let a closed laptop log the rest of
+        // the hour, which is precisely what rule 1 exists to prevent. It reads only OPEN
+        // entries, at most one per remote employee.
+        'hq:timer-watchdog' => '* * * * *',
+        // Phase 4: the office attendance sweep. 23:55 because the day has to be over before a
+        // missing record means anything — somebody who clocks in at 23:40 is not absent, and
+        // the unique index on (employee_id, date) is what makes that true rather than the five
+        // minutes. What it SKIPS is AttendanceService::markAbsent()'s and not this schedule's,
+        // including the one place Phase 5 adds approved leave and holidays.
+        'hq:mark-absent' => '55 23 * * *',
         'backup:clean' => '30 1 * * *',
         'backup:run --only-db' => '0 2 * * *',
         'backup:monitor' => '0 3 * * *',

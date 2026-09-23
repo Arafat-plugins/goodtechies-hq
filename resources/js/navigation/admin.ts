@@ -47,7 +47,11 @@ export const adminNav: NavGroup[] = [
             { label: 'My Tasks', href: '/admin/my-tasks', icon: ListTodo },
             { label: 'Due Today', href: '/admin/my-tasks?bucket=due_today', icon: CalendarClock },
             { label: 'Overdue', href: '/admin/my-tasks?bucket=overdue', icon: CircleAlert },
-            { label: 'My Attendance', icon: UserCheck, phase: 4 },
+            // An Admin's own attendance. It points at the SHARED route, because clocking in is
+            // a fact about the person rather than about the shell — Part D §8's office
+            // employees include both Admins — and the page picks its layout from the viewer's
+            // surface, the way Profile does.
+            { label: 'My Attendance', href: '/attendance', icon: UserCheck },
             { label: 'My Leave', icon: CalendarOff, phase: 5 },
         ],
     },
@@ -77,11 +81,15 @@ export const adminNav: NavGroup[] = [
         label: 'Workforce',
         items: [
             { label: 'Employees', icon: Users, phase: 12 },
-            { label: 'Attendance', icon: CalendarCheck, phase: 4 },
+            // The roster. `activePrefix` is the same URL, so a reader on a person's month —
+            // which lives at the shared `/attendance/{id}` — is not claimed by this row; that
+            // page belongs to My Attendance's claim or to no row at all, which is correct:
+            // it is one employee's page reached from here, not a second Workforce screen.
+            { label: 'Attendance', href: '/admin/attendance', icon: CalendarCheck },
             { label: 'Time', icon: Timer, phase: 4 },
             { label: 'Workload', icon: Weight, phase: 4 },
             { label: 'Leave', icon: CalendarOff, phase: 5 },
-            { label: 'Work Schedule', icon: AlarmClock, phase: 4 },
+            { label: 'Work Schedule', href: '/admin/schedules', icon: AlarmClock },
         ],
     },
     {
