@@ -44,6 +44,13 @@ enum NotificationType: string
      */
     case TaskOverdue = 'task.overdue';
 
+    /**
+     * Sent by `hq:notify-due-tomorrow`, once per task — the last of Part D §19's fixed automation
+     * rules ("Task due tomorrow → notify assignee"). Like TaskOverdue it is not one of the task
+     * EVENTS: nothing a person does produces it, a date approaching does.
+     */
+    case TaskDueTomorrow = 'task.due_tomorrow';
+
     /* System tab ------------------------------------------------------------------------- */
 
     /**
@@ -71,8 +78,11 @@ enum NotificationType: string
             // the cancelled project's tasks are dealt with.
             self::TaskSubmittedForReview, self::TaskOverdue, self::ProjectCancelled => NotificationPriority::High,
 
-            // Something changed about who owns the work, or it finished.
-            self::TaskAssigned, self::TaskReassigned, self::TaskCompleted, self::TaskDeleted => NotificationPriority::Normal,
+            // Something changed about who owns the work, or it finished. Due tomorrow sits here
+            // too: it is a deadline the reader has to plan around today, which is more than a
+            // status change and less than the thing being late already.
+            self::TaskAssigned, self::TaskReassigned, self::TaskCompleted, self::TaskDeleted,
+            self::TaskDueTomorrow => NotificationPriority::Normal,
 
             // Worth knowing between tasks; never worth interrupting for. These are also the two
             // that group hardest — a busy discussion is the case §11's dedup rule was written
@@ -139,10 +149,19 @@ enum NotificationType: string
             self::TaskCommented => $grouped
                 ? sprintf('%d new comments in "%s"', $count, $title)
                 : sprintf('New comment in "%s"', $title),
-            self::TaskSubmittedForReview => sprintf('"%s" is waiting for your review', $title),
+            // A resubmission groups into the reviewer's existing unread row, so without a
+            // plural branch the second submission was invisible: the sentence still described
+            // the first one, and the only sign anything had changed was `count`, which the
+            // screen deliberately does not print. Found by walking the acceptance flow — the
+            // reviewer requests changes, the assignee fixes and sends it back, and the bell
+            // says exactly what it said an hour ago.
+            self::TaskSubmittedForReview => $grouped
+                ? sprintf('"%s" is waiting for your review again', $title)
+                : sprintf('"%s" is waiting for your review', $title),
             self::TaskCompleted => sprintf('"%s" was completed', $title),
             self::TaskDeleted => sprintf('"%s" was deleted', $title),
             self::TaskOverdue => sprintf('"%s" is overdue', $title),
+            self::TaskDueTomorrow => sprintf('"%s" is due tomorrow', $title),
             self::ProjectCancelled => sprintf(
                 '"%s" was cancelled — %d open %s to close or reassign',
                 $title,

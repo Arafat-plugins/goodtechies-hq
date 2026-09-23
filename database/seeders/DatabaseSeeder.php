@@ -21,6 +21,10 @@ class DatabaseSeeder extends Seeder
             DemoSeeder::class,
             // Phase 2: tasks hang off DemoSeeder's projects, so it has to have run first.
             TaskSeeder::class,
+            // Phase 3: the retainer templates. Also DemoSeeder's projects, and deliberately
+            // AFTER TaskSeeder so the seeded task count stays the twenty-five Phase 2 asserts —
+            // this seeder creates templates and generates nothing.
+            RecurringTaskSeeder::class,
         ]);
     }
 }

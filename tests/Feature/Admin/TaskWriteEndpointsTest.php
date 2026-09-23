@@ -304,7 +304,7 @@ it('keeps links, and refuses one that is not http', function () {
 })->group('phase2');
 
 it('records and drops a dependency', function () {
-    $other = Task::where('title', 'Rewrite the Home Model page titles')->firstOrFail();
+    $other = Task::where('title', 'Optimize Home Model pages')->firstOrFail();
 
     $this->actingAs($this->admin)
         ->post(route('admin.tasks.dependencies.store', $this->task), ['depends_on_task_id' => $other->id])

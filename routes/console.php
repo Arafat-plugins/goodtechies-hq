@@ -12,11 +12,24 @@ use Illuminate\Support\Facades\Schedule;
 |
 */
 
+// Recurring tasks (master prompt §6, §19, Phase 3): the period's instance for every template
+// that is due, one queue job each. 00:05 so the period has rolled over first. The five minutes
+// are slack and not precision — a run that does not happen until the next day still generates
+// the right period, because the engine works from the period the RUN DATE falls in rather than
+// from a `next_run_at` it has to hit exactly. See RecurringTaskEngine::due().
+Schedule::command('hq:generate-recurring-tasks')->dailyAt('00:05')->withoutOverlapping();
+
 // Tasks (master prompt §19, Phase 2): one notification per NEWLY overdue task, to its
 // assignees and their manager or the Admins. 08:00 because it is meant to be the first thing
 // somebody sees, and "newly" is answered by the notifications table rather than by this
 // schedule — see FlagOverdueTasks. The Overdue buckets themselves stay query-time.
 Schedule::command('hq:flag-overdue')->dailyAt('08:00')->withoutOverlapping();
+
+// Tasks (master prompt §19, Phase 3): the last of the fixed automation rules — a reminder to
+// the assignee the day before something is due. Same 08:00 slot as the overdue sweep, because
+// both answer the question somebody opens the bell with; "once per task" is answered by the
+// notifications table here too, so the two running a minute apart cannot double up.
+Schedule::command('hq:notify-due-tomorrow')->dailyAt('08:00')->withoutOverlapping();
 
 // Backups (master prompt Part B §4): encrypted daily database dump, weekly restore test.
 Schedule::command('backup:clean')->dailyAt('01:30')->withoutOverlapping();

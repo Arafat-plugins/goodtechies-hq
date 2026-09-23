@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, usePage } from '@inertiajs/vue3';
+import { Head, Link, usePage } from '@inertiajs/vue3';
 import { FileText, ListTodo } from '@lucide/vue';
 import { computed } from 'vue';
 import ProjectFacts from '@/Components/Employee/ProjectFacts.vue';
@@ -9,6 +9,7 @@ import PageShell from '@/Components/PageShell.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { toneForProjectStatus } from '@/Components/StatusPill.vue';
 import { Badge } from '@/Components/ui/badge';
+import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 
@@ -63,22 +64,40 @@ function isViewer(member: EmployeeProject['members'][number]): boolean {
                     </CardContent>
                 </Card>
 
-                <!-- Phase 2 fills these two; until then they carry the same line the rest of the app uses. -->
+                <!--
+                    Phase 2 filled the first of these two, so it stopped being a placeholder: it
+                    hands the reader to the Tasks screens filtered to this project rather than
+                    growing a fourth copy of that query here (DESIGN.md §5.8).
+                -->
                 <Card class="min-w-0 gap-4 p-6 shadow-xs">
                     <h2 class="text-sm font-medium">Tasks</h2>
                     <EmptyState
                         :icon="ListTodo"
-                        title="Arrives in Phase 2"
-                        description="Your tasks on this project will be listed here."
-                    />
+                        title="Your tasks on this project"
+                        description="They live on your Tasks screens — List, Board and Calendar all read the same work. This opens them filtered to this project."
+                    >
+                        <template #action>
+                            <Button as-child size="sm">
+                                <Link :href="`/employee/tasks?project_id=${project.id}`">
+                                    Open this project’s tasks
+                                </Link>
+                            </Button>
+                        </template>
+                    </EmptyState>
                 </Card>
 
+                <!--
+                    The second did not: Phase 2's Files tabs are on the **admin** project and
+                    client screens, and this surface has no project-files route to read. What an
+                    employee can reach is a task's own attachments, so the panel says that
+                    instead of naming a phase that has already shipped.
+                -->
                 <Card class="min-w-0 gap-4 p-6 shadow-xs">
                     <h2 class="text-sm font-medium">Files</h2>
                     <EmptyState
                         :icon="FileText"
-                        title="Arrives in Phase 2"
-                        description="Project files and attachments will be listed here."
+                        title="Files live on the task"
+                        description="Anything attached to a task you are on is in that task's Attachments panel. There is no project-wide file list on this surface."
                     />
                 </Card>
             </div>

@@ -28,7 +28,7 @@ UI surfaces (Admin, Employee, Accountant) and **privacy by role is enforced on t
 | `app/Support/` | Enums and keys (`Permission`, `Role`, `TrackingMode`, statuses) | new keys |
 | `app/Console/Commands/` | `hq:*` artisan commands | scheduled or ops jobs |
 | `app/Events/`, `app/Listeners/`, `app/Jobs/` | Events; the one `NotificationDispatcher` listener; queue jobs | from Phase 2 |
-| `database/migrations/` | Added phase by phase, never ahead (Phase 0 identity/audit; Phase 1 clients, projects, project_finance, project_members) | schema |
+| `database/migrations/` | Added phase by phase, never ahead (Phase 0 identity/audit; Phase 1 clients, projects, project_finance, project_members; Phase 2 tasks, task_assignees, task_checklists, task_links, task_dependencies, tags, task_tags, files, conversations, conversation_members, messages, message_attachments, notifications) | schema |
 | `database/seeders/` | `RolePermissionSeeder`, `SettingsSeeder`, `TeamSeeder`, `DemoSeeder` (Phase 1+) | seed data |
 | `routes/` | `web.php` includes the surface files `auth.php`, `admin.php`, `employee.php`, `accountant.php`, `shared.php`; `console.php` holds the schedule | routes |
 | `resources/js/Layouts/` | `AdminLayout.vue`, `EmployeeLayout.vue`, `AccountantLayout.vue`, `AuthLayout.vue`, each a **separate** shell | shell chrome |
@@ -53,43 +53,77 @@ UI surfaces (Admin, Employee, Accountant) and **privacy by role is enforced on t
 - **Tests:** `tests/Pest.php` binds `TestCase` + `RefreshDatabase` for the `Feature` and `Permissions` folders.
 
 ### Surfaces
-Generated 2026-09-17 from `php artisan route:list --except-vendor` (plus framework `GET /up`).
-**Stale since Phase 2** — it does not list the tasks, files, tags or discussion routes that
-slices 1-4 added. Run the command for the truth; this table is still right about Phase 0 and 1.
-The **Styles** column is historical.
-Every page now opens with `PageShell`; admin lists use `DataTable` + the chip `FilterBar`; an
+Regenerated **2026-09-23** at the Phase 2 close-out from `php artisan route:list --except-vendor`
+(107 routes, plus the framework's `GET /up`). It now covers Phase 2's tasks, board, calendar,
+my-tasks, tags, files, discussion and notification routes. `route:list` is still the source of
+truth; this table is the map.
+Every page opens with `PageShell`; admin lists use `DataTable` + the chip `FilterBar`; an
 unbuilt panel is `Card` + `EmptyState`. See DESIGN.md §4.
-| Surface (route) | Entry | View | Styles |
-| --- | --- | --- | --- |
-| `GET /` | `HomeController` (redirects to login or the user's shell) | none | none |
-| `GET/POST /login`, `POST /logout` | `Auth/LoginController` | `Pages/Auth/Login.vue` in `AuthLayout` | utility classes |
-| `/two-factor/challenge` (GET/POST) | `Auth/TwoFactorChallengeController` | `Pages/Auth/TwoFactorChallenge.vue` | utility classes |
-| `/two-factor/enrol` (GET/POST), `GET /two-factor/recovery-codes` | `Auth/TwoFactorEnrolmentController` | `Pages/Auth/TwoFactorEnrol.vue`, `RecoveryCodes.vue` | utility classes |
-| `GET /admin/dashboard` | `Admin/DashboardController` | `Pages/Admin/Dashboard.vue` in `AdminLayout` | utility classes |
-| `GET /admin/settings` | `Admin/SettingsController` | `Pages/Admin/Settings.vue` | utility classes |
-| `GET /employee/dashboard` | `Employee/DashboardController` | `Pages/Employee/Dashboard.vue` in `EmployeeLayout` | utility classes |
-| `GET /accountant/dashboard` | `Accountant/DashboardController` | `Pages/Accountant/Dashboard.vue` in `AccountantLayout` | utility classes |
-| `/admin/clients` (index/create/store/show/edit/update) + `POST /admin/clients/{client}/deactivate` | `Admin/ClientController` | `Pages/Admin/Clients/{Index,Create,Edit,Show}.vue`, `Components/Clients/*` | utility classes |
-| `/admin/projects` (index/create/store/show/edit/update) | `Admin/ProjectController` | `Pages/Admin/Projects/{Index,Create,Edit,Show}.vue`, `Components/Projects/*` | utility classes |
-| `PUT /admin/projects/{project}/finance` · `/members` · `POST …/status` · `/archive` · `/unarchive` | `Admin/Project{Finance,Member,Status}Controller` | rendered inside `Pages/Admin/Projects/Show.vue` | utility classes |
-| `/employee/projects`, `/employee/projects/{project}` | `Employee/ProjectController` | `Pages/Employee/Projects/{Index,Show}.vue`, `Components/Employee/*` | utility classes |
-| `/profile` (GET/PUT), `PUT /profile/password`, `DELETE /profile/two-factor`, `POST /profile/two-factor/recovery-codes`, `DELETE /profile/sessions/{session}` | `Shared/Profile*Controller` | `Pages/Shared/Profile.vue` (layout chosen from `auth.user.surface`), `Components/Profile/*` | utility classes |
+
+| Surface (route) | Entry | View |
+| --- | --- | --- |
+| `GET /` | `HomeController` (redirects to login or the user's shell) | none |
+| `GET/POST /login`, `POST /logout` | `Auth/LoginController` | `Pages/Auth/Login.vue` in `AuthLayout` |
+| `/two-factor/challenge` (GET/POST) | `Auth/TwoFactorChallengeController` | `Pages/Auth/TwoFactorChallenge.vue` |
+| `/two-factor/enrol` (GET/POST), `GET /two-factor/recovery-codes` | `Auth/TwoFactorEnrolmentController` | `Pages/Auth/TwoFactorEnrol.vue`, `RecoveryCodes.vue` |
+| `GET /admin/dashboard` | `Admin/DashboardController` | `Pages/Admin/Dashboard.vue` in `AdminLayout` |
+| `GET /admin/settings` | `Admin/SettingsController` | `Pages/Admin/Settings.vue` |
+| `GET /employee/dashboard` | `Employee/DashboardController` | `Pages/Employee/Dashboard.vue` in `EmployeeLayout` |
+| `GET /accountant/dashboard` | `Accountant/DashboardController` | `Pages/Accountant/Dashboard.vue` in `AccountantLayout` |
+| `/admin/clients` (index/create/store/show/edit/update) + `POST …/deactivate` | `Admin/ClientController` | `Pages/Admin/Clients/{Index,Create,Edit,Show}.vue`, `Components/Clients/*` |
+| `/admin/projects` (index/create/store/show/edit/update) | `Admin/ProjectController` | `Pages/Admin/Projects/{Index,Create,Edit,Show}.vue`, `Components/Projects/*` |
+| `PUT /admin/projects/{project}/finance` · `/members` · `POST …/status` · `/archive` · `/unarchive` | `Admin/Project{Finance,Member,Status}Controller` | rendered inside `Pages/Admin/Projects/Show.vue` |
+| `/employee/projects`, `/employee/projects/{project}` | `Employee/ProjectController` | `Pages/Employee/Projects/{Index,Show}.vue`, `Components/Employee/*` |
+| `/profile` (GET/PUT), `PUT /profile/password`, `DELETE /profile/two-factor`, `POST /profile/two-factor/recovery-codes`, `DELETE /profile/sessions/{session}` | `Shared/Profile*Controller` | `Pages/Shared/Profile.vue` (layout chosen from `auth.user.surface`), `Components/Profile/*` |
+
+**Phase 2 — tasks.** Three views of one query per surface; the filters travel as query
+parameters, which is why every controller echoes `filters` back.
+
+| Surface (route) | Entry | View |
+| --- | --- | --- |
+| `GET /admin/tasks` · `/board` · `/calendar` | `Admin/TaskController@{index,board,calendar}` | `Pages/Admin/Tasks/{Index,Board,Calendar}.vue` → `Components/Tasks/{TaskList,TaskBoard,TaskCalendar}.vue` |
+| `GET /employee/tasks` · `/board` · `/calendar` | `Employee/TaskController@{index,board,calendar}` | `Pages/Employee/Tasks/{Index,Board,Calendar}.vue`, same three components |
+| `GET /admin/tasks/{task}`, `GET /employee/tasks/{task}` | `{Admin,Employee}/TaskController@show` | `Pages/{Admin,Employee}/Tasks/Show.vue` → `Components/Tasks/TaskDetailBody.vue`. The **same body** mounts in `TaskDetailDrawer.vue` from a row click, which fetches the detail route over `X-Inertia` |
+| `POST /admin/tasks` (store) · `PUT …/{task}` · `DELETE …/{task}` | `Admin/TaskController` | `QuickAddTaskModal.vue`, `TaskFieldsPanel.vue` |
+| `POST …/tasks/{task}/status` · `/reorder` · `/handoff` · `/archive` · `/unarchive` (admin only) | `{Admin,Employee}/TaskController` | `TaskStatusActions.vue` (the one status control; the Board reuses it `headless`), `TaskPeoplePanel.vue` |
+| `PUT /admin/tasks/{task}/assignees` — **Admin only** | `Admin/TaskController@assignees` | `TaskPeoplePanel.vue` |
+| `…/tasks/{task}/checklist` (POST/PUT/DELETE), `…/links` (POST/DELETE) — both surfaces | `{Admin,Employee}/TaskController` | `TaskChecklistPanel.vue`, `TaskLinksPanel.vue` |
+| `…/tasks/{task}/dependencies` (POST/DELETE) — **Admin only** | `Admin/TaskController` | `TaskDependenciesPanel.vue` (read-only on the employee surface) |
+| `GET /admin/my-tasks`, `GET /employee/my-tasks` | `{Admin,Employee}/MyTaskController@index` | `Pages/{Admin,Employee}/MyTasks.vue` → `Components/Tasks/MyTasks.vue` (one component, both surfaces) |
+
+**Phase 2 — tags, files, discussion, notifications.**
+
+| Surface (route) | Entry | View |
+| --- | --- | --- |
+| `/admin/tags`, `/employee/tags` (index/store/update/destroy) | `{Admin,Employee}/TagController` | `Components/Tags/TagManagerDialog.vue`, opened from `TaskFilterBar.vue` |
+| `GET/POST /admin/projects/{project}/files` | `Admin/ProjectFileController` | Files tab in `Pages/Admin/Projects/Show.vue` → `Components/Files/FilePanel.vue` |
+| `GET/POST /admin/clients/{client}/files` | `Admin/ClientFileController` | Files tab in `Pages/Admin/Clients/Show.vue` → `FilePanel.vue` |
+| `GET/POST /admin/tasks/{task}/files`, `…/employee/…` | `{Admin,Employee}/TaskFileController` | Attachments panel in `TaskDetailBody.vue` → `FilePanel.vue` |
+| `GET/POST /{admin,employee}/files/{file}/versions`, `DELETE /{admin,employee}/files/{file}` | `{Admin,Employee}/FileController` | the per-row controls inside `FilePanel.vue` |
+| `GET /files/{file}` | `Shared/FileDownloadController` | none — a `temporarySignedRoute` re-checked by `FilePolicy` on every fetch |
+| `GET/POST /{admin,employee}/tasks/{task}/discussion` | `{Admin,Employee}/TaskDiscussionController` | `Components/Tasks/TaskDiscussionPanel.vue` |
+| `GET /notifications`, `GET /notifications/recent`, `POST /notifications/{n}/read`, `POST /notifications/read-all` | `Shared/NotificationController` | `Pages/Shared/Notifications.vue` (the Center) and `Components/Shell/NotificationBell.vue`, both through `Components/Notifications/notifications.ts`. **`/notifications` is one route serving two readers** — the Inertia page and the bell's JSON — so the popover and the page cannot disagree |
+
+There is **no** project- or client-files route on the employee surface: `fileRoutes()` is
+overloaded so asking for one is a compile error rather than a 404 found in staging.
 
 - **Shell building blocks:** `Components/Shell/*` (skip link, sidebar + rail toggle, Coming-soon disclosure, top bar, ⌘K palette, quick create, bell, user menu, theme toggle, mobile sheet) and `navigation/{admin,employee,accountant}.ts`. To enable a nav item, give it an `href` and remove its `phase`. `SkipToContent.vue` must stay the first child of each layout, and each layout's `<main>` keeps `id="main-content" tabindex="-1"`.
 - **Shared blocks:** `Components/{PageShell,StatusBadge,EmptyState,Toaster,DetailDrawer,FilterBar,FilterChip,StatCard,AppWordmark,FlashMessage,Pagination,StatusPill}.vue`, plus `DataTable/*`, `Skeletons/*`, `Charts/*` and `Dashboard/*`. `StatusPill.vue` also exports `toneForProjectStatus()`; `Pagination.vue` exports the `Paginated<T>` type; `Charts/chartTokens.ts` is how a chart reads CSS variables.
+- **Phase 2 blocks:** `Components/Tasks/*` (the three views, the detail body and its panels, the status control, `MyTasks.vue`, `taskDetail.ts`, `taskBoard.ts`), `Components/Files/{FilePanel.vue,files.ts}`, `Components/Tags/{TagManagerDialog,TagColourSelect}.vue` and `Components/Notifications/{NotificationRow.vue,notifications.ts}`. **Every signature is in DESIGN.md §4.5, §4.7 and §4.8** — read it rather than the component.
 - **`PageHeader.vue` and `PlaceholderPanel.vue` no longer exist** — Phase 0.5 deleted them. `PageShell` replaces the first; `Card` + `EmptyState` replaces the second. Do not reintroduce either.
 - **Read `DESIGN.md` before writing any Tailwind class.** It carries every token with its light and dark value, the real signature of every shared component, and the 20 things that are never allowed. It is generated from `app.css`, which wins if the two ever disagree.
 - **Route file ownership:** `routes/auth.php`, `admin.php`, `employee.php`, `accountant.php`, `shared.php`. The schedule lives in `routes/console.php`.
-- **Services:** `AuditLogger`, `ActivityLogger`, `SettingsService`, `EmployeeAdministrationService`, `TwoFactorService`, `SessionService`, `ClientService`, `ProjectService`, `ProjectFinanceService`.
-- **Serializers:** `ProjectResource` and `ClientResource` — the only way a project or client leaves the server. A project's **status changes only** through `POST …/status`, `…/archive`, `…/unarchive`; `PUT /admin/projects/{id}` ignores a `status` key by design.
-- **Policies:** `EmployeePolicy`, `ProjectPolicy` (view, create, update, archive, unarchive, cancel, manageMembers, viewCommercial, viewFinance, updateFinance), `ClientPolicy`. `Project::visibleTo($user)` scopes every list.
+- **Services:** `AuditLogger`, `ActivityLogger`, `SettingsService`, `EmployeeAdministrationService`, `TwoFactorService`, `SessionService`, `ClientService`, `ProjectService`, `ProjectFinanceService`, and from Phase 2 `TaskService`, `TaskReviewers`, `TagService`, `FileService`, `ConversationService`, `NotificationService`.
+- **Serializers:** `ProjectResource`, `ClientResource`, and from Phase 2 `TaskResource`, `TagResource`, `FileResource`, `MessageResource`, `NotificationResource` — the only way each of those leaves the server. A project's **status changes only** through `POST …/status`, `…/archive`, `…/unarchive`; `PUT /admin/projects/{id}` ignores a `status` key by design. `TaskResource` puts the checklist, links and dependencies behind `whenLoaded` and `available_transitions` behind a `task_detail` attribute, so a list payload is not a detail payload.
+- **Policies:** `EmployeePolicy`, `ProjectPolicy` (view, create, update, archive, unarchive, cancel, manageMembers, viewCommercial, viewFinance, updateFinance), `ClientPolicy`, and from Phase 2 `TaskPolicy`, `TagPolicy`, `FilePolicy`, `ConversationPolicy`, `MessagePolicy`, `NotificationPolicy` (all extending `Policy`). `Project::visibleTo($user)` and `Task::visibleTo($user)` scope every list.
+- **Events / listeners (Phase 2):** `TaskAssigned`, `TaskReassigned`, `TaskStatusChanged`, `TaskCommented`, `TaskSubmittedForReview`, `TaskCompleted`, `TaskDeleted`, `TaskBecameOverdue`, `ProjectCancelled` → the one `NotificationDispatcher` listener. **A move to In review fires `TaskSubmittedForReview` and a move to Completed fires `TaskCompleted` *instead of* `TaskStatusChanged`, never as well** — `TaskService::transition()` picks one.
 - **Middleware aliases:** `surface:<admin|employee|accountant>` and `two-factor`.
 - **Gates:** one per permission value (`can:settings.manage`).
 - **Enums** (`app/Support`):
   - `Permission`: PascalCase cases, dotted values.
   - `RoleName`: cases `ADMIN` …
   - `TrackingMode`, `UserStatus`, `AuditEvent`, `Surface`.
-- **Commands:** `hq:verify-backup` (`app/Console/Commands/VerifyBackup.php`).
+- **Commands:** `hq:verify-backup` (`VerifyBackup.php`), `hq:two-factor-code <email>` (`TwoFactorCode.php` — prints the dev TOTP), and from Phase 2 `hq:flag-overdue` (`FlagOverdueTasks.php`, daily 08:00; it only *sends* — the overdue buckets stay query-time).
 
 ## Conventions that will get a change rejected
 - **Privacy is enforced on the backend, never only in the UI:**
@@ -129,7 +163,7 @@ unbuilt panel is `Card` + `EmptyState`. See DESIGN.md §4.
 | --- | --- |
 | Lint (PHP) | `vendor/bin/pint --test` |
 | Type-check (Vue/TS) | `npx vue-tsc --noEmit` |
-| Test | `php artisan test` (all) · `php artisan test --group=permissions` |
+| Test | **`php vendor/bin/pest`** (all) · `php vendor/bin/pest --group=permissions`. **Not `php artisan test`** — it runs in parallel here and deadlocks on migration DDL; see *Known-failing baseline* below, which also says why two agents must not run the suite at once |
 | Build | `npm run build` |
 | Migrate (dev) | `php artisan migrate:fresh --seed --database=pgsql_migrator` |
 | Dev server | `npm run build && php artisan serve --host=127.0.0.1 --port=8000` (run it in the background and kill it when done) |
@@ -141,10 +175,10 @@ unbuilt panel is `Card` + `EmptyState`. See DESIGN.md §4.
 The local cloud workspace has PostgreSQL 16 on `127.0.0.1:5432`, superuser `postgres`, trust auth (dev only), and Redis on `127.0.0.1:6379`.
 
 ## Known-failing baseline
-Measured 2026-09-22 at `b6d6146` (Phase 2, slice 5 complete — notifications, My Tasks, dashboard
-cards) with `php vendor/bin/pest`: none failing (**1011 passed, 5546 assertions**).
+Measured 2026-09-23 at the Phase 2 close-out plus Phase 3's engine (recurring tasks,
+due-tomorrow) with `php vendor/bin/pest`: none failing (**1111 passed, 5898 assertions**).
 `vendor/bin/pint --test`: passed. `npx vue-tsc --noEmit`: passed. `npm run build`: passed. If
-your number is not 1011, that is a finding, not drift.
+your number is not 1111, that is a finding, not drift.
 
 **Two suites cannot share this checkout.** `php artisan test` runs in parallel here and
 deadlocks on migration DDL before any test body runs — use `php vendor/bin/pest`. And if a

@@ -97,6 +97,27 @@ class TaskService
     ];
 
     /**
+     * The attributes only CREATE may set: where the task came from.
+     *
+     * Phase 3. A generated task is created through create() like any other — the repo has
+     * refused a second creation path twice (decisions 2-9 and 2-36) — but its provenance is not
+     * something anybody edits afterwards, so it is listed here instead of in FIELDS. update()
+     * never looks at this list, so a request that smuggles `recurring_task_id` into the edit
+     * form cannot reassign a task to another template or restamp its period.
+     *
+     * The two columns being written in the SAME INSERT as the rest of the task is the whole
+     * point: `tasks_recurring_task_period_unique` is checked on that row, so there is no instant
+     * in which a generated task exists without the period that makes it unique. That is what
+     * turns the duplicate rule from an `if` into a constraint.
+     *
+     * @var list<string>
+     */
+    private const BIRTH_FIELDS = [
+        'recurring_task_id',
+        'recurring_period',
+    ];
+
+    /**
      * The statuses a task may be BORN in.
      *
      * A task has to start somewhere, so creation is the one write that sets a status without a
@@ -542,6 +563,9 @@ class TaskService
                 'status' => $status,
                 'created_by' => $actor->getKey(),
                 'position' => $this->nextPosition($status),
+                // Phase 3: the recurring origin, in this INSERT and only this one. See
+                // BIRTH_FIELDS — the unique index is checked on this row, not afterwards.
+                ...array_intersect_key($attributes, array_flip(self::BIRTH_FIELDS)),
             ])->save();
 
             if (isset($attributes['work_summary'])) {

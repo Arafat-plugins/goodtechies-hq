@@ -197,6 +197,23 @@ const reviewerNames = computed(() =>
     props.reviewers.map((reviewer) => reviewer.name).filter((name): name is string => Boolean(name)),
 );
 
+/**
+ * Is this person one of the two people who can end a review?
+ *
+ * `available_transitions` is `TaskPolicy`'s answer, so the absence of Approve and Request
+ * changes on a task sitting In review means the verdict is somebody else's — an Admin who is
+ * not this project's reviewer is the ordinary case. Until now that read as nothing: the strip
+ * printed the status, a `Change status` menu holding In progress and Cancel, and no sentence
+ * saying why the two verbs a reviewer would expect are missing. The reason was only in their
+ * absence, which is the hidden reason DESIGN.md §5.12 is about.
+ */
+const awaitingSomebodyElsesVerdict = computed(
+    () =>
+        props.task.status === STATUS_IN_REVIEW
+        && !props.task.is_archived
+        && !prominent.value.some((move) => move.kind === 'approve' || move.kind === 'changes'),
+);
+
 /* --------------------------------------------------------------- the dialogs */
 
 const open = ref<Kind | null>(null);
@@ -471,10 +488,28 @@ const required = computed(
             <template v-if="task.is_archived">
                 An archived task does not move. Unarchive it first.
             </template>
-            <template v-else-if="task.status === 'in_review' && reviewerNames.length > 0">
-                Waiting on a verdict from {{ reviewerNames.join(' or ') }}.
+            <template v-else-if="awaitingSomebodyElsesVerdict">
+                {{
+                    reviewerNames.length > 0
+                        ? `Waiting on a verdict from ${reviewerNames.join(' or ')}.`
+                        : 'Waiting on a verdict from this project’s reviewer.'
+                }}
             </template>
             <template v-else>You have no moves on this task from {{ task.status_label }}.</template>
+        </p>
+
+        <!--
+            The same sentence when there ARE other moves. Having somewhere to send the task is
+            not the same as being able to end its review, and a strip that offers `Change status`
+            and stays silent about the verdict leaves the reader to infer a permission rule from
+            a missing button.
+        -->
+        <p v-if="moves.length > 0 && awaitingSomebodyElsesVerdict" class="text-xs text-muted-foreground">
+            {{
+                reviewerNames.length > 0
+                    ? `Approve and Request changes are ${reviewerNames.join(' or ')}’s on this project — the verdict is not yours to give.`
+                    : 'Approve and Request changes belong to this project’s reviewer — the verdict is not yours to give.'
+            }}
         </p>
 
         <!--

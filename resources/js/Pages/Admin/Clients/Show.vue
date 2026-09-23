@@ -194,7 +194,13 @@ function confirmDeactivate(): void {
                 </TabsList>
             </div>
 
-            <TabsContent value="overview">
+            <!--
+                Every panel is a tab stop: reka gives it `tabindex="0"` so a keyboard can reach
+                what the strip controls, and the primitive's base class is `outline-none`, so
+                the stop painted nothing. The ring goes on here rather than in the generated
+                component, exactly as `Pages/Shared/Notifications.vue` does it.
+            -->
+            <TabsContent value="overview" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
                 <div class="grid min-w-0 items-start gap-4 lg:grid-cols-3">
                     <Card class="min-w-0 gap-2 shadow-xs lg:col-span-2">
                         <CardHeader>
@@ -294,7 +300,7 @@ function confirmDeactivate(): void {
                 </div>
             </TabsContent>
 
-            <TabsContent value="files">
+            <TabsContent value="files" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
                 <FilePanel
                     :routes="files"
                     :can-upload="canAttach"
@@ -303,7 +309,7 @@ function confirmDeactivate(): void {
                 />
             </TabsContent>
 
-            <TabsContent value="activity">
+            <TabsContent value="activity" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
                 <Card class="min-w-0 gap-2 shadow-xs">
                     <CardHeader>
                         <CardTitle class="text-sm font-medium">Activity</CardTitle>

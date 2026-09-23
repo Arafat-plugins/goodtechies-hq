@@ -146,12 +146,21 @@ const monthStats = [
             <StatCard size="compact" label="Present today" :phase="4" :icon="UserCheck" />
         </section>
 
-        <!-- Tier 2 — the block that tells you what to do, before any chart. -->
+        <!--
+            Tier 2 — the block that tells you what to do, before any chart.
+
+            It still has no feed: no controller sends `items`, so it draws its empty state. The
+            copy had to change all the same. It promised "overdue work" in "Phases 2–5" while
+            the row of cards directly above it was already counting six overdue tasks and one
+            awaiting review — a panel saying nothing needs you, under a number saying six things
+            do. The work Phase 2 delivered is named where it actually lives; the marker keeps
+            only the phases that have not happened.
+        -->
         <AttentionList
             title="Needs your attention"
             :empty-icon="Inbox"
-            empty-title="Nothing needs you right now"
-            empty-description="Approvals, overdue work and leave decisions arrive in Phases 2–5"
+            empty-title="Nothing is queued here yet"
+            empty-description="Overdue work and the review queue are the cards above. Approvals and leave decisions arrive in Phases 3–5."
         />
 
         <!-- Tier 3 — two charts, the screen's whole chart budget. -->

@@ -8,6 +8,7 @@ use App\Events\TaskBecameOverdue;
 use App\Events\TaskCommented;
 use App\Events\TaskCompleted;
 use App\Events\TaskDeleted;
+use App\Events\TaskDueTomorrow;
 use App\Events\TaskReassigned;
 use App\Events\TaskStatusChanged;
 use App\Events\TaskSubmittedForReview;
@@ -81,6 +82,7 @@ class NotificationDispatcher
             TaskCompleted::class => 'onTaskCompleted',
             TaskDeleted::class => 'onTaskDeleted',
             TaskBecameOverdue::class => 'onTaskBecameOverdue',
+            TaskDueTomorrow::class => 'onTaskDueTomorrow',
             ProjectCancelled::class => 'onProjectCancelled',
         ];
     }
@@ -219,13 +221,27 @@ class NotificationDispatcher
     }
 
     /**
-     * Completed: the spec's "original assigner/reviewer" — `created_by`, plus the same
-     * reviewers as above.
+     * Completed: the spec's "original assigner/reviewer" — `created_by` and the reviewers —
+     * **plus the assignees**, which the spec's recipient list leaves out.
+     *
+     * That addition is deliberate and it settles a contradiction inside the plan itself. The
+     * Phase 2 Backend paragraph lists `TaskCompleted` → `created_by` + reviewer; the same
+     * phase's "Done when" sentence says *"Shahadat requests changes then approves;
+     * notifications appear for each step."* On the seeded team those two people are usually one
+     * person, and they are the actor, who is always dropped — so an approval wrote **zero**
+     * rows and the one person who did the work was never told it was accepted. Found by walking
+     * the acceptance at the Phase 2 close-out, not by a test.
+     *
+     * The acceptance sentence wins over the recipient list: it is what "done" means, and the
+     * list reads as an implementation note written before anybody walked the flow. Nobody
+     * learns anything they could not already see — an assignee can open the task and read its
+     * status — so this widens who is told, not what is known.
      */
     public function onTaskCompleted(TaskCompleted $event): void
     {
         $candidates = $this->usersByIds([(int) $event->task->created_by])
-            ->merge($this->tasks->reviewersFor($event->task));
+            ->merge($this->tasks->reviewersFor($event->task))
+            ->merge($this->assignees($event->task));
 
         $this->notifications->notify(
             NotificationType::TaskCompleted,
@@ -298,6 +314,35 @@ class NotificationDispatcher
     }
 
     /**
+     * Due tomorrow: "notify assignee" (spec §19), and nobody else.
+     *
+     * The difference from overdue one method up is not an oversight. Overdue says "assignee +
+     * manager/admin" because lateness is somebody else's problem too; due tomorrow says
+     * "assignee" because it is a heads-up to the person holding the work, and a manager told
+     * every night about every task anybody has due tomorrow stops reading the bell. So there is
+     * no escalation and no fallback to the Admins: an unassigned task due tomorrow tells nobody,
+     * and the Due-today and Overdue buckets are what surface it the morning after.
+     *
+     * No actor, like every date-driven rule.
+     */
+    public function onTaskDueTomorrow(TaskDueTomorrow $event): void
+    {
+        $assignees = $event->task->assignees()->with('user')->get()
+            ->map(fn (Employee $employee): ?User => $employee->user)
+            ->filter();
+
+        $this->notifications->notify(
+            NotificationType::TaskDueTomorrow,
+            $event->task,
+            $this->canSee($event->task, new Collection($assignees->all())),
+            $this->taskPayload($event->task, [
+                'due_date' => $event->task->due_date?->toDateString(),
+                'as_of' => $event->asOf->toDateString(),
+            ]),
+        );
+    }
+
+    /**
      * Cancelled project: the prompt to bulk-close or reassign what is left open (spec §21).
      *
      * It goes to the people who can actually answer it — the project's PM and every Admin —
@@ -347,12 +392,22 @@ class NotificationDispatcher
      */
     private function assigneesAndCreator(Task $task): Collection
     {
-        $assignees = $task->assignees()->with('user')->get()
+        return $this->assignees($task)
+            ->merge($this->usersByIds([(int) $task->created_by]));
+    }
+
+    /**
+     * The people doing the work, as users.
+     *
+     * @return Collection<int, User>
+     */
+    private function assignees(Task $task): Collection
+    {
+        $users = $task->assignees()->with('user')->get()
             ->map(fn (Employee $employee): ?User => $employee->user)
             ->filter();
 
-        return (new Collection($assignees->all()))
-            ->merge($this->usersByIds([(int) $task->created_by]));
+        return new Collection($users->all());
     }
 
     /**

@@ -316,9 +316,12 @@ class.
   numbers that meant two different things. Repaired — it now runs 0.5-1 … 0.5-30 with no
   duplicate and no gap, and the spec's §0 board records how.
 
-## Phase 2 — Tasks (in progress)
+## Phase 2 — Tasks ✅ complete
 
-Built as five vertical slices. All five are done; the phase close-out and **GATE C** remain.
+Built as five vertical slices. All five are done; the phase close-out remains.
+
+**Phase 2 has no gate** — the phase table in `docs/master-prompt-v1.md` (line 558) puts GATE C at the
+end of **Phase 4**, not here. So the close-out is followed by Phase 3, not by a stop.
 
 | Slice | What it is | State |
 | --- | --- | --- |
@@ -374,6 +377,31 @@ withdrawn at the client's request (kept in history at `1148417`).
 | 2-21 | An Admin board card carries the whole project finance fragment to print a name |
 | 2-30 | The task detail payload ships an `attachments` array no screen reads |
 
+## Phase 3 — Recurring tasks (engine done, screens next)
+
+**Goal (from the plan):** monthly retainer work generates itself with zero manual re-creation,
+for at least two simulated cycles.
+
+The engine is built and seeded; the Admin screens are not.
+
+- `recurring_tasks` and `recurring_generation_log`; `tasks.recurring_template_id` renamed to the
+  spec's own `recurring_task_id` (every value was still NULL) and given the partial unique index
+  that *is* the duplicate prevention (3-1).
+- `hq:generate-recurring-tasks` at 00:05 and `hq:notify-due-tomorrow` at 08:00, both
+  `withoutOverlapping()` and both asserted in `ScheduleTest`.
+- Monthly, weekly and custom rules, one period-key function (3-3). Time-travelling two
+  consecutive months produces exactly two instances; running the scheduler twice in one day
+  produces one task and one warning row.
+- Three seeded templates: abc.com Monthly Maintenance (Yaseen, the spec's 8-item checklist),
+  Heat Gap Monthly SEO (Tapu), Buffalo Modular Monthly SEO (Tapu). The seeder creates templates
+  and generates nothing — a pre-generated month would be a second creation path.
+
+**Still to build:** Recurring templates under a project (list, create/edit, next-run preview,
+"Generate now", the generation log with its duplicate warnings), a Recurring tab on project
+detail, and "Generated from: <template> · period <Month YYYY>" on task detail.
+
+**Tests: 1111 passing, 5898 assertions.**
+
 ## Deployment log
 
 | Date | Commit | Server | Result |
@@ -384,17 +412,15 @@ withdrawn at the client's request (kept in history at `1148417`).
 
 ## Next step
 
-**Phase 2 close-out, then GATE C.**
+**Phase 3's screens**, then Phase 4 and **GATE C**.
 
-1. Run the phase's own acceptance from the spec: *Tapu opens "Optimize Home Model pages", works
-   it, submits with a summary, Shahadat requests changes then approves; notifications appear for
-   each step.* Every piece now exists; nobody has walked it end to end in one sitting.
-2. A light/dark, keyboard and 360 px pass over every screen the phase added, as Phase 0.5's
-   close-out did — that pass is what found the two-factor tab trap and the overdue-in-red bug.
-3. `DESIGN.md`: §4.1 still describes the bell as "the bell with its empty popover"; the new
-   panels, the tag manager and the Notification Center are not in it.
-4. `AGENTS.md`: the Surfaces table is still marked stale and predates Phase 2's routes.
-5. Sync to `D:\goodtechies-hq` and stop at **GATE C**.
+1. Recurring templates under a project: list, create/edit (title template, checklist template,
+   recurrence, default assignee, active toggle), next-run preview, "Generate now", and the
+   generation log with its duplicate warnings. `RecurringTaskEngine::generate($template, $asOf,
+   force: true)` is the entry point that button calls; the engine deliberately added no routes.
+2. A Recurring tab on project detail, and "Generated from: … · period …" on task detail.
+3. Then **Phase 4** — remote timer, Timesheet, office attendance, schedules, workload — which
+   ends at **GATE C**, the next place this build stops for you.
 
 **Still open, and blocking nothing yet:** the GATE A questions (Sun–Thu week, real email
 addresses, VPS and backup bucket, Google Workspace, spec §46, the ClickUp export, holidays) and

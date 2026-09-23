@@ -453,7 +453,11 @@ class TaskSeeder extends Seeder
             // check he cannot see.
             [
                 'project' => 'Buffalo Modular — SEO',
-                'title' => 'Rewrite the Home Model page titles',
+                // Named to match the plan's Phase 2 acceptance sentence verbatim — "Tapu opens
+                // 'Optimize Home Model pages', works it, submits with a summary, Shahadat
+                // requests changes then approves". The close-out walk had to decide which
+                // seeded row was meant; the next person should not have to.
+                'title' => 'Optimize Home Model pages',
                 'description' => 'Target the model names plus the county; UK English throughout.',
                 'status' => TaskStatus::InProgress,
                 'priority' => TaskPriority::High,

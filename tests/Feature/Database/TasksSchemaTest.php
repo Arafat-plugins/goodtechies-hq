@@ -27,10 +27,13 @@ it('creates the four Phase 2 tables', function (string $table) {
     expect(Schema::hasTable($table))->toBeTrue();
 })->with([['tasks'], ['task_assignees'], ['tags'], ['task_tags']])->group('phase2');
 
-it('leaves the Phase 3 recurring columns nullable and empty', function () {
-    // Created now so Phase 3 adds its templates table and a foreign key without ALTERing a
-    // populated tasks table. Nothing in Phase 2 reads or writes them.
-    expect(Schema::hasColumn('tasks', 'recurring_template_id'))->toBeTrue()
+it('leaves the recurring columns nullable and empty on a hand-made task', function () {
+    // Phase 2 created these nullable so Phase 3 could add its table and a foreign key without
+    // ALTERing a populated tasks table. Phase 3 renamed the first to the name the spec gives it
+    // (`recurring_task_id`) and constrained both — see
+    // 2026_09_23_000003_add_recurring_origin_to_tasks_table. They stay nullable, because the
+    // overwhelming majority of tasks are made by hand and belong to no period at all.
+    expect(Schema::hasColumn('tasks', 'recurring_task_id'))->toBeTrue()
         ->and(Schema::hasColumn('tasks', 'recurring_period'))->toBeTrue();
 
     $nullable = fn (string $column): bool => DB::selectOne(
@@ -38,9 +41,10 @@ it('leaves the Phase 3 recurring columns nullable and empty', function () {
         ['tasks', $column],
     )->is_nullable === 'YES';
 
-    expect($nullable('recurring_template_id'))->toBeTrue()
+    expect($nullable('recurring_task_id'))->toBeTrue()
         ->and($nullable('recurring_period'))->toBeTrue()
-        ->and(Task::whereNotNull('recurring_template_id')->count())->toBe(0)
+        // The seeders make templates and generate nothing, so every seeded task is hand-made.
+        ->and(Task::whereNotNull('recurring_task_id')->count())->toBe(0)
         ->and(Task::whereNotNull('recurring_period')->count())->toBe(0);
 })->group('phase2');
 

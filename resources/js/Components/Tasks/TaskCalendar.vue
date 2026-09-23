@@ -630,6 +630,18 @@ const handleTitle = computed(() =>
                                         aria-hidden="true"
                                     />
 
+                                    <!--
+                                        The status is printed, not just tinted. `statusToneClass`
+                                        hands this bar the same fill a `StatusBadge` wears, and
+                                        DESIGN.md §4.2 is explicit that a surface which takes it
+                                        still prints its label — §5.6's rule, with §1.4's
+                                        measurement behind it: light `review` and `waiting` are
+                                        ΔE 0.16 apart under deuteranopia, so a tinted rectangle
+                                        carrying only a title says nothing about where the task
+                                        stands. The word shares the title's truncation, so a
+                                        one-day bar on a phone still spends its room on the
+                                        title; the `aria-label` carries both at every width.
+                                    -->
                                     <button
                                         type="button"
                                         draggable="false"
@@ -638,6 +650,9 @@ const handleTitle = computed(() =>
                                         @click="openTask(segment.task)"
                                     >
                                         <span aria-hidden="true">{{ segment.task.title }}</span>
+                                        <span aria-hidden="true" class="opacity-70">
+                                            · {{ segment.task.status_label }}
+                                        </span>
                                     </button>
 
                                     <span

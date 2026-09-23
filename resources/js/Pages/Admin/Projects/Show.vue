@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Archive, ArchiveRestore, Pencil } from '@lucide/vue';
+import { Archive, ArchiveRestore, ListTodo, Pencil } from '@lucide/vue';
 import { computed, ref } from 'vue';
+import EmptyState from '@/Components/EmptyState.vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
 import { fileRoutes } from '@/Components/Files/files';
 import PageShell from '@/Components/PageShell.vue';
@@ -155,12 +156,18 @@ function confirmArchiveToggle(): void {
                     <TabsTrigger v-if="permissions.can_view_finance" value="finance">Finance</TabsTrigger>
                     <TabsTrigger value="members">Members</TabsTrigger>
                     <TabsTrigger value="activity">Activity</TabsTrigger>
-                    <TabsTrigger value="tasks" disabled title="Arrives in Phase 2">Tasks</TabsTrigger>
+                    <TabsTrigger value="tasks">Tasks</TabsTrigger>
                     <TabsTrigger value="files">Files</TabsTrigger>
                 </TabsList>
             </div>
 
-            <TabsContent value="overview" class="flex flex-col gap-4">
+            <!--
+                Every panel is a tab stop: reka gives it `tabindex="0"` so a keyboard can reach
+                what the strip controls, and the primitive's base class is `outline-none`, so
+                the stop painted nothing. The ring goes on here rather than in the generated
+                component, exactly as `Pages/Shared/Notifications.vue` does it.
+            -->
+            <TabsContent value="overview" class="flex flex-col gap-4 rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
                 <ProjectMetaList :project="project" />
 
                 <div class="grid items-start gap-4 lg:grid-cols-2">
@@ -193,7 +200,7 @@ function confirmArchiveToggle(): void {
                 </div>
             </TabsContent>
 
-            <TabsContent v-if="permissions.can_view_finance" value="finance">
+            <TabsContent v-if="permissions.can_view_finance" value="finance" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
                 <FinanceCard
                     :project="project"
                     :billing-frequencies="billingFrequencies"
@@ -201,7 +208,7 @@ function confirmArchiveToggle(): void {
                 />
             </TabsContent>
 
-            <TabsContent value="members">
+            <TabsContent value="members" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
                 <MembersCard
                     :project="project"
                     :assignable-employees="assignableEmployees"
@@ -209,7 +216,33 @@ function confirmArchiveToggle(): void {
                 />
             </TabsContent>
 
-            <TabsContent value="files">
+            <!--
+                Phase 2 built the tasks screens, so this tab stopped being a placeholder. It is
+                not a second Tasks list: the three views already answer "the tasks on this
+                project" through `project_id`, and a fourth copy of that query here would be the
+                bespoke table DESIGN.md §5.8 forbids. So the tab hands the reader over to the
+                real one, pre-filtered, and says so.
+            -->
+            <TabsContent value="tasks" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+                <Card class="min-w-0 gap-4 p-6 shadow-xs">
+                    <h2 class="text-sm font-medium">Tasks</h2>
+                    <EmptyState
+                        :icon="ListTodo"
+                        title="The tasks on this project"
+                        description="They live on the Tasks screens, where the List, the Board and the Calendar all read the same query. This opens them filtered to this project."
+                    >
+                        <template #action>
+                            <Button as-child size="sm">
+                                <Link :href="`/admin/tasks?project_id=${project.id}`">
+                                    Open this project’s tasks
+                                </Link>
+                            </Button>
+                        </template>
+                    </EmptyState>
+                </Card>
+            </TabsContent>
+
+            <TabsContent value="files" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
                 <FilePanel
                     :routes="files"
                     :can-upload="permissions.can_update === true"
@@ -218,7 +251,7 @@ function confirmArchiveToggle(): void {
                 />
             </TabsContent>
 
-            <TabsContent value="activity">
+            <TabsContent value="activity" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
                 <Card class="min-w-0 gap-2 shadow-xs">
                     <CardHeader>
                         <CardTitle class="text-sm font-medium">Activity</CardTitle>

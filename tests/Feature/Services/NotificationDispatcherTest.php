@@ -180,9 +180,63 @@ it('tells the original assigner when a task is completed', function () {
     $this->tasks->transition($this->admin, $farukstask->fresh(), TaskStatus::Completed);
 
     expect(typesFor($this->faruk))->toBe([NotificationType::TaskCompleted->value])
+        // And the person who actually did the work. The spec's recipient list says
+        // `created_by` + reviewer and stops there; its own acceptance sentence says a
+        // notification appears at every step, and on this team those two people are usually
+        // one person who is also the actor — so an approval used to write zero rows and the
+        // assignee was never told. See NotificationDispatcher::onTaskCompleted().
+        ->and(typesFor($this->tapu))->toBe([NotificationType::TaskCompleted->value])
         // The reviewer completed it, so the reviewer is the actor and hears nothing.
         ->and(typesFor($this->admin))->toBe([])
         ->and(typesFor($this->accountant))->toBe([]);
+})->group('phase2');
+
+it('tells the assignee their work was approved, even when the reviewer asked for it', function () {
+    // The acceptance walk's last step, exactly as the plan writes it: Shahadat both created
+    // the task and reviews it, and he is the one who approves. Every candidate the spec's
+    // recipient list names is therefore the actor, and the actor is always dropped — so before
+    // the assignee was added to the list, this step was silent for everybody.
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'Rewritten and re-crawled.');
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::ChangesRequested, 'Two titles still run long.');
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'Both shortened.');
+
+    Notification::query()->delete();
+
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::Completed);
+
+    expect(typesFor($this->tapu))->toBe([NotificationType::TaskCompleted->value])
+        ->and(Notification::query()->forUser($this->tapu)->first()->summary())
+        ->toBe('"'.$this->task->title.'" was completed');
+})->group('phase2');
+
+it('says a resubmission is back rather than repeating the first request', function () {
+    // A second submission groups into the reviewer's existing unread row. Without a plural
+    // branch the sentence still described the first one, so a reviewer who had already asked
+    // for changes saw a bell that said exactly what it said an hour ago.
+    Notification::query()->delete();
+
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'First pass.');
+
+    // By type, not `first()`: moving to In progress notifies the creator too, and which of
+    // the two rows is newest is not what this test is about.
+    $review = fn () => Notification::query()->forUser($this->admin)
+        ->where('type', NotificationType::TaskSubmittedForReview->value)
+        ->first();
+
+    expect($review()->summary())
+        ->toBe('"'.$this->task->title.'" is waiting for your review');
+
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::ChangesRequested, 'Titles run long.');
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'Shortened.');
+
+    $row = $review();
+
+    expect((int) $row->count)->toBe(2)
+        ->and($row->summary())->toBe('"'.$this->task->title.'" is waiting for your review again');
 })->group('phase2');
 
 /*

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue';
+import { computed, nextTick, watch } from 'vue';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/Components/ui/sheet';
 import { queryParam, syncQuery } from '@/lib/tableState';
 import { cn } from '@/lib/utils';
@@ -19,7 +19,16 @@ import { cn } from '@/lib/utils';
  * focus back to on Esc and it lands on `<body>`.
  *
  * Esc, the focus trap and returning focus to the trigger all come from reka's dialog
- * under `ui/sheet`; nothing here re-implements them.
+ * under `ui/sheet`; nothing here re-implements them — except the one case reka cannot cover.
+ *
+ * **A deep link has no trigger.** Open `…/tasks?detail=6` from a colleague's message and the
+ * drawer is on screen without anything having opened it, so on Esc reka restores focus to a
+ * trigger that never existed and it lands on `<body>` — measured, at 1280 and at 375. The next
+ * Tab then starts the page over at the skip link, which is the whole tab order again for
+ * somebody who was reading one record. So the close is checked: if focus came back to nothing,
+ * it is put on `<main>`, which every layout already gives `id="main-content" tabindex="-1"` for
+ * the skip link. Where reka *does* have a trigger — a row click — `activeElement` is that row
+ * and this does nothing.
  */
 const props = withDefaults(
     defineProps<{
@@ -67,6 +76,50 @@ watch(
     },
     { immediate: true },
 );
+
+/**
+ * What had focus when this opened — the thing reka will hand it back to.
+ *
+ * A row click leaves the `<tr>` (or the card `<li>` below `md`) here. A deep link leaves
+ * nothing, because the drawer opens while the page is still mounting and `activeElement` is
+ * `<body>`. That is the whole difference between the two cases, and it is why only one of them
+ * needed fixing.
+ */
+let opener: HTMLElement | null = null;
+
+watch(
+    () => props.open,
+    (open) => {
+        if (!open) {
+            return;
+        }
+
+        const active = document.activeElement;
+        opener = active instanceof HTMLElement && active !== document.body ? active : null;
+    },
+    { immediate: true },
+);
+
+/**
+ * Reka's own moment for putting focus back, before the panel unmounts. Left alone it restores
+ * the opener; with nothing to restore, focus simply falls to `<body>` when the panel goes —
+ * measured at 350 ms, once the close animation has run. So when the opener is gone (or never
+ * existed) we take the event and put focus on `<main>` ourselves.
+ */
+function onCloseAutoFocus(event: Event): void {
+    if (opener !== null && opener.isConnected) {
+        return;
+    }
+
+    const main = document.getElementById('main-content');
+
+    if (main === null) {
+        return;
+    }
+
+    event.preventDefault();
+    void nextTick(() => main.focus({ preventScroll: true }));
+}
 </script>
 
 <template>
@@ -75,6 +128,7 @@ watch(
             side="right"
             :class="cn('w-full gap-0 p-0', widthClass)"
             :aria-describedby="subtitle ? undefined : ''"
+            @close-auto-focus="onCloseAutoFocus"
         >
             <SheetHeader class="flex-row items-start justify-between gap-3 border-b p-4 pr-12">
                 <div class="flex min-w-0 flex-col gap-1">
