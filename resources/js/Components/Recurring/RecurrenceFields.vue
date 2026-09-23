@@ -53,15 +53,11 @@ const ids = {
     dueOffset: `${uid}-due-offset`,
 };
 
-const FREQUENCIES: { value: RecurrenceFrequency; label: string; help: string }[] = [
-    { value: 'monthly', label: 'Monthly', help: 'A calendar month. The period is October 2026.' },
-    { value: 'weekly', label: 'Weekly', help: 'An ISO week. The period is Week 41, 2026.' },
-    { value: 'custom', label: 'Custom', help: 'Every N days from a date you choose.' },
+const FREQUENCIES: { value: RecurrenceFrequency; label: string }[] = [
+    { value: 'monthly', label: 'Monthly' },
+    { value: 'weekly', label: 'Weekly' },
+    { value: 'custom', label: 'Custom' },
 ];
-
-const help = computed(
-    () => FREQUENCIES.find((frequency) => frequency.value === draft.value.frequency)?.help ?? '',
-);
 
 /**
  * The due control is a choice between two sentences rather than a nullable number, because
@@ -112,7 +108,6 @@ function error(key: string): string | undefined {
                         </SelectItem>
                     </SelectContent>
                 </Select>
-                <p class="text-xs text-muted-foreground">{{ help }}</p>
                 <p v-if="error('frequency')" class="text-xs text-destructive">{{ error('frequency') }}</p>
             </div>
 
@@ -129,9 +124,6 @@ function error(key: string): string | undefined {
                     :disabled="disabled"
                     :aria-invalid="error('day_of_month') ? true : undefined"
                 />
-                <p class="text-xs text-muted-foreground">
-                    1 to {{ MAX_DAY_OF_MONTH }}, so the rule never skips February.
-                </p>
                 <p v-if="error('day_of_month')" class="text-xs text-destructive">{{ error('day_of_month') }}</p>
             </div>
 
@@ -178,9 +170,6 @@ function error(key: string): string | undefined {
                     :disabled="disabled"
                     :aria-invalid="error('anchor') ? true : undefined"
                 />
-                <p class="text-xs text-muted-foreground">
-                    Every cycle is counted from this date, forwards and backwards.
-                </p>
                 <p v-if="error('anchor')" class="text-xs text-destructive">{{ error('anchor') }}</p>
             </div>
         </div>
@@ -211,9 +200,6 @@ function error(key: string): string | undefined {
                     :disabled="disabled"
                     :aria-invalid="error('due_offset_days') ? true : undefined"
                 />
-                <p class="text-xs text-muted-foreground">
-                    The same count on every frequency — one knob, not three.
-                </p>
                 <p v-if="error('due_offset_days')" class="text-xs text-destructive">
                     {{ error('due_offset_days') }}
                 </p>

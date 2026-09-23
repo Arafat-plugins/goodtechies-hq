@@ -255,12 +255,6 @@ const checklistError = computed(() =>
                         :aria-invalid="form.errors.title_template ? true : undefined"
                         placeholder="abc.com Monthly Maintenance — {period}"
                     />
-                    <p class="text-xs text-muted-foreground">
-                        <code class="rounded-sm bg-muted px-1 py-0.5">{period}</code>,
-                        <code class="rounded-sm bg-muted px-1 py-0.5">{project}</code> and
-                        <code class="rounded-sm bg-muted px-1 py-0.5">{date}</code> are filled in when
-                        the task is made. Without one of them, every period produces the same title.
-                    </p>
                     <p v-if="form.errors.title_template" class="text-xs text-destructive">
                         {{ form.errors.title_template }}
                     </p>
@@ -300,9 +294,6 @@ const checklistError = computed(() =>
                         :aria-invalid="checklistError ? true : undefined"
                         placeholder="WordPress core updates&#10;Plugin updates&#10;Backup verification"
                     />
-                    <p class="text-xs text-muted-foreground">
-                        Copied onto every generated task, in this order.
-                    </p>
                     <p v-if="checklistError" class="text-xs text-destructive">{{ checklistError }}</p>
                 </div>
 
