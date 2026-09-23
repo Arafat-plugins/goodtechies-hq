@@ -2,6 +2,12 @@
 
 namespace App\Services;
 
+use App\Events\TaskAssigned;
+use App\Events\TaskCompleted;
+use App\Events\TaskDeleted;
+use App\Events\TaskReassigned;
+use App\Events\TaskStatusChanged;
+use App\Events\TaskSubmittedForReview;
 use App\Exceptions\TaskStateException;
 use App\Models\Employee;
 use App\Models\Tag;
@@ -12,6 +18,7 @@ use App\Models\User;
 use App\Support\AuditEvent;
 use App\Support\Permission;
 use App\Support\RoleName;
+use App\Support\TaskBucket;
 use App\Support\TaskPriority;
 use App\Support\TaskStatus;
 use App\Support\UserStatus;
@@ -104,6 +111,7 @@ class TaskService
         private readonly AuditLogger $audit,
         private readonly ActivityLogger $activity,
         private readonly TaskReviewers $reviewers,
+        private readonly ConversationService $conversations,
     ) {}
 
     /**
@@ -118,10 +126,7 @@ class TaskService
      */
     public function query(User $user, array $filters = [], string $order = self::ORDER_LIST): Builder
     {
-        $filters = $this->filters($filters);
-
-        return $this->order(Task::query()
-            ->visibleTo($user)
+        return $this->order($this->filtered($user, $filters)
             ->with(self::RELATIONS)
             // The List view's "Subtasks" column, promised by slice 1's TaskResource and
             // countable now that there is a checklist to count. Two aggregates, not a query
@@ -129,7 +134,94 @@ class TaskService
             ->withCount([
                 'checklistItems',
                 'checklistItems as checklist_items_done_count' => fn (Builder $query) => $query->where('is_done', true),
-            ])
+                // The paperclip on a card. The `files` relation is already current-versions
+                // only, so this counts files and not revisions.
+                'files as attachment_count',
+            ]), $order);
+    }
+
+    /**
+     * How many tasks this question has — scoped and filtered exactly as the list would be.
+     *
+     * A card's number is a COUNT in the database, never `count($rows)` after a fetch and never
+     * a length read off a page of a paginated list. That is the whole difference between "4
+     * overdue" and "4 overdue on this page".
+     *
+     * It runs against filtered() rather than query(): the eager loads and the two ordering
+     * columns are for a list somebody reads, and Postgres refuses `select count(*) … order by
+     * due_date` outright.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function count(User $user, array $filters = []): int
+    {
+        return $this->filtered($user, $filters)->count();
+    }
+
+    /**
+     * One count per bucket, each its own query against the same scoped, filtered base.
+     *
+     * The buckets are `TaskBucket` cases rather than strings so that a screen cannot ask for
+     * a count of something that has no definition — and so that the card's `?bucket=` link
+     * and this count are the same enum case, which is what stops them drifting apart.
+     *
+     * @param  list<TaskBucket>  $buckets
+     * @param  array<string, mixed>  $filters
+     * @return array<string, int>
+     */
+    public function bucketCounts(User $user, array $buckets, array $filters = []): array
+    {
+        $counts = [];
+
+        foreach ($buckets as $bucket) {
+            $counts[$bucket->value] = $this->count($user, [...$filters, 'bucket' => $bucket->value]);
+        }
+
+        return $counts;
+    }
+
+    /**
+     * The buckets as a screen draws them: key, label and count, in the order asked for.
+     *
+     * The card and the link it carries are the same enum case, so a strip cannot end up with
+     * a number from one predicate and a destination built from another.
+     *
+     * @param  list<TaskBucket>  $buckets
+     * @param  array<string, mixed>  $filters
+     * @return list<array{key: string, label: string, count: int}>
+     */
+    public function bucketCards(User $user, array $buckets, array $filters = []): array
+    {
+        $counts = $this->bucketCounts($user, $buckets, $filters);
+
+        return array_map(fn (TaskBucket $bucket): array => [
+            'key' => $bucket->value,
+            'label' => $bucket->cardLabel(),
+            'count' => $counts[$bucket->value],
+        ], $buckets);
+    }
+
+    /**
+     * Everything query() and count() share: the rows this user may see at all, narrowed by
+     * the filters. No ordering and no eager loading, because one of the two callers wants a
+     * number and the other wants a screen.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return Builder<Task>
+     */
+    private function filtered(User $user, array $filters): Builder
+    {
+        $filters = $this->filters($filters);
+
+        return Task::query()
+            ->visibleTo($user)
+            // "Assigned to me", which for an Admin is a real narrowing: Task::visibleTo() has
+            // already handed them the whole agency. A user with no employee row is assigned
+            // nothing, and must not fall through to everybody's work — see onlyMine().
+            ->when($filters['mine'], fn (Builder $q) => $this->onlyMine($q, $user))
+            // The bucket, whose definition lives in TaskBucket::apply() and nowhere else.
+            ->when($filters['bucket'], fn (Builder $q, string $bucket) => TaskBucket::from($bucket)
+                ->apply($q, $filters['as_of']))
             ->when($filters['search'], fn (Builder $q, string $search) => $q->where('title', 'ilike', '%'.$search.'%'))
             ->when($filters['project_id'], fn (Builder $q, int $id) => $q->where('project_id', $id))
             ->when($filters['status'], fn (Builder $q, string $status) => $q->where('status', $status))
@@ -153,7 +245,25 @@ class TaskService
             ))
             ->when($filters['overdue'], fn (Builder $q) => $q->overdue($filters['as_of']))
             // Archived tasks are hidden from active views unless explicitly asked for.
-            ->unless($filters['archived'], fn (Builder $q) => $q->notArchived()), $order);
+            ->unless($filters['archived'], fn (Builder $q) => $q->notArchived());
+    }
+
+    /**
+     * The `mine` narrowing: tasks this user is assigned to, primary or not.
+     *
+     * The null branch is the one that matters. `Task::visibleTo()` gives an Admin every row,
+     * so if "mine" quietly did nothing for a user without an employee record, an Admin's My
+     * Tasks page would show the agency's entire backlog as their own plate. Nobody is assigned
+     * a task without an employee row, so the honest answer is no rows.
+     *
+     * @param  Builder<Task>  $query
+     * @return Builder<Task>
+     */
+    private function onlyMine(Builder $query, User $user): Builder
+    {
+        $employee = $user->employee;
+
+        return $employee === null ? $query->whereRaw('1 = 0') : $query->forEmployee($employee);
     }
 
     /**
@@ -441,6 +551,17 @@ class TaskService
 
             $this->activity->record($task, 'Task created', $actor);
 
+            // Every task is born with its discussion (Phase 2 slice 4, recorded decision): the
+            // spec's `task_comments` table is not created, and a task's "comments" are the
+            // messages of its own `task` conversation. Doing it here, inside the create
+            // transaction, means a task and its discussion arrive together or not at all.
+            //
+            // It is not the only guarantee, and deliberately so — the conversations migration
+            // backfills every task that predates the table, and forTask() is a firstOrCreate
+            // behind a unique index, so a task made by the factory or the seeder still ends up
+            // with exactly one.
+            $this->conversations->forTask($task);
+
             if ($assigneeIds !== []) {
                 $this->applyAssignees($actor, $task, $assigneeIds, $primaryId, AuditEvent::TaskAssigned);
             }
@@ -616,7 +737,35 @@ class TaskService
                 $actor,
             );
 
+            $this->announceTransition($actor, $task, $from, $to, $reason);
+
             return $task;
+        });
+    }
+
+    /**
+     * Slice 5: tell the people who need to know that this task moved.
+     *
+     * ONE event per move. Two of the eight destinations have a notification of their own in the
+     * spec's automation table — "Task marked In Review → notify reviewer" and "Task completed →
+     * notify original assigner/reviewer" — so those two fire their own event INSTEAD of the
+     * general one, never as well as it. §11's rule is "one event = one notification", and a
+     * reviewer told both "waiting for your review" and "status changed to In review" has been
+     * told the same thing twice.
+     *
+     * Who hears about each is NotificationDispatcher's half, not this class's.
+     */
+    private function announceTransition(
+        User $actor,
+        Task $task,
+        TaskStatus $from,
+        TaskStatus $to,
+        ?string $reason,
+    ): void {
+        event(match ($to) {
+            TaskStatus::InReview => new TaskSubmittedForReview($task, $actor),
+            TaskStatus::Completed => new TaskCompleted($task, $actor),
+            default => new TaskStatusChanged($task, $actor, $from, $to, $reason),
         });
     }
 
@@ -704,6 +853,14 @@ class TaskService
                 $actor,
             );
 
+            // Slice 5. A hand-off does not go through applyAssignees() — the assignee SET does
+            // not change, only which of them owns completion — so the event is fired here, with
+            // identical before and after lists and two different primaries. That is exactly the
+            // shape NotificationDispatcher reads to work out that both of them need telling.
+            $ids = $assignees->pluck('id')->map('intval')->values()->all();
+
+            event(new TaskReassigned($task, $actor, $ids, $ids, $from?->id, (int) $to->id));
+
             return $task->refresh();
         });
     }
@@ -727,6 +884,11 @@ class TaskService
             $this->activity->record($task, 'Task deleted', $actor);
 
             $task->delete();
+
+            // After the delete, so the event describes something that has happened. The delete
+            // is SOFT, so the row, its assignees and its policy answers are all still there for
+            // the dispatcher to ask about.
+            event(new TaskDeleted($task, $actor));
         });
     }
 
@@ -1150,6 +1312,25 @@ class TaskService
             : 'Assigned to '.implode(', ', $names), $actor);
 
         $this->audit->record($event, $task, $before, $after, $actor);
+
+        // Slice 5. Fired here rather than in the two public callers because this is the one
+        // place that knows whether the set really changed — the early return above means an
+        // idempotent re-save of the same assignees notifies nobody, which is what stops a form
+        // submitted twice from sending two "you were assigned" rows.
+        //
+        // In the same transaction as the audit row, deliberately: the listener writes
+        // `notifications` synchronously, so a write that rolls back takes its notification with
+        // it. See App\Events\TaskAssigned for why that is the rule.
+        event($event === AuditEvent::TaskAssigned
+            ? new TaskAssigned($task, $actor, $after['assignee_ids'])
+            : new TaskReassigned(
+                $task,
+                $actor,
+                $before['assignee_ids'],
+                $after['assignee_ids'],
+                $before['primary_employee_id'] === null ? null : (int) $before['primary_employee_id'],
+                $after['primary_employee_id'] === null ? null : (int) $after['primary_employee_id'],
+            ));
     }
 
     /**
@@ -1696,7 +1877,7 @@ class TaskService
      * Either end may stand alone: `date_from` on its own is an open-ended "from here on".
      *
      * @param  array<string, mixed>  $filters
-     * @return array{search: string|null, project_id: int|null, status: string|null, priority: string|null, assignee_id: int|null, tag_id: int|null, date_from: Carbon|null, date_to: Carbon|null, overdue: bool, archived: bool, as_of: Carbon}
+     * @return array{search: string|null, project_id: int|null, status: string|null, priority: string|null, assignee_id: int|null, tag_id: int|null, bucket: string|null, mine: bool, date_from: Carbon|null, date_to: Carbon|null, overdue: bool, archived: bool, as_of: Carbon}
      */
     public function filters(array $filters): array
     {
@@ -1707,6 +1888,11 @@ class TaskService
             'search' => $search === '' ? null : $search,
             'project_id' => $this->id($filters['project_id'] ?? null),
             'status' => TaskStatus::tryFrom((string) ($filters['status'] ?? ''))?->value,
+            // An unrecognised bucket becomes null rather than an error, exactly as an
+            // unrecognised status does — a stale link asks a question that no longer exists,
+            // and the honest answer is the unnarrowed list, not a 500.
+            'bucket' => TaskBucket::tryFrom((string) ($filters['bucket'] ?? ''))?->value,
+            'mine' => (bool) ($filters['mine'] ?? false),
             'priority' => TaskPriority::tryFrom((string) ($filters['priority'] ?? ''))?->value,
             'assignee_id' => $this->id($filters['assignee_id'] ?? null),
             'tag_id' => $this->id($filters['tag_id'] ?? null),

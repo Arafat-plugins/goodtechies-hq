@@ -11,7 +11,10 @@ use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Http\Request;
 
 /** The keys every requester gets, whatever their role. */
-const PUBLIC_CLIENT_KEYS = ['id', 'name', 'status', 'status_label'];
+// `permissions` is here, not in the commercial half: what you may *do* to a client is not a
+// commercial fact about that client, and a screen needs it before it knows whether to draw a
+// control. Its two keys are false for anyone who may not, which is the whole answer.
+const PUBLIC_CLIENT_KEYS = ['id', 'name', 'status', 'status_label', 'permissions'];
 
 beforeEach(function () {
     $this->seed(RolePermissionSeeder::class);
@@ -127,4 +130,20 @@ it('labels an inactive client', function () {
 
     expect($payload['status'])->toBe('inactive')
         ->and($payload['status_label'])->toBe('Inactive');
+})->group('phase1');
+
+it('answers what each requester may do to the client, from the policy', function () {
+    // The Files tab on the client page needs this before it draws an upload control, and the
+    // alternative it used first — "only an Admin is on this surface, so reaching the page is
+    // the permission" — is an inference that stops being true the day a role is added.
+    expect(clientPayload($this->client, $this->admin)['permissions'])
+        ->toBe(['can_update' => true, 'can_delete' => true]);
+
+    foreach ([$this->manager, $this->employee] as $user) {
+        expect(clientPayload($this->client, $user)['permissions'])
+            ->toBe(['can_update' => false, 'can_delete' => false]);
+    }
+
+    expect(clientPayload($this->client, null)['permissions'])
+        ->toBe(['can_update' => false, 'can_delete' => false]);
 })->group('phase1');

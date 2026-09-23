@@ -22,9 +22,13 @@ defineProps<{
     can_plan: boolean;
     filters: TaskFilters;
     statuses: TaskOption[];
+    /** The bucket chip's options — "what is late", "what is due today". Server-labelled. */
+    buckets: TaskOption[];
     priorities: TaskOption[];
     projects: TaskNamedRef[];
     tags: TaskTag[];
+    /** `TagPolicy::create`, answered by the controller — whether the tag manager is offered. */
+    canManageTags: boolean;
 }>();
 
 useFlashAsToast();
@@ -44,9 +48,11 @@ useFlashAsToast();
             surface="employee"
             :filters="filters"
             :statuses="statuses"
+            :buckets="buckets"
             :priorities="priorities"
             :projects="projects"
             :tags="tags"
+            :can-manage-tags="canManageTags"
             search-placeholder="Search your tasks…"
             empty-title="Nothing of yours is scheduled in this window"
             empty-description="Move to another month — a task with no dates is not on a grid."

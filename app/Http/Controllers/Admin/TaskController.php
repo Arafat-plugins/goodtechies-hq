@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Exceptions\TaskStateException;
+use App\Http\Controllers\Concerns\BuildsDiscussionPayload;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Task\ChangeTaskStatusRequest;
 use App\Http\Requests\Task\HandOffTaskRequest;
@@ -25,7 +26,9 @@ use App\Models\TaskChecklistItem;
 use App\Models\TaskLink;
 use App\Models\User;
 use App\Services\ActivityLogger;
+use App\Services\ConversationService;
 use App\Services\TaskService;
+use App\Support\TaskBucket;
 use App\Support\TaskPriority;
 use App\Support\TaskStatus;
 use Illuminate\Http\RedirectResponse;
@@ -53,6 +56,10 @@ use Inertia\Response;
  */
 class TaskController extends Controller
 {
+    // The detail page inlines the task's discussion into its props, in the same shape the
+    // `…/discussion` endpoint sends, so the panel paints with its thread already in hand.
+    use BuildsDiscussionPayload;
+
     /** How far back a task's timeline is shown on the detail page. */
     private const ACTIVITY_LIMIT = 30;
 
@@ -66,11 +73,15 @@ class TaskController extends Controller
         'completer',
         'firstCompleter',
         'workSummaryAuthor',
+        // The attachment panel. Current versions only — the relation says so — each one's
+        // uploader eager-loaded so FileResource does not query per row.
+        'files.uploader',
     ];
 
     public function __construct(
         private readonly TaskService $tasks,
         private readonly ActivityLogger $activity,
+        private readonly ConversationService $conversations,
     ) {}
 
     public function index(Request $request): Response
@@ -87,8 +98,15 @@ class TaskController extends Controller
             'groupByOptions' => TaskService::GROUP_BY,
             'statuses' => $this->options(TaskStatus::boardOrder()),
             'priorities' => $this->options(TaskPriority::cases()),
+            // The bucket chip's options. A bucket is a question rather than a column value
+            // — "what is late", "what is due today" — and it is the vocabulary the
+            // dashboards' cards link in, so a card's count and the list it opens are the
+            // same predicate. Unset, the chip is invisible: FilterBar only draws a chip for
+            // a filter that has a value.
+            'buckets' => $this->options(TaskBucket::cases()),
             'projects' => $this->projects($request),
             'tags' => $this->filterTags($request),
+            'canManageTags' => $this->mayManageTags(),
             // The assignee picker's options. TaskService has taken an `assignee_id` filter
             // since slice 1 and no controller sent the list to build it with, so the chip bar
             // could not offer it — the 2-8 follow-up.
@@ -118,8 +136,15 @@ class TaskController extends Controller
             'transitions' => $this->tasks->transitionsFor($request->user()),
             'statuses' => $this->options(TaskStatus::boardOrder()),
             'priorities' => $this->options(TaskPriority::cases()),
+            // The bucket chip's options. A bucket is a question rather than a column value
+            // — "what is late", "what is due today" — and it is the vocabulary the
+            // dashboards' cards link in, so a card's count and the list it opens are the
+            // same predicate. Unset, the chip is invisible: FilterBar only draws a chip for
+            // a filter that has a value.
+            'buckets' => $this->options(TaskBucket::cases()),
             'projects' => $this->projects($request),
             'tags' => $this->filterTags($request),
+            'canManageTags' => $this->mayManageTags(),
             'employees' => $this->employees(),
         ]);
     }
@@ -145,8 +170,15 @@ class TaskController extends Controller
             'can_plan' => TaskService::mayPlan($request->user()),
             'statuses' => $this->options(TaskStatus::boardOrder()),
             'priorities' => $this->options(TaskPriority::cases()),
+            // The bucket chip's options. A bucket is a question rather than a column value
+            // — "what is late", "what is due today" — and it is the vocabulary the
+            // dashboards' cards link in, so a card's count and the list it opens are the
+            // same predicate. Unset, the chip is invisible: FilterBar only draws a chip for
+            // a filter that has a value.
+            'buckets' => $this->options(TaskBucket::cases()),
             'projects' => $this->projects($request),
             'tags' => $this->filterTags($request),
+            'canManageTags' => $this->mayManageTags(),
             'employees' => $this->employees(),
         ]);
     }
@@ -174,6 +206,10 @@ class TaskController extends Controller
             // offering a label that the request would then refuse is worse than no picker.
             'tags' => $this->tagsFor($task->project),
             'siblings' => $this->siblings($task),
+            // The task's discussion — the plan's "comments", which are the messages of this
+            // task's own conversation. Inlined so the panel paints with its thread; the
+            // `…/discussion` endpoint sends the identical shape for refreshes after a post.
+            'discussion' => $this->discussionPayload($request, $task),
         ]);
     }
 
@@ -398,6 +434,7 @@ class TaskController extends Controller
             ->withCount([
                 'checklistItems',
                 'checklistItems as checklist_items_done_count' => fn ($query) => $query->where('is_done', true),
+                'files as attachment_count',
             ])
             ->whereKey($task->getKey())
             ->firstOrFail();
@@ -582,6 +619,21 @@ class TaskController extends Controller
     }
 
     /**
+     * Whether to offer the tag manager beside the filter chips at all.
+     *
+     * Sent from the server for the same reason `can_plan` is: the alternative is a Vue file
+     * deciding from `auth.user.role`, which is a second copy of `TagPolicy::manages()` living
+     * where nobody will remember to change it. `Gate::allows('create', Tag::class)` passes no
+     * project, so this is the global-tag answer — the weakest thing the manager can do, and
+     * therefore the right gate for whether the door is worth showing. Every endpoint behind
+     * the door asks again.
+     */
+    private function mayManageTags(): bool
+    {
+        return Gate::allows('create', Tag::class);
+    }
+
+    /**
      * One task's picker: the tags that task's project can use, its own plus the global ones,
      * which is exactly the set `tag_ids` accepts.
      *
@@ -604,7 +656,7 @@ class TaskController extends Controller
             ->map(fn (Tag $tag): array => [
                 'id' => $tag->id,
                 'name' => $tag->name,
-                'colour' => $tag->colour,
+                'colour' => $tag->colour?->value,
                 'is_global' => $tag->isGlobal(),
             ])
             ->values()
@@ -629,13 +681,13 @@ class TaskController extends Controller
     }
 
     /**
-     * @param  list<TaskStatus|TaskPriority>  $cases
+     * @param  list<TaskStatus|TaskPriority|TaskBucket>  $cases
      * @return list<array{value: string, label: string}>
      */
     private function options(array $cases): array
     {
         return array_map(
-            fn (TaskStatus|TaskPriority $case): array => [
+            fn (TaskStatus|TaskPriority|TaskBucket $case): array => [
                 'value' => $case->value,
                 'label' => $case->label(),
             ],

@@ -100,13 +100,17 @@ it('sends a board card everything the card draws, and nothing from the project f
                 ->has('assignees')
                 ->has('primary_assignee')
                 ->has('tags')
-                // Checklist counts exist because checklists do. Comments and attachments
-                // arrive in slice 4 and are absent rather than sent as zeros that would look
-                // like counts of something.
+                // Checklist counts exist because checklists do, and so now does the
+                // attachment count — slice 4 gave the paperclip something real to print.
+                // Comments arrive in the next slice and are still absent rather than sent as
+                // a zero that would look like a count of something.
                 ->has('subtask_count')
                 ->has('subtasks_done_count')
+                ->has('attachment_count')
                 ->missing('comment_count')
-                ->missing('attachment_count')
+                // The attachments themselves are the detail page's: a board must not sign a
+                // URL per file per card to draw a number.
+                ->missing('attachments')
                 // The project fragment is ProjectResource's, not a select list of columns.
                 ->has('project', fn (Assert $project) => $project
                     ->has('id')

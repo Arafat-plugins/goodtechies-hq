@@ -21,9 +21,13 @@ defineProps<{
     can_plan: boolean;
     filters: TaskFilters;
     statuses: TaskOption[];
+    /** The bucket chip's options — "what is late", "what is due today". Server-labelled. */
+    buckets: TaskOption[];
     priorities: TaskOption[];
     projects: TaskNamedRef[];
     tags: TaskTag[];
+    /** `TagPolicy::create`, answered by the controller — whether the tag manager is offered. */
+    canManageTags: boolean;
     employees: TaskNamedRef[];
 }>();
 
@@ -58,9 +62,11 @@ if (quickAddOpen.value) {
             surface="admin"
             :filters="filters"
             :statuses="statuses"
+            :buckets="buckets"
             :priorities="priorities"
             :projects="projects"
             :tags="tags"
+            :can-manage-tags="canManageTags"
             :employees="employees"
             search-placeholder="Search tasks…"
             empty-title="Nothing scheduled in this window"

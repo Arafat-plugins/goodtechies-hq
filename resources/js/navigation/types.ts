@@ -42,9 +42,48 @@ export function isActiveHref(url: string, href: string | undefined): boolean {
     return url === href || url.startsWith(`${href}/`) || url.startsWith(`${href}?`);
 }
 
-/** Is this row the one the current URL belongs to? `activePrefix` widens it — see NavItem. */
+/** Does this row CLAIM the current URL? `activePrefix` widens the claim — see NavItem. */
 export function isActiveItem(url: string, item: NavItem): boolean {
     return isActiveHref(url, item.activePrefix ?? item.href);
+}
+
+/**
+ * The ONE row a URL belongs to: of every row that claims it, the most specific claim wins.
+ *
+ * `isActiveItem` answers "does this row claim this URL", and more than one row legitimately
+ * can. `/admin/tasks/calendar` is claimed by the Tasks row (whose `activePrefix` is
+ * `/admin/tasks`, decision C-3) and by the Calendar row that points straight at it;
+ * `/admin/my-tasks?bucket=overdue` is claimed by both My Tasks and Overdue. Lighting both
+ * would be a sidebar saying you are in two places, so the longer pattern — the one that
+ * describes more of the URL — takes the row.
+ *
+ * This is the rule `matchNavItem()` in `lib/breadcrumb.ts` already used for the breadcrumb;
+ * it is here so the sidebar and the breadcrumb cannot end up naming different rows.
+ *
+ * Rows without an `href` are the unbuilt ones and never match.
+ */
+export function activeItem(groups: NavGroup[], url: string): NavItem | null {
+    let best: NavItem | null = null;
+    let bestLength = -1;
+
+    for (const group of groups) {
+        for (const item of group.items) {
+            if (!isActiveItem(url, item)) {
+                continue;
+            }
+
+            // The matched PATTERN's length, not the href's: a row with an `activePrefix` makes
+            // the wider claim and must lose to a row that named the exact page.
+            const length = (item.activePrefix ?? item.href ?? '').length;
+
+            if (length > bestLength) {
+                best = item;
+                bestLength = length;
+            }
+        }
+    }
+
+    return best;
 }
 
 /**
@@ -81,6 +120,11 @@ export function comingSoonItems(groups: NavGroup[]): NavItem[] {
     return groups.flatMap((group) => group.items.filter((item) => !isLiveItem(item)));
 }
 
-export function groupHasActive(group: NavGroup, url: string): boolean {
-    return group.items.some((item) => isActiveItem(url, item));
+/**
+ * Does the active row live in this group? It takes the already-resolved row rather than the
+ * URL, so a group cannot report itself active because one of its rows made a claim that
+ * another group's row then won — see activeItem().
+ */
+export function groupHasActive(group: NavGroup, active: NavItem | null): boolean {
+    return active !== null && group.items.includes(active);
 }

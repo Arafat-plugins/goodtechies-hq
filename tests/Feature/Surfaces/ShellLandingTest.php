@@ -79,9 +79,11 @@ it('gives each dashboard exactly its documented props', function (string $email,
 
     expect(array_values(array_diff($pageProps, $shared)))->toEqualCanonicalizing($props);
 })->with([
-    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats']],
+    // `workStats` / `taskStats` are the Phase 2 task cards: five counts apiece, each one a
+    // server-side query with the link to the tasks it counted.
+    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats']],
     'accountant' => ['accountant@goodtechies.test', '/accountant/dashboard', ['greetingName', 'today']],
-    'employee' => ['yaseen@goodtechies.test', '/employee/dashboard', ['greetingName', 'today', 'trackingMode']],
+    'employee' => ['yaseen@goodtechies.test', '/employee/dashboard', ['greetingName', 'today', 'trackingMode', 'taskStats']],
 ])->group('phase0');
 
 it('passes the greeting name and tracking mode to the employee dashboard', function (string $email, string $name, string $mode) {

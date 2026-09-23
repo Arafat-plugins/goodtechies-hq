@@ -97,10 +97,26 @@ class TaskResource extends JsonResource
             'subtask_count' => (int) ($this->resource->checklist_items_count ?? 0),
             'subtasks_done_count' => (int) ($this->resource->checklist_items_done_count ?? 0),
 
+            // How many files are on the task, counting each one once whatever its version
+            // history looks like. Slice 3's board card printed a paperclip with nothing beside
+            // it because the server sent nothing; it sends this now. Every query that produces
+            // a TaskResource sets the count — TaskService::query() for the three list views and
+            // the two controllers' visible() for the detail page — for the same reason
+            // `subtask_count` is a withCount and not a relation read: a list must not become a
+            // query per row to print a number.
+            'attachment_count' => (int) ($this->resource->attachment_count ?? 0),
+
             // The detail page's panels. Behind whenLoaded so the List view's payload does not
             // grow three relations per row it never draws.
             'checklist' => $this->whenLoaded('checklistItems', fn (): array => $this->checklist()),
             'links' => $this->whenLoaded('links', fn (): array => $this->links()),
+            // The attachment panel's rows, each through FileResource — which is what mints the
+            // signed URL. Behind whenLoaded like the rest: a board of two hundred cards must
+            // not sign two hundred links to draw a paperclip.
+            'attachments' => $this->whenLoaded(
+                'files',
+                fn (): array => FileResource::collection($this->resource->files)->toArray($request),
+            ),
             'dependencies' => $this->whenLoaded('dependencies', fn (): array => $this->taskStubs($this->resource->dependencies)),
             'dependents' => $this->whenLoaded('dependents', fn (): array => $this->taskStubs($this->resource->dependents)),
 
@@ -289,7 +305,7 @@ class TaskResource extends JsonResource
             ->map(fn (Tag $tag): array => [
                 'id' => $tag->id,
                 'name' => $tag->name,
-                'colour' => $tag->colour,
+                'colour' => $tag->colour?->value,
                 'is_global' => $tag->isGlobal(),
             ])
             ->values()

@@ -3,7 +3,7 @@ import { Head, router } from '@inertiajs/vue3';
 import PageShell from '@/Components/PageShell.vue';
 import type { TaskTag } from '@/Components/Tasks/TaskList.vue';
 import TaskDetailBody from '@/Components/Tasks/TaskDetailBody.vue';
-import type { TaskActivityEntry, TaskDetail } from '@/Components/Tasks/taskDetail';
+import type { TaskActivityEntry, TaskDetail, TaskDiscussion } from '@/Components/Tasks/taskDetail';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
 
@@ -29,6 +29,11 @@ defineOptions({ layout: EmployeeLayout });
 defineProps<{
     task: TaskDetail;
     activity: TaskActivityEntry[];
+    /**
+     * The same discussion, on the same terms: an employee reaches a task's thread exactly when
+     * they reach the task, because `ConversationPolicy` asks `TaskPolicy::view` and nothing else.
+     */
+    discussion: TaskDiscussion;
     reviewers: { id: number; name: string | null }[];
     /** This project's tags plus the global ones — exactly what `tag_ids` accepts. */
     tags: TaskTag[];
@@ -49,6 +54,7 @@ useFlashAsToast();
         <TaskDetailBody
             :task="task"
             :activity="activity"
+            :discussion="discussion"
             surface="employee"
             :reviewers="reviewers"
             :tags="tags"

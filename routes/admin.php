@@ -1,13 +1,20 @@
 <?php
 
 use App\Http\Controllers\Admin\ClientController;
+use App\Http\Controllers\Admin\ClientFileController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\FileController;
+use App\Http\Controllers\Admin\MyTaskController;
 use App\Http\Controllers\Admin\ProjectController;
+use App\Http\Controllers\Admin\ProjectFileController;
 use App\Http\Controllers\Admin\ProjectFinanceController;
 use App\Http\Controllers\Admin\ProjectMemberController;
 use App\Http\Controllers\Admin\ProjectStatusController;
 use App\Http\Controllers\Admin\SettingsController;
+use App\Http\Controllers\Admin\TagController;
 use App\Http\Controllers\Admin\TaskController;
+use App\Http\Controllers\Admin\TaskDiscussionController;
+use App\Http\Controllers\Admin\TaskFileController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('admin')
@@ -19,6 +26,15 @@ Route::prefix('admin')
             ->middleware('can:settings.manage')
             ->name('settings');
 
+        // An Admin's own plate. One route, seven buckets on `?bucket=` — Due today and Overdue
+        // are questions about the same plate, not separate screens, so they are deep links into
+        // this one rather than two more routes with two more queries to keep in step.
+        //
+        // It sits OUTSIDE the `tasks` prefix deliberately: `/admin/tasks/my` would bind `my` as
+        // a task id at the first careless reorder, and the nav's `activePrefix` for the Tasks
+        // row would light on a page that is not a Tasks view.
+        Route::get('/my-tasks', [MyTaskController::class, 'index'])->name('my-tasks');
+
         Route::prefix('clients')->name('clients.')->group(function () {
             Route::get('/', [ClientController::class, 'index'])->name('index');
             Route::get('/create', [ClientController::class, 'create'])->name('create');
@@ -28,6 +44,11 @@ Route::prefix('admin')
             Route::put('/{client}', [ClientController::class, 'update'])->name('update');
             // Clients are never deleted; a finished one is deactivated.
             Route::post('/{client}/deactivate', [ClientController::class, 'deactivate'])->name('deactivate');
+
+            // The client detail page's Files tab (spec §28). The same FileService as the task
+            // panel and the project tab; listing takes clients.view_full, attaching clients.edit.
+            Route::get('/{client}/files', [ClientFileController::class, 'index'])->name('files.index');
+            Route::post('/{client}/files', [ClientFileController::class, 'store'])->name('files.store');
         });
 
         Route::prefix('projects')->name('projects.')->group(function () {
@@ -43,6 +64,10 @@ Route::prefix('admin')
             Route::post('/{project}/status', [ProjectStatusController::class, 'update'])->name('status');
             Route::post('/{project}/archive', [ProjectStatusController::class, 'archive'])->name('archive');
             Route::post('/{project}/unarchive', [ProjectStatusController::class, 'unarchive'])->name('unarchive');
+
+            // The project detail page's Files tab (spec §7).
+            Route::get('/{project}/files', [ProjectFileController::class, 'index'])->name('files.index');
+            Route::post('/{project}/files', [ProjectFileController::class, 'store'])->name('files.store');
         });
 
         // Tasks. A status moves through ONE endpoint — `…/status` — and `PUT /{task}` does not
@@ -85,5 +110,44 @@ Route::prefix('admin')
 
             Route::post('/{task}/dependencies', [TaskController::class, 'storeDependency'])->name('dependencies.store');
             Route::delete('/{task}/dependencies/{dependency}', [TaskController::class, 'destroyDependency'])->name('dependencies.destroy');
+
+            // Attachments. The list and the upload hang off the task; replacing and deleting
+            // hang off the FILE, below, because those two are the same act whichever kind of
+            // record owns it.
+            Route::get('/{task}/files', [TaskFileController::class, 'index'])->name('files.index');
+            Route::post('/{task}/files', [TaskFileController::class, 'store'])->name('files.store');
+
+            // The discussion — the plan's "comments", stored as the messages of the task's own
+            // `task` conversation (one store, no `task_comments` table). There is no route for
+            // editing or deleting a message, and that is the feature: a message is what
+            // somebody said at a time.
+            Route::get('/{task}/discussion', [TaskDiscussionController::class, 'index'])->name('discussion.index');
+            Route::post('/{task}/discussion', [TaskDiscussionController::class, 'store'])->name('discussion.store');
+        });
+
+        // Tag management (spec: "Admin/Manager create, global or per project"). ASSIGNING a
+        // tag is not here and is not an endpoint at all — it is `tag_ids` on the task update,
+        // which is why an employee can label a task without being able to invent a label.
+        //
+        // The same four routes exist on the Employee surface, because that is where a Manager
+        // lives; TagPolicy is what keeps an employee out of them, not their absence.
+        Route::prefix('tags')->name('tags.')->group(function () {
+            Route::get('/', [TagController::class, 'index'])->name('index');
+            Route::post('/', [TagController::class, 'store'])->name('store');
+            Route::put('/{tag}', [TagController::class, 'update'])->name('update');
+            Route::delete('/{tag}', [TagController::class, 'destroy'])->name('destroy');
+        });
+
+        // One file, whatever owns it. Downloading is not here: it is `GET /files/{file}` in
+        // routes/shared.php, signed, because the answer does not depend on the surface.
+        Route::prefix('files')->name('files.')->group(function () {
+            // The chain, oldest first and including the current version — JSON, like the two
+            // Files tabs' index, because it is what the panel's history disclosure fetches when
+            // somebody opens it. A file this requester may not see answers 404 here exactly as
+            // it does everywhere else, versions and their count included.
+            Route::get('/{file}/versions', [FileController::class, 'versions'])->name('versions.index');
+            // A new version. Never an overwrite — the row being replaced keeps its bytes.
+            Route::post('/{file}/versions', [FileController::class, 'storeVersion'])->name('versions.store');
+            Route::delete('/{file}', [FileController::class, 'destroy'])->name('destroy');
         });
     });

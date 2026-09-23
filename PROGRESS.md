@@ -316,6 +316,64 @@ class.
   numbers that meant two different things. Repaired — it now runs 0.5-1 … 0.5-30 with no
   duplicate and no gap, and the spec's §0 board records how.
 
+## Phase 2 — Tasks (in progress)
+
+Built as five vertical slices. All five are done; the phase close-out and **GATE C** remain.
+
+| Slice | What it is | State |
+| --- | --- | --- |
+| 1 | Tasks List, grouped by status, filters, both surfaces | done |
+| 2 | Task detail, create/edit, the status machine | done |
+| 3 | Board (drag between lanes, manual order) and Calendar | done |
+| 4 | Tags, files, task discussion — backend and screens | done |
+| 5 | Notifications, My Tasks, real dashboard task cards, `hq:flag-overdue` | done |
+
+**Slice 4, in one paragraph.** Attachments hang off tasks, projects and clients through one
+`files` table with an exclusive-arc CHECK, versioned by `superseded_at` + `version_of` with a
+partial unique index that makes two current versions impossible. A file's link is signed *into
+the application* and re-checked by `FilePolicy` on every fetch, so forwarding one gives 404 to
+somebody who may not see the owning record (2-25). Tags carry a status-token name rather than a
+hex colour (2-22). A task's discussion is one conversation per task, with membership computed
+from `TaskPolicy::view` rather than stored (2-24). On screen: a Files tab on project and client
+detail, an attachments panel and a Discussion panel on task detail (page mount and drawer mount,
+both surfaces), and a tag manager beside the filter chips.
+
+Five defects were found by review rather than by tests, and fixed in the same slice: a 422 that
+leaked the existence of an invisible tag (2-27), a permission derived from a role in a Vue file
+(2-28), a missing `permissions` block that forced a hard-coded `true` (2-29), file version
+history that was unreachable and a payload key that could never be populated (2-26), and an
+upload-refusal check that read a flash bag another component had already emptied.
+
+**Slice 5, in one paragraph.** One engine: event → recipients → dedup/group → row. Recipients
+pass two filters and neither names a role — the type's required permission, and `view` on the
+object itself (2-31), so the Accountant receives nothing because they hold no `tasks.*` key.
+Grouping happens at dispatch, as the spec insists: twelve comments inside
+`settings.notification_group_window_minutes` are one row written with `count: 12`, proved end to
+end through twelve real `ConversationService::post()` calls. `hq:flag-overdue` runs daily at
+08:00 and only *sends* — the overdue buckets stay query-time. The bell polls every 15s and stops
+when nobody is looking (2-39); the Notification Center is the same route that answers the bell's
+JSON (2-41). `TaskBucket` is the single statement of each bucket predicate, so a dashboard card's
+count and the list it opens are the same `where` (2-37). And the cancel-project side effect Phase
+1 could only record as a sentence is now real: it *prompts* the PM and every Admin to close or
+reassign the open tasks, and closes nothing itself (2-36).
+
+**Client change requests** from 22 Sep are logged as C-1…C-7 in `docs/decisions.md`: the product
+is **goodERP**, the Board is the default Tasks view, and the board-scroll work was built and then
+withdrawn at the client's request (kept in history at `1148417`).
+
+**Tests: 922 passing, 4982 assertions.** Baseline recorded in `AGENTS.md`.
+
+### Open follow-ups from Phase 2
+
+| # | What |
+| --- | --- |
+| 2-5 | Review and Waiting are hard to tell apart under deuteranopia |
+| 2-8 | *(closed in slice 2 — the assignee filter shipped with its option list)* |
+| 2-15 | A cross-project move drops foreign tags but leaves dependencies |
+| 2-20 | `can_review` resolves per row — a gate call per card on List, Board and Calendar |
+| 2-21 | An Admin board card carries the whole project finance fragment to print a name |
+| 2-30 | The task detail payload ships an `attachments` array no screen reads |
+
 ## Deployment log
 
 | Date | Commit | Server | Result |
@@ -326,12 +384,25 @@ class.
 
 ## Next step
 
-**Stop: waiting for GATE B.** Sign in as Shahadat and as Tapu side by side and check the privacy behaviour: Shahadat sees *Buffalo Modular Homes*, the price and the internal notes; Tapu sees *buffalomodular.com — SEO* and nothing commercial.
+**Phase 2 close-out, then GATE C.**
 
-Then:
+1. Run the phase's own acceptance from the spec: *Tapu opens "Optimize Home Model pages", works
+   it, submits with a summary, Shahadat requests changes then approves; notifications appear for
+   each step.* Every piece now exists; nobody has walked it end to end in one sitting.
+2. A light/dark, keyboard and 360 px pass over every screen the phase added, as Phase 0.5's
+   close-out did — that pass is what found the two-factor tab trap and the overdue-in-red bug.
+3. `DESIGN.md`: §4.1 still describes the bell as "the bell with its empty popover"; the new
+   panels, the tag manager and the Notification Center are not in it.
+4. `AGENTS.md`: the Surfaces table is still marked stale and predates Phase 2's routes.
+5. Sync to `D:\goodtechies-hq` and stop at **GATE C**.
 
-1. Answer the GATE A questions above (they are still open) and the GATE B ones.
-2. Start **Phase 2 — Tasks**: List grouped by status (decision 0.5-6 settles that this is the
-   first build), Board, Calendar, tags, files, task discussion and in-app notifications. It is the
-   biggest phase so far, about ten briefs. Phase 0.5 means it starts from a shell, a table, an
-   empty state and a chart set that already exist — Phase 2 writes screens, not primitives.
+**Still open, and blocking nothing yet:** the GATE A questions (Sun–Thu week, real email
+addresses, VPS and backup bucket, Google Workspace, spec §46, the ClickUp export, holidays) and
+the GATE B ones (contacts per client, employee priority visibility, the unarchive target status,
+the "Internal" label).
+
+**One thing only you can do:** the file bridge refuses to write `.env` (it holds the database and
+seed passwords), so line 1 of `D:\goodtechies-hq\.env` still reads `APP_NAME="GoodTechies HQ"`.
+The launchers set `APP_NAME=goodERP` in the environment, which wins, so the app is correctly
+named — but making it permanent means editing that line by hand, and the same line 5 in
+`deploy/.env.production.example`.

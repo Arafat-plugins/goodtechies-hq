@@ -17,6 +17,15 @@ export interface Client {
     projects_count?: number;
     contacts?: ClientContact[];
     internal_notes?: string | null;
+    /**
+     * What this requester may do, answered by `ClientPolicy` in `ClientResource`. Optional
+     * because the Create form has no client yet; every screen that reads it treats absent as
+     * "no", which is the safe half.
+     */
+    permissions?: {
+        can_update: boolean;
+        can_delete: boolean;
+    };
 }
 </script>
 

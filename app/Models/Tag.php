@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\TagColour;
 use Database\Factories\TagFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -13,14 +14,37 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 /**
  * A colour-coded label on a task.
  *
- * A tag is global (project_id null) or scoped to exactly one project. Who may CREATE one is a
- * policy question for slice 2 — Admins and Managers do, employees only assign what exists.
+ * A tag is global (project_id null) or scoped to exactly one project. Admins and Managers
+ * create, rename and remove them (TagPolicy); everybody else may only ASSIGN one that already
+ * exists, which happens through `tag_ids` on the task update and never through this model.
+ *
+ * `colour` is a TagColour — the name of one of the eight status tones, never a hex. See that
+ * enum for why, and `tags_colour_is_a_status_token` for the constraint that makes it true of
+ * the database rather than of this class.
  */
 #[Fillable(['project_id', 'name', 'colour'])]
 class Tag extends Model
 {
     /** @use HasFactory<TagFactory> */
     use HasFactory;
+
+    /**
+     * The longest a label may be.
+     *
+     * Sixty characters. A tag is drawn as a chip inside a table cell and on a board card that
+     * is 280 px wide; anything longer is not a label, it is a sentence, and it wraps the card.
+     */
+    public const MAX_NAME = 60;
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'colour' => TagColour::class,
+        ];
+    }
 
     /**
      * @return BelongsTo<Project, $this>

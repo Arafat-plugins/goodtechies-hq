@@ -3,7 +3,12 @@ import { Head, router } from '@inertiajs/vue3';
 import PageShell from '@/Components/PageShell.vue';
 import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
 import TaskDetailBody from '@/Components/Tasks/TaskDetailBody.vue';
-import type { TaskActivityEntry, TaskDetail, TaskSibling } from '@/Components/Tasks/taskDetail';
+import type {
+    TaskActivityEntry,
+    TaskDetail,
+    TaskDiscussion,
+    TaskSibling,
+} from '@/Components/Tasks/taskDetail';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
 
@@ -24,6 +29,11 @@ defineOptions({ layout: AdminLayout });
 defineProps<{
     task: TaskDetail;
     activity: TaskActivityEntry[];
+    /**
+     * The task's thread, inlined by the controller so the discussion panel paints with it
+     * rather than with a spinner. The same shape the drawer mount is handed.
+     */
+    discussion: TaskDiscussion;
     employees: TaskNamedRef[];
     reviewers: { id: number; name: string | null }[];
     priorities: TaskOption[];
@@ -52,6 +62,7 @@ useFlashAsToast();
         <TaskDetailBody
             :task="task"
             :activity="activity"
+            :discussion="discussion"
             surface="admin"
             :reviewers="reviewers"
             :employees="employees"

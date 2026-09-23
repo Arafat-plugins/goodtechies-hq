@@ -250,6 +250,21 @@ class Task extends Model
     }
 
     /**
+     * The task's attachments — the CURRENT version of each, newest first.
+     *
+     * Superseded versions are excluded here rather than filtered by every caller: a panel and a
+     * count both want "the files on this task", and a task showing five attachments because two
+     * of them have been revised twice is a count nobody asked for. One file's history is a
+     * separate question, asked per file through FileService::history().
+     *
+     * @return HasMany<File, $this>
+     */
+    public function files(): HasMany
+    {
+        return $this->hasMany(File::class)->whereNull('superseded_at')->orderByDesc('id');
+    }
+
+    /**
      * The tasks this one is waiting for.
      *
      * @return BelongsToMany<Task, $this>
@@ -304,6 +319,25 @@ class Task extends Model
     }
 
     /**
+     * Still owed: the status is not one of TaskStatus::closed().
+     *
+     * Extracted from scopeOverdue() rather than written beside it, because "somebody still
+     * owes work on this" is half of the overdue definition AND the whole of the Due today and
+     * My Tasks buckets. Two spellings of it is how a task ends up counted as due today on one
+     * screen and not on another.
+     *
+     * @param  Builder<Task>  $query
+     * @return Builder<Task>
+     */
+    public function scopeOpen(Builder $query): Builder
+    {
+        return $query->whereNotIn('status', array_map(
+            fn (TaskStatus $status): string => $status->value,
+            TaskStatus::closed(),
+        ));
+    }
+
+    /**
      * Overdue, computed here and never stored: `due_date < today` and the status is one
      * somebody still owes work on. A stored flag would be wrong every midnight.
      *
@@ -315,10 +349,40 @@ class Task extends Model
         return $query
             ->whereNotNull('due_date')
             ->whereDate('due_date', '<', ($asOf ?? Carbon::today())->toDateString())
-            ->whereNotIn('status', array_map(
-                fn (TaskStatus $status): string => $status->value,
-                TaskStatus::closed(),
-            ));
+            ->open();
+    }
+
+    /**
+     * Due on one exact day, and still owed. The Due today bucket, as a query.
+     *
+     * Open-only for the same reason overdue is: a task somebody finished this morning is not
+     * something they have to do today. It reads the same as-of date overdue does, so the two
+     * buckets can never disagree about where midnight is.
+     *
+     * @param  Builder<Task>  $query
+     * @return Builder<Task>
+     */
+    public function scopeDueOn(Builder $query, ?Carbon $asOf = null): Builder
+    {
+        return $query
+            ->whereDate('due_date', ($asOf ?? Carbon::today())->toDateString())
+            ->open();
+    }
+
+    /**
+     * Completed on one exact day — the Company dashboard's "Completed today".
+     *
+     * `completed_at` is cleared by a reopen, which is the behaviour this wants: a task that
+     * was finished this morning and reopened this afternoon is not a thing finished today.
+     *
+     * @param  Builder<Task>  $query
+     * @return Builder<Task>
+     */
+    public function scopeCompletedOn(Builder $query, ?Carbon $asOf = null): Builder
+    {
+        return $query
+            ->where('status', TaskStatus::Completed->value)
+            ->whereDate('completed_at', ($asOf ?? Carbon::today())->toDateString());
     }
 
     /**

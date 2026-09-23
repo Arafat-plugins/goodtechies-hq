@@ -26,6 +26,10 @@ export function taskFiltersActive(filters: TaskFilters): boolean {
         filters.project_id !== null ||
         filters.tag_id !== null ||
         filters.assignee_id !== null ||
+        // A bucket arrived from a dashboard card. It counts: a list narrowed to four overdue
+        // tasks must say it was narrowed, or the empty case reads as "there is no work" rather
+        // than "nothing is late", and there is no way back to the whole list.
+        filters.bucket !== null ||
         filters.overdue ||
         filters.archived
     );
@@ -33,10 +37,14 @@ export function taskFiltersActive(filters: TaskFilters): boolean {
 </script>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { usePage } from '@inertiajs/vue3';
+import { Tags } from '@lucide/vue';
+import { computed, ref } from 'vue';
 import type { FilterDef } from '@/Components/FilterBar.vue';
 import FilterBar from '@/Components/FilterBar.vue';
+import TagManagerDialog from '@/Components/Tags/TagManagerDialog.vue';
 import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
+import { Button } from '@/Components/ui/button';
 import { Checkbox } from '@/Components/ui/checkbox';
 import { Label } from '@/Components/ui/label';
 import { pushQuery, resetQuery } from '@/lib/tableState';
@@ -45,9 +53,24 @@ const props = withDefaults(
     defineProps<{
         filters: TaskFilters;
         statuses: TaskOption[];
+        /**
+         * The bucket chip's options, labelled by `TaskBucket::label()`.
+         *
+         * Unset, no bucket chip is offered — and because `FilterBar` draws a chip only for a
+         * filter that has a value, offering it costs the three Tasks views nothing visually
+         * until somebody arrives from a dashboard card or picks one from *Add filter*.
+         */
+        buckets?: TaskOption[];
         priorities: TaskOption[];
         projects: TaskNamedRef[];
         tags: TaskTag[];
+        /**
+         * Whether to offer the tag manager beside the chips. Resolved by the server from
+         * `TagPolicy::create` (`canManageTags` on every Tasks payload) — never inferred here
+         * from a role, which would be a second copy of the policy. Defaults to false, so a
+         * screen that forgets to pass it hides a door rather than showing a refused one.
+         */
+        canManageTags?: boolean;
         /**
          * The assignee chip's options — the Admin surface only. The employee views are
          * already scoped to one person, so the filter would have exactly one value.
@@ -66,7 +89,7 @@ const props = withDefaults(
          */
         clearKeeps?: string[];
     }>(),
-    { clearKeeps: () => [] },
+    { clearKeeps: () => [], canManageTags: false },
 );
 
 const filterDefs = computed<FilterDef[]>(() => {
@@ -102,6 +125,14 @@ const filterDefs = computed<FilterDef[]>(() => {
         });
     }
 
+    /*
+     * Last, and after the splice above, so adding it cannot move the assignee chip: it is the
+     * broadest of the filters and the one a reader arrives with rather than reaches for.
+     */
+    if (props.buckets?.length) {
+        defs.push({ key: 'bucket', label: 'Bucket', kind: 'select', options: props.buckets });
+    }
+
     return defs;
 });
 
@@ -110,6 +141,30 @@ function clearFilters(): void {
 }
 
 defineExpose({ clearFilters });
+
+/* ------------------------------------------------------------- managing tags */
+
+/**
+ * Where the tag manager hangs.
+ *
+ * Here, and not on each of the three Tasks pages, because all three already wear this bar:
+ * one affordance beside the Tag chip is the same affordance on the List, the Board and the
+ * Calendar, and it is where somebody is when they notice a label is missing. The chip itself
+ * is untouched — this sits next to it.
+ */
+const tagManagerOpen = ref(false);
+
+const page = usePage();
+
+/**
+ * Which shell's tag routes to write to.
+ *
+ * The four endpoints exist on both, because an Admin manages tags from the Admin shell and a
+ * Manager from the Employee one. `EnsureSurface` lets each role reach only its own shell, so
+ * the surface on the shared auth prop is the surface whose routes this person is on — there
+ * is no case where the page and the user disagree.
+ */
+const tagBase = computed(() => `/${page.props.auth.user?.surface ?? 'admin'}/tags`);
 </script>
 
 <template>
@@ -137,6 +192,29 @@ defineExpose({ clearFilters });
                 />
                 <Label :for="`${idPrefix}-archived`" class="font-normal whitespace-nowrap">Show archived</Label>
             </div>
+
+            <template v-if="canManageTags">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    class="h-8"
+                    @click="tagManagerOpen = true"
+                >
+                    <Tags aria-hidden="true" />
+                    Manage tags
+                </Button>
+
+                <!--
+                    Inside the slot rather than beside the bar so this component keeps one root
+                    element; the dialog renders into a portal at the end of the body either way.
+                -->
+                <TagManagerDialog
+                    v-model:open="tagManagerOpen"
+                    :base="tagBase"
+                    :projects="projects"
+                />
+            </template>
         </template>
     </FilterBar>
 </template>

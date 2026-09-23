@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
@@ -87,6 +88,31 @@ class Project extends Model
     public function pm(): BelongsTo
     {
         return $this->belongsTo(Employee::class, 'pm_id');
+    }
+
+    /**
+     * The project's Files tab (spec §7) — current versions only, newest first, like a task's.
+     *
+     * @return HasMany<File, $this>
+     */
+    public function files(): HasMany
+    {
+        return $this->hasMany(File::class)->whereNull('superseded_at')->orderByDesc('id');
+    }
+
+    /**
+     * Every task on this project.
+     *
+     * Unscoped on purpose — it is the relation, not a view. Who may SEE these is
+     * Task::visibleTo()'s question and is asked by whoever is listing them; the one caller in
+     * this phase is ProjectService::changeStatus(), counting what a cancellation leaves behind
+     * for somebody to deal with, and that count must not depend on who did the cancelling.
+     *
+     * @return HasMany<Task, $this>
+     */
+    public function tasks(): HasMany
+    {
+        return $this->hasMany(Task::class);
     }
 
     /**

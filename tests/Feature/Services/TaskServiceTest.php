@@ -308,6 +308,9 @@ it('drops an unrecognised enum filter rather than passing it to the query', func
 it('defaults every filter key so the payload shape never varies', function () {
     expect(array_keys($this->service->filters([])))->toEqualCanonicalizing([
         'search', 'project_id', 'status', 'priority', 'assignee_id', 'tag_id',
+        // The bucket a card was counted in, and "assigned to me" — what the My Tasks page and
+        // the two dashboards ask with.
+        'bucket', 'mine',
         // The calendar's window. Defaulted to null like every other key, so a caller that
         // asks for no window gets the same array shape as one that does.
         'date_from', 'date_to',

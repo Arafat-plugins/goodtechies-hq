@@ -109,9 +109,13 @@ const props = defineProps<{
     surface: TaskSurface;
     filters: TaskFilters;
     statuses: TaskOption[];
+    /** The bucket chip's options. Optional, so a screen that offers no bucket simply has none. */
+    buckets?: TaskOption[];
     priorities: TaskOption[];
     projects: TaskNamedRef[];
     tags: TaskTag[];
+    /** Server-resolved (`canManageTags`); passed straight through to the filter bar. */
+    canManageTags?: boolean;
     employees?: TaskNamedRef[];
     searchPlaceholder: string;
     emptyTitle: string;
@@ -445,9 +449,11 @@ const handleTitle = computed(() =>
             ref="filterBar"
             :filters="filters"
             :statuses="statuses"
+            :buckets="buckets"
             :priorities="priorities"
             :projects="projects"
             :tags="tags"
+            :can-manage-tags="canManageTags"
             :employees="employees"
             :placeholder="searchPlaceholder"
             :id-prefix="`${surface}-calendar`"

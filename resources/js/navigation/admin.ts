@@ -36,9 +36,17 @@ export const adminNav: NavGroup[] = [
     {
         label: 'My work',
         items: [
-            { label: 'My Tasks', icon: ListTodo, phase: 2 },
-            { label: 'Due Today', icon: CalendarClock, phase: 2 },
-            { label: 'Overdue', icon: CircleAlert, phase: 2 },
+            // An Admin's own plate, which is not the agency's — that is the Tasks row below.
+            //
+            // Due Today and Overdue are BUCKETS of this page, not screens of their own: they
+            // ask the same question about the same tasks, narrowed by a date, and My Tasks
+            // already shows all seven counts at once. Two more routes would mean two more
+            // controllers, two more permission-matrix rows and two more chances for "overdue"
+            // to mean something slightly different — for a `where` clause that already exists.
+            // They are deep links, and `activeItem()` lights whichever one you are on.
+            { label: 'My Tasks', href: '/admin/my-tasks', icon: ListTodo },
+            { label: 'Due Today', href: '/admin/my-tasks?bucket=due_today', icon: CalendarClock },
+            { label: 'Overdue', href: '/admin/my-tasks?bucket=overdue', icon: CircleAlert },
             { label: 'My Attendance', icon: UserCheck, phase: 4 },
             { label: 'My Leave', icon: CalendarOff, phase: 5 },
         ],
@@ -56,7 +64,10 @@ export const adminNav: NavGroup[] = [
             // view switcher, and /admin/tasks still serves it — this changes where the nav points,
             // not which views exist.
             { label: 'Tasks', href: '/admin/tasks/board', activePrefix: '/admin/tasks', icon: ListChecks },
-            { label: 'Calendar', icon: CalendarDays, phase: 2 },
+            // Shipped in slice 3 and left marked unbuilt until now. The Tasks row above claims
+            // this URL too through its `activePrefix`; `activeItem()` gives the row to the
+            // longer claim, so the Calendar lights the Calendar and nothing else.
+            { label: 'Calendar', href: '/admin/tasks/calendar', icon: CalendarDays },
             { label: 'Meetings', icon: Video, phase: 7 },
             { label: 'Team', icon: UsersRound, phase: 6 },
             { label: 'Messages', icon: MessagesSquare, phase: 6 },

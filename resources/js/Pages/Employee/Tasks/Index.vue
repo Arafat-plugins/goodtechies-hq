@@ -24,9 +24,13 @@ defineProps<{
     filters: TaskFilters;
     groupByOptions: string[];
     statuses: TaskOption[];
+    /** The bucket chip's options — "what is late", "what is due today". Server-labelled. */
+    buckets: TaskOption[];
     priorities: TaskOption[];
     projects: TaskNamedRef[];
     tags: TaskTag[];
+    /** `TagPolicy::create`, answered by the controller — whether the tag manager is offered. */
+    canManageTags: boolean;
 }>();
 
 /** The drawer's writes are this screen's writes; the toaster announces them. */
@@ -86,9 +90,11 @@ function openTask(task: Task): void {
             :columns="columns"
             :group-by-options="groupByOptions"
             :statuses="statuses"
+            :buckets="buckets"
             :priorities="priorities"
             :projects="projects"
             :tags="tags"
+            :can-manage-tags="canManageTags"
             search-placeholder="Search your tasks…"
             empty-title="No tasks assigned to you"
             empty-description="When someone assigns you work, it lands here."

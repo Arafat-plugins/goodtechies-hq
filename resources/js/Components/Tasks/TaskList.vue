@@ -110,6 +110,17 @@ export interface TaskFilters {
     priority: string | null;
     assignee_id: number | null;
     tag_id: number | null;
+    /**
+     * A question rather than a column value — "what is late", "what is due today", "what is
+     * waiting on a reviewer". `TaskBucket` in PHP holds the eight and their predicates; this
+     * side only ever carries the key it was given, and never works out what one means.
+     *
+     * It is what the dashboard cards link in, so a card's count and the list it opens are the
+     * same query asked twice.
+     */
+    bucket: string | null;
+    /** Assigned to the signed-in person. Set by the My Tasks page, never by a chip. */
+    mine: boolean;
     overdue: boolean;
     archived: boolean;
 }
@@ -134,6 +145,15 @@ const TASK_COLUMNS: Record<string, ColumnDef<Task>> = {
         nowrap: true,
     },
     status: { key: 'status', header: 'Status', cell: 'badge', nowrap: true },
+    /**
+     * Which project the work belongs to. Not offered by the Tasks List — it groups by project
+     * instead — but My Tasks is one flat list of somebody's whole plate, where the project is
+     * the only thing that tells two similarly named tasks apart.
+     *
+     * `project` is a `ProjectResource` fragment, so on the employee surface it is already the
+     * domain rather than the client: this reads a name, it does not decide which name.
+     */
+    project: { key: 'project', header: 'Project', value: (task) => task.project?.name ?? null },
     due_date: { key: 'due_date', header: 'Due date', cell: 'date', nowrap: true },
     tracked: {
         key: 'tracked',
@@ -171,6 +191,22 @@ const GROUP_BY_LABELS: Record<string, string> = {
     project: 'Project',
     priority: 'Priority',
 };
+
+const TASK_DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' });
+
+/**
+ * A task's date, as every task list prints it. Exported so the My Tasks page shows the same
+ * "12 Sep 2026" this one does rather than growing a second formatter next to it.
+ */
+export function formatTaskDate(value: string | null): string {
+    if (!value) {
+        return '—';
+    }
+
+    const date = new Date(value);
+
+    return Number.isNaN(date.getTime()) ? value : TASK_DATE.format(date);
+}
 
 /** Tracked time reads as hours and minutes; seconds are noise on a list. */
 export function formatTracked(seconds: number): string {
@@ -234,9 +270,13 @@ const props = defineProps<{
     /** The variants this surface offers. The employee list has no `assignee`. */
     groupByOptions: string[];
     statuses: TaskOption[];
+    /** The bucket chip's options. Optional, so a screen that offers no bucket simply has none. */
+    buckets?: TaskOption[];
     priorities: TaskOption[];
     projects: TaskNamedRef[];
     tags: TaskTag[];
+    /** Server-resolved (`canManageTags`); passed straight through to the filter bar. */
+    canManageTags?: boolean;
     /**
      * The assignee filter's options — the Admin list only. `TaskService` has taken an
      * `assignee_id` filter since slice 1; this is the list that makes the chip offerable
@@ -289,17 +329,8 @@ const groups = computed<TableGroup<Task>[]>(() =>
 
 /* ------------------------------------------------------------------- cells */
 
-const DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' });
-
-function formatDate(value: string | null): string {
-    if (!value) {
-        return '—';
-    }
-
-    const date = new Date(value);
-
-    return Number.isNaN(date.getTime()) ? value : DATE.format(date);
-}
+/* The module block's, so this list and My Tasks cannot print the same date differently. */
+const formatDate = formatTaskDate;
 
 function initials(name: string | null): string {
     return (name ?? '?')
@@ -324,9 +355,11 @@ const loading = useNavigationPending();
             ref="filterBar"
             :filters="filters"
             :statuses="statuses"
+            :buckets="buckets"
             :priorities="priorities"
             :projects="projects"
             :tags="tags"
+            :can-manage-tags="canManageTags"
             :employees="employees"
             :placeholder="searchPlaceholder"
             :id-prefix="tableId"

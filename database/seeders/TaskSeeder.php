@@ -3,12 +3,14 @@
 namespace Database\Seeders;
 
 use App\Models\Employee;
+use App\Models\Message;
 use App\Models\Project;
 use App\Models\Tag;
 use App\Models\Task;
 use App\Models\TaskChecklistItem;
 use App\Models\TaskLink;
 use App\Models\User;
+use App\Services\ConversationService;
 use App\Support\TaskPriority;
 use App\Support\TaskStatus;
 use Illuminate\Database\Seeder;
@@ -53,6 +55,87 @@ class TaskSeeder extends Seeder
 
             $this->spreadPositions();
         });
+
+        // Outside the status guard, because a discussion has nothing to do with status.
+        $this->seedDiscussions($team);
+    }
+
+    /**
+     * A few demo messages on the demo tasks.
+     *
+     * Two things this has to be, and both of them shape how it is written:
+     *
+     *   - IDEMPOTENT. `start-hq.bat` reseeds on every start. Each message is looked up by its
+     *     conversation, its author and its body before it is created, so a fifth reseed leaves
+     *     three messages and not fifteen. The conversation itself comes from
+     *     ConversationService::forTask(), which is a firstOrCreate behind a unique index — the
+     *     same call TaskService::create() makes, so the seeded tasks end up with exactly the
+     *     conversation a real one would have.
+     *   - FREE OF FILES. Nothing here writes a byte to disk. `migrate:fresh --seed` must not
+     *     leave uploads behind, so the seeded discussion is text — which is also what makes it
+     *     safe to run in a test's `$this->seed()`.
+     *
+     * The threads are chosen to line up with the privacy tests rather than to be decorative:
+     * two are on Tapu's SEO tasks, which Yaseen is not assigned to, so "an employee 404s on the
+     * discussion of a task they are not on" has real messages behind it instead of an empty
+     * thread that would have looked the same either way.
+     *
+     * @param  array<string, Employee>  $team
+     */
+    private function seedDiscussions(array $team): void
+    {
+        $conversations = app(ConversationService::class);
+
+        foreach ($this->discussions() as $title => $thread) {
+            $task = Task::where('title', $title)->first();
+
+            if ($task === null) {
+                continue;
+            }
+
+            $conversation = $conversations->forTask($task);
+
+            foreach ($thread as $index => [$author, $body]) {
+                $user = $team[$author]->user;
+
+                $message = Message::firstOrCreate([
+                    'conversation_id' => $conversation->id,
+                    'author_id' => $user?->id,
+                    'body' => $body,
+                ]);
+
+                // Relative to today, like every other date in this seeder, so a demo seeded a
+                // fortnight ago does not show a discussion that stopped a fortnight ago.
+                $message->forceFill([
+                    'created_at' => Carbon::today()->subDays(3 - $index)->setTime(9 + $index, 15),
+                    'updated_at' => Carbon::today()->subDays(3 - $index)->setTime(9 + $index, 15),
+                ])->save();
+            }
+        }
+    }
+
+    /**
+     * The seeded threads, keyed by task title.
+     *
+     * @return array<string, list<array{0: string, 1: string}>>
+     */
+    private function discussions(): array
+    {
+        return [
+            'Fix the duplicate canonical tags on model pages' => [
+                ['shahadat', 'Search Console is still reporting the eight pages as duplicates — is the fix live?'],
+                ['tapu', 'Half of them are. The template writes the canonical from the parent, so the four newest models need the field filled in before it resolves.'],
+                ['shahadat', 'Understood. Fill them in and re-request indexing; I will keep an eye on the coverage report.'],
+            ],
+            'Build the internal link map for the county pages' => [
+                ['tapu', 'Holding this until the canonicals resolve — linking the counties to pages that canonicalise elsewhere would just move the problem.'],
+                ['shahadat', 'Agreed, leave it in the backlog until then.'],
+            ],
+            'Apply the April core and plugin updates' => [
+                ['yaseen', 'Staging is updated and the contact form still delivers. Happy to run it on production in the morning.'],
+                ['shahadat', 'Go ahead, and take a backup first.'],
+            ],
+        ];
     }
 
     /**
@@ -194,6 +277,12 @@ class TaskSeeder extends Seeder
             fn (string $name): int => $tags[$name]->id,
             $row['tags'],
         ));
+
+        // The discussion a task is born with. These rows do not go through TaskService — they
+        // are `firstOrCreate`d straight onto the table — so the guarantee has to be restated
+        // here, and `forTask()` being a firstOrCreate behind a unique index is what makes
+        // restating it safe on the launcher's reseed-every-start.
+        app(ConversationService::class)->forTask($task);
 
         $this->seedChecklist($task, $row['checklist'] ?? [], $this->primaryUser($row, $team));
         $this->seedLinks($task, $row['links'] ?? [], $creator);

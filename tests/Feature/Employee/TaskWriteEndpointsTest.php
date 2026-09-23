@@ -160,8 +160,18 @@ it('gives a drag exactly the same answer as the form', function () {
 })->group('phase2');
 
 it('reorders a card inside its own column', function () {
-    $a = Task::factory()->status(TaskStatus::InProgress)->create(['project_id' => $this->project->id, 'position' => 1000]);
-    Task::factory()->status(TaskStatus::InProgress)->create(['project_id' => $this->project->id, 'position' => 2000]);
+    // `due_date` is pinned to null on purpose. A lane is drawn in ORDER_BOARD — position, then
+    // due date, then id — and the seeded In-progress lane already holds a card at 1000 and one
+    // at 2000. With the factory's RANDOM due date, whether `$a` sorted before or after the
+    // seeded card it ties with at 1000 was a coin flip, and landing between two cards that are
+    // both at 1000 renumbers the lane instead of taking a midpoint: the same assertion came out
+    // 1500 or 2000 depending on the date faker picked. `nulls last` puts both of these at the
+    // end of their tie group, so the card below `$a` is the one at 2000 every time. The
+    // behaviour under test is unchanged; only the fixture stopped being random.
+    $a = Task::factory()->status(TaskStatus::InProgress)
+        ->create(['project_id' => $this->project->id, 'position' => 1000, 'due_date' => null]);
+    Task::factory()->status(TaskStatus::InProgress)
+        ->create(['project_id' => $this->project->id, 'position' => 2000, 'due_date' => null]);
 
     $this->actingAs($this->tapu)
         ->post(route('employee.tasks.reorder', $this->task), ['after_id' => $a->id])

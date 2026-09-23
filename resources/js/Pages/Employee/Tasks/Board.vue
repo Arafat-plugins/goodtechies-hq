@@ -23,9 +23,13 @@ defineProps<{
     transitions: TransitionMap;
     filters: TaskFilters;
     statuses: TaskOption[];
+    /** The bucket chip's options — "what is late", "what is due today". Server-labelled. */
+    buckets: TaskOption[];
     priorities: TaskOption[];
     projects: TaskNamedRef[];
     tags: TaskTag[];
+    /** `TagPolicy::create`, answered by the controller — whether the tag manager is offered. */
+    canManageTags: boolean;
 }>();
 
 /** Refusals come back 200 with a flashed sentence. The toaster says it once (§5.19). */
@@ -46,9 +50,11 @@ useFlashAsToast();
             :filters="filters"
             surface="employee"
             :statuses="statuses"
+            :buckets="buckets"
             :priorities="priorities"
             :projects="projects"
             :tags="tags"
+            :can-manage-tags="canManageTags"
             search-placeholder="Search your tasks…"
             empty-title="No tasks assigned to you"
             empty-description="When someone assigns you work, it lands here."

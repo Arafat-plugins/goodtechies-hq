@@ -22,7 +22,9 @@ it('names the home route of each surface', function () {
 })->group('phase0');
 
 it('uses dotted audit event values', function () {
-    expect(AuditEvent::cases())->toHaveCount(22)
+    // 24 since Phase 2 slice 4 added `tag.deleted`: deleting a tag takes a label off every
+    // task that was wearing it, and the pivot rows it cascades away survive nowhere else.
+    expect(AuditEvent::cases())->toHaveCount(24)
         ->and(AuditEvent::TwoFactorDisabled->value)->toBe('user.two_factor_disabled')
         ->and(AuditEvent::RestrictedAccessAttempt->value)->toBe('access.restricted_attempt');
 })->group('phase0');

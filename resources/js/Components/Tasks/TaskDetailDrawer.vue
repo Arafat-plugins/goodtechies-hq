@@ -9,6 +9,7 @@ import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskL
 import type {
     TaskActivityEntry,
     TaskDetail,
+    TaskDiscussion,
     TaskSibling,
     TaskSurface,
 } from '@/Components/Tasks/taskDetail';
@@ -43,6 +44,8 @@ const emit = defineEmits<{ 'update:open': [open: boolean] }>();
 interface DetailProps {
     task: TaskDetail;
     activity: TaskActivityEntry[];
+    /** The task's thread, inlined into the detail props exactly as the page mount gets it. */
+    discussion: TaskDiscussion;
     reviewers: { id: number; name: string | null }[];
     employees?: TaskNamedRef[];
     priorities?: TaskOption[];
@@ -169,6 +172,7 @@ function close(): void {
             :key="detail.task.id"
             :task="detail.task"
             :activity="detail.activity"
+            :discussion="detail.discussion"
             :surface="surface"
             :reviewers="detail.reviewers"
             :employees="detail.employees"

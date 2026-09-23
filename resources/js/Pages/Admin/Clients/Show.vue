@@ -4,6 +4,8 @@ import { FolderKanban, Mail, Pencil, Phone, UserX } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import type { Client } from '@/Components/Clients/ClientForm.vue';
 import EmptyState from '@/Components/EmptyState.vue';
+import FilePanel from '@/Components/Files/FilePanel.vue';
+import { fileRoutes } from '@/Components/Files/files';
 import PageShell from '@/Components/PageShell.vue';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
 import { Button } from '@/Components/ui/button';
@@ -16,6 +18,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/Components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
 defineOptions({ layout: AdminLayout });
@@ -121,6 +124,18 @@ function relativeTime(at: string): string {
 
 const recentActivity = computed(() => props.activity.slice(0, 20));
 
+const files = computed(() => fileRoutes('admin', 'clients', client.value.id));
+
+/**
+ * Attaching takes `ClientPolicy::update` — the same gate `FileService::guardMayAttach()` asks
+ * the owner's own policy for. Read off the payload rather than inferred from "only an Admin
+ * reaches this surface anyway": that inference is true today and stops being true the moment
+ * a role is added, and the screen would go on offering an upload the endpoint refuses.
+ */
+const canAttach = computed(() => client.value.permissions?.can_update === true);
+
+const tab = ref('overview');
+
 const confirmOpen = ref(false);
 const deactivating = ref(false);
 
@@ -169,132 +184,156 @@ function confirmDeactivate(): void {
             </Button>
         </template>
 
-        <div class="grid min-w-0 items-start gap-4 lg:grid-cols-3">
-            <Card class="min-w-0 gap-2 shadow-xs lg:col-span-2">
-                <CardHeader>
-                    <CardTitle class="text-sm font-medium">Projects</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <EmptyState
-                        v-if="projects.length === 0"
-                        :icon="FolderKanban"
-                        title="No projects yet"
-                        description="Work booked for this client will show up here."
-                    />
-                    <ul v-else class="divide-y">
-                        <li
-                            v-for="project in projects"
-                            :key="project.id"
-                            class="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
-                        >
-                            <div class="flex min-w-0 flex-col gap-1">
-                                <Link
-                                    :href="`/admin/projects/${project.id}`"
-                                    class="text-sm font-medium break-words hover:underline"
-                                >
-                                    {{ project.name }}
-                                </Link>
-                                <p class="text-xs text-muted-foreground">
-                                    <span v-if="project.project_type_label">
-                                        {{ project.project_type_label }} ·
-                                    </span>
-                                    {{ formatDeadline(project.deadline) }}
-                                </p>
-                            </div>
-                            <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-                                <StatusPill
-                                    :label="project.status_label"
-                                    :tone="toneForProjectStatus(project.status)"
-                                />
-                                <span
-                                    v-if="moneyLine(project)"
-                                    class="text-sm font-medium whitespace-nowrap tabular-nums"
-                                >
-                                    {{ moneyLine(project) }}
-                                </span>
-                            </div>
-                        </li>
-                    </ul>
-                </CardContent>
-            </Card>
-
-            <div class="flex min-w-0 flex-col gap-4">
-                <Card class="min-w-0 gap-2 shadow-xs">
-                    <CardHeader>
-                        <CardTitle class="text-sm font-medium">Contacts</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p v-if="contacts.length === 0" class="text-sm text-muted-foreground">
-                            No contacts recorded for this client.
-                        </p>
-                        <ul v-else class="divide-y">
-                            <li v-for="(contact, index) in contacts" :key="index" class="flex flex-col gap-1 py-3">
-                                <p class="text-sm font-medium break-words">{{ contact.name }}</p>
-                                <p v-if="contact.role" class="text-xs text-muted-foreground">{{ contact.role }}</p>
-                                <a
-                                    v-if="contact.email"
-                                    :href="`mailto:${contact.email}`"
-                                    class="flex items-center gap-2 text-xs break-all text-muted-foreground hover:text-foreground hover:underline"
-                                >
-                                    <Mail class="size-3 shrink-0" aria-hidden="true" />
-                                    {{ contact.email }}
-                                </a>
-                                <a
-                                    v-if="contact.phone"
-                                    :href="`tel:${contact.phone}`"
-                                    class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground hover:underline"
-                                >
-                                    <Phone class="size-3 shrink-0" aria-hidden="true" />
-                                    {{ contact.phone }}
-                                </a>
-                            </li>
-                        </ul>
-                    </CardContent>
-                </Card>
-
-                <Card class="min-w-0 gap-2 shadow-xs">
-                    <CardHeader>
-                        <CardTitle class="text-sm font-medium">Internal notes</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p
-                            v-if="client.internal_notes"
-                            class="text-sm break-words whitespace-pre-wrap"
-                        >{{ client.internal_notes }}</p>
-                        <p v-else class="text-sm text-muted-foreground">No internal notes yet.</p>
-                    </CardContent>
-                </Card>
+        <Tabs v-model="tab" class="min-w-0 gap-4">
+            <!-- The trigger row scrolls on its own at 375 so the page itself never does. -->
+            <div class="min-w-0 max-w-full overflow-x-auto">
+                <TabsList>
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="files">Files</TabsTrigger>
+                    <TabsTrigger value="activity">Activity</TabsTrigger>
+                </TabsList>
             </div>
-        </div>
 
-        <Card class="min-w-0 gap-2 shadow-xs">
-            <CardHeader>
-                <CardTitle class="text-sm font-medium">Activity</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <p v-if="recentActivity.length === 0" class="text-sm text-muted-foreground">
-                    Nothing has happened on this client yet.
-                </p>
-                <ol v-else class="flex flex-col gap-0">
-                    <li v-for="(entry, index) in recentActivity" :key="index" class="flex gap-3">
-                        <div class="flex flex-col items-center">
-                            <span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-status-progress" aria-hidden="true" />
-                            <span
-                                v-if="index < recentActivity.length - 1"
-                                class="w-px grow bg-border"
-                                aria-hidden="true"
+            <TabsContent value="overview">
+                <div class="grid min-w-0 items-start gap-4 lg:grid-cols-3">
+                    <Card class="min-w-0 gap-2 shadow-xs lg:col-span-2">
+                        <CardHeader>
+                            <CardTitle class="text-sm font-medium">Projects</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <EmptyState
+                                v-if="projects.length === 0"
+                                :icon="FolderKanban"
+                                title="No projects yet"
+                                description="Work booked for this client will show up here."
                             />
-                        </div>
-                        <div class="flex min-w-0 flex-col gap-1 pb-4">
-                            <p class="text-sm break-words">{{ entry.description }}</p>
-                            <p class="text-xs text-muted-foreground">
-                                <span v-if="entry.actor">{{ entry.actor }} · </span>{{ relativeTime(entry.at) }}
-                            </p>
-                        </div>
-                    </li>
-                </ol>
-            </CardContent>
-        </Card>
+                            <ul v-else class="divide-y">
+                                <li
+                                    v-for="project in projects"
+                                    :key="project.id"
+                                    class="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+                                >
+                                    <div class="flex min-w-0 flex-col gap-1">
+                                        <Link
+                                            :href="`/admin/projects/${project.id}`"
+                                            class="text-sm font-medium break-words hover:underline"
+                                        >
+                                            {{ project.name }}
+                                        </Link>
+                                        <p class="text-xs text-muted-foreground">
+                                            <span v-if="project.project_type_label">
+                                                {{ project.project_type_label }} ·
+                                            </span>
+                                            {{ formatDeadline(project.deadline) }}
+                                        </p>
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+                                        <StatusPill
+                                            :label="project.status_label"
+                                            :tone="toneForProjectStatus(project.status)"
+                                        />
+                                        <span
+                                            v-if="moneyLine(project)"
+                                            class="text-sm font-medium whitespace-nowrap tabular-nums"
+                                        >
+                                            {{ moneyLine(project) }}
+                                        </span>
+                                    </div>
+                                </li>
+                            </ul>
+                        </CardContent>
+                    </Card>
+
+                    <div class="flex min-w-0 flex-col gap-4">
+                        <Card class="min-w-0 gap-2 shadow-xs">
+                            <CardHeader>
+                                <CardTitle class="text-sm font-medium">Contacts</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <p v-if="contacts.length === 0" class="text-sm text-muted-foreground">
+                                    No contacts recorded for this client.
+                                </p>
+                                <ul v-else class="divide-y">
+                                    <li v-for="(contact, index) in contacts" :key="index" class="flex flex-col gap-1 py-3">
+                                        <p class="text-sm font-medium break-words">{{ contact.name }}</p>
+                                        <p v-if="contact.role" class="text-xs text-muted-foreground">{{ contact.role }}</p>
+                                        <a
+                                            v-if="contact.email"
+                                            :href="`mailto:${contact.email}`"
+                                            class="flex items-center gap-2 text-xs break-all text-muted-foreground hover:text-foreground hover:underline"
+                                        >
+                                            <Mail class="size-3 shrink-0" aria-hidden="true" />
+                                            {{ contact.email }}
+                                        </a>
+                                        <a
+                                            v-if="contact.phone"
+                                            :href="`tel:${contact.phone}`"
+                                            class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                                        >
+                                            <Phone class="size-3 shrink-0" aria-hidden="true" />
+                                            {{ contact.phone }}
+                                        </a>
+                                    </li>
+                                </ul>
+                            </CardContent>
+                        </Card>
+
+                        <Card class="min-w-0 gap-2 shadow-xs">
+                            <CardHeader>
+                                <CardTitle class="text-sm font-medium">Internal notes</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <p
+                                    v-if="client.internal_notes"
+                                    class="text-sm break-words whitespace-pre-wrap"
+                                >{{ client.internal_notes }}</p>
+                                <p v-else class="text-sm text-muted-foreground">No internal notes yet.</p>
+                            </CardContent>
+                        </Card>
+                    </div>
+                </div>
+            </TabsContent>
+
+            <TabsContent value="files">
+                <FilePanel
+                    :routes="files"
+                    :can-upload="canAttach"
+                    description="Contracts, brand assets and anything else that belongs to this client rather than one project."
+                    empty-description="Attach a contract or a brand pack and it will be here next week."
+                />
+            </TabsContent>
+
+            <TabsContent value="activity">
+                <Card class="min-w-0 gap-2 shadow-xs">
+                    <CardHeader>
+                        <CardTitle class="text-sm font-medium">Activity</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <p v-if="recentActivity.length === 0" class="text-sm text-muted-foreground">
+                            Nothing has happened on this client yet.
+                        </p>
+                        <ol v-else class="flex flex-col gap-0">
+                            <li v-for="(entry, index) in recentActivity" :key="index" class="flex gap-3">
+                                <div class="flex flex-col items-center">
+                                    <span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-status-progress" aria-hidden="true" />
+                                    <span
+                                        v-if="index < recentActivity.length - 1"
+                                        class="w-px grow bg-border"
+                                        aria-hidden="true"
+                                    />
+                                </div>
+                                <div class="flex min-w-0 flex-col gap-1 pb-4">
+                                    <p class="text-sm break-words">{{ entry.description }}</p>
+                                    <p class="text-xs text-muted-foreground">
+                                        <span v-if="entry.actor">{{ entry.actor }} · </span>{{ relativeTime(entry.at) }}
+                                    </p>
+                                </div>
+                            </li>
+                        </ol>
+                    </CardContent>
+                </Card>
+            </TabsContent>
+        </Tabs>
     </PageShell>
 
     <Dialog v-model:open="confirmOpen">

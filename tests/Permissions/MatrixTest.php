@@ -2,7 +2,10 @@
 
 use App\Models\Client;
 use App\Models\Employee;
+use App\Models\File;
+use App\Models\Notification;
 use App\Models\Project;
+use App\Models\Tag;
 use App\Models\Task;
 use App\Models\TaskChecklistItem;
 use App\Models\TaskLink;
@@ -78,6 +81,18 @@ function matrixParameters(): array
         '{item}' => matrixResolve('checklist:List every page with a wrong canonical'),
         '{link}' => matrixResolve('link:https://search.google.com/search-console'),
         '{dependency}' => matrixTaskId('Build the internal link map for the county pages'),
+
+        // Files are not seeded — nothing writes to a disk during `migrate:fresh --seed`, and
+        // these rows need rows rather than bytes. The default one is on Tapu's task and
+        // uploaded BY Tapu, which is what makes the employee delete row below read the delete
+        // rule out loud: the uploader gets 302 and the Manager, who may edit the very same
+        // task, gets 403.
+        '{file}' => matrixFileId('default'),
+
+        // A notification of Tapu's, so the `…/{notification}/read` row can state the whole
+        // privacy rule in one line: an Admin who can see everything else in the agency gets
+        // 404 on one line of somebody else's mail.
+        '{notification}' => matrixNotificationId(),
     ];
 }
 
@@ -87,6 +102,56 @@ const MATRIX_TASK = 'Fix the duplicate canonical tags on model pages';
 function matrixTaskId(string $title): string
 {
     return (string) Task::where('title', $title)->firstOrFail()->id;
+}
+
+/**
+ * A file row for the file routes to point at, created once per key and remembered.
+ *
+ * Three of them, because two rows consume the file they are aimed at and one row needs a file
+ * that survives every other row: `GET /files/{file}` runs SubstituteBindings before `auth`, so
+ * a consumed id would answer 404 to the guest instead of sending them to log in, and the row
+ * would stop being about the signature.
+ */
+function matrixFileId(string $key): string
+{
+    static $files = [];
+
+    // The existence check keeps the memo honest across a rolled-back database: an id cached
+    // from a previous test's transaction is not a row any more, and re-using it would point
+    // these rows at nothing.
+    if (! isset($files[$key]) || ! File::withTrashed()->whereKey($files[$key])->exists()) {
+        $tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
+
+        $files[$key] = (string) File::factory()
+            ->forTask(Task::where('title', MATRIX_TASK)->firstOrFail())
+            ->uploadedBy($tapu)
+            ->create()->id;
+    }
+
+    return $files[$key];
+}
+
+/**
+ * A notification for the notification rows to point at, created once and remembered.
+ *
+ * Notifications are not seeded — nothing in `migrate:fresh --seed` does anything a person
+ * would be notified about — so this makes one, addressed to Tapu. The existence check keeps
+ * the memo honest across a rolled-back database, exactly as matrixFileId's does.
+ */
+function matrixNotificationId(): string
+{
+    static $id = null;
+
+    if ($id === null || ! Notification::whereKey($id)->exists()) {
+        $tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
+
+        $id = (string) Notification::factory()
+            ->forUser($tapu)
+            ->about(Task::where('title', MATRIX_TASK)->firstOrFail())
+            ->create()->id;
+    }
+
+    return $id;
 }
 
 /**
@@ -113,6 +178,10 @@ function matrixResolve(string $token): string
             ->where('task_id', matrixTaskId(MATRIX_TASK))
             ->where('url', $value)
             ->firstOrFail()->id,
+        'file' => matrixFileId($value),
+        // By name, because the four seeded labels are global and named, and a row that
+        // consumes one must not be pointed at whichever id happens to sort first.
+        'tag' => (string) Tag::query()->whereNull('project_id')->where('name', $value)->firstOrFail()->id,
         default => $value,
     };
 }
@@ -128,6 +197,9 @@ function permissionMatrix(): array
     $adminAction = ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403];
     $employee = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 200, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403];
     $accountant = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 200];
+    // Everybody with a mailbox, which is everybody who holds a permission some notification
+    // type requires — see NotificationPolicy. In Phase 2 that is everybody but the Accountant.
+    $notifications = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => 403];
 
     // A DELETE row destroys the record it points at, and route-model binding runs before the
     // surface middleware — so every cell after the one that is allowed sees 404 where it would
@@ -155,6 +227,11 @@ function permissionMatrix(): array
         // Admin surface
         ['GET', 'admin/dashboard', $admin],
         ['GET', 'admin/settings', $admin],
+        // An Admin's own plate. One route for all seven buckets — Due Today and Overdue are
+        // `?bucket=` on this, not routes of their own, so there is one row here and not three.
+        // The Accountant holds no tasks.* permission, so `viewAny` refuses them before the
+        // surface middleware would have.
+        ['GET', 'admin/my-tasks', $admin],
 
         // Admin surface — clients. A body-less mutating call stops at the validation
         // redirect, which is proof enough that it got past every gate.
@@ -165,6 +242,10 @@ function permissionMatrix(): array
         ['GET', 'admin/clients/{client}/edit', $admin],
         ['PUT', 'admin/clients/{client}', $adminAction],
         ['POST', 'admin/clients/{client}/deactivate', $adminAction],
+        // The client Files tab (spec §28). A body-less POST stops at the validation redirect,
+        // which is proof it got past every gate.
+        ['GET', 'admin/clients/{client}/files', $admin],
+        ['POST', 'admin/clients/{client}/files', $adminAction],
 
         // Admin surface — projects. archive and unarchive sit next to each other on purpose:
         // the Admin cell of the first is undone by the Admin cell of the second.
@@ -179,6 +260,9 @@ function permissionMatrix(): array
         ['POST', 'admin/projects/{project}/status', $adminAction],
         ['POST', 'admin/projects/{project}/archive', $adminAction],
         ['POST', 'admin/projects/{project}/unarchive', $adminAction],
+        // The project Files tab (spec §7), the same FileService as the client tab above.
+        ['GET', 'admin/projects/{project}/files', $admin],
+        ['POST', 'admin/projects/{project}/files', $adminAction],
 
         // Admin surface — tasks. A status moves through `…/status` and nowhere else: there is
         // no second endpoint here for the board drag to use, which is the point.
@@ -209,11 +293,47 @@ function permissionMatrix(): array
         // undone by the Admin cell of the second, so the rows after these see a live task.
         ['POST', 'admin/tasks/{task}/archive', $adminAction],
         ['POST', 'admin/tasks/{task}/unarchive', $adminAction],
+        // Attachments on a task.
+        ['GET', 'admin/tasks/{task}/files', $admin],
+        ['POST', 'admin/tasks/{task}/files', $adminAction],
         // Soft delete, on its own task, needed by no row after it.
         ['DELETE', 'admin/tasks/{task}', $consumed, ['{task}' => 'task:Write the 404 and maintenance pages']],
 
+        // Admin surface — the task discussion. The GET has no Form Request in front of it, so
+        // an Admin gets the thread; the POST has one, so a body-less call stops at the
+        // validation redirect, which is proof it got past every gate.
+        ['GET', 'admin/tasks/{task}/discussion', $admin],
+        ['POST', 'admin/tasks/{task}/discussion', $adminAction],
+
+        // Admin surface — tag management. Creating, renaming and removing a label is
+        // Admin/Manager; a Manager reaches it on the Employee surface, below.
+        ['GET', 'admin/tags', $admin],
+        ['POST', 'admin/tags', $adminAction],
+        // `update` sends no body here, so it stops at validation for everybody who reaches the
+        // surface rather than at the policy. The policy's answer is asserted directly in
+        // tests/Feature/Admin/TagEndpointsTest.php.
+        ['PUT', 'admin/tags/{tag}', $adminAction, ['{tag}' => 'tag:Development']],
+        // Its own tag, because it destroys the one it points at — and a global one, so no
+        // other row's picker loses an option it was counting on.
+        ['DELETE', 'admin/tags/{tag}', $consumed, ['{tag}' => 'tag:Maintenance']],
+
+        // Admin surface — one file. The history GET has no Form Request in front of it, so it
+        // reads the visibility rule out loud: an Admin sees the chain of a file on any task,
+        // and everybody else is stopped by the surface before the question arises. It consumes
+        // nothing, so it can point at the same default file the two rows below do.
+        ['GET', 'admin/files/{file}/versions', $admin],
+        // `versions` takes a body, so nobody who reaches the surface
+        // gets past the Form Request without one and the row consumes nothing.
+        ['POST', 'admin/files/{file}/versions', $adminAction],
+        // Its own file, because it destroys the one it is pointed at.
+        ['DELETE', 'admin/files/{file}', $consumed, ['{file}' => 'file:admin-delete']],
+
         // Employee surface
         ['GET', 'employee/dashboard', $employee],
+        // The same one-route-seven-buckets page on this surface. A 200 for everyone who may
+        // reach the surface: a plate with nothing on it is still a plate, so an employee with
+        // no tasks gets the page and seven zeroes, not a refusal.
+        ['GET', 'employee/my-tasks', $employee],
         ['GET', 'employee/projects', $employee],
         // Tapu (REMOTE_EMPLOYEE) is on this project and Yaseen (EMPLOYEE) is not: a project
         // an employee is not on is missing, not forbidden.
@@ -250,8 +370,51 @@ function permissionMatrix(): array
         // Archive is ADMIN/MANAGER: an assignee reaches the task and is still refused, which is
         // a 403 about their role and not a 404 about the record.
         ['POST', 'employee/tasks/{task}/archive', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
+        // Attachments. The GET has no Form Request in front of it, so Yaseen's 404 survives to
+        // be seen; the POST has one, so everybody who reaches the surface stops at the same
+        // validation redirect.
+        ['GET', 'employee/tasks/{task}/files', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
+        ['POST', 'employee/tasks/{task}/files', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        // The discussion. The GET has no Form Request, so Yaseen's 404 survives to be seen —
+        // which is the whole privacy rule for this slice, read straight off a row: an employee
+        // sees the discussion only of tasks they are assigned to, and one they are not on is
+        // ABSENT rather than refused. The POST has a Form Request (a message needs a body or a
+        // file), so everybody who reaches the surface stops at the same validation redirect.
+        ['GET', 'employee/tasks/{task}/discussion', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
+        ['POST', 'employee/tasks/{task}/discussion', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+
         // Delete is ADMIN/MANAGER too, and a Manager can only reach it here. Its own task.
         ['DELETE', 'employee/tasks/{task}', $consumedByManager, ['{task}' => 'task:Refresh the agency case-study deck']],
+
+        // Employee surface — tag management, which is here because this is where a MANAGER is.
+        // The GET and the DELETE carry no body, so both read the policy out loud: the Manager
+        // manages tags and an employee does not, as a 403 about their role rather than a 404
+        // about a record they can perfectly well see the name of.
+        ['GET', 'employee/tags', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
+        ['POST', 'employee/tags', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        // Every field on the update is optional, so an empty body passes validation and the
+        // request reaches the policy — which is why this row shows the refusal that the POST
+        // above hides behind its Form Request.
+        ['PUT', 'employee/tags/{tag}', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403], ['{tag}' => 'tag:Branding']],
+        // Its own tag: the Manager cell consumes it, so every cell after sees 404.
+        ['DELETE', 'employee/tags/{tag}', $consumedByManager, ['{tag}' => 'tag:SEO']],
+
+        // Employee surface — one file. The history GET carries no body, so Yaseen's 404
+        // survives to be seen and the row states the privacy rule the endpoint exists to keep:
+        // the file is on Tapu's task, so the Manager and Tapu read its chain and Yaseen — who
+        // is not on that task — is told it is ABSENT, not refused. Its version count is behind
+        // the same 404. It must stay ABOVE the DELETE row, which consumes this file.
+        ['GET', 'employee/files/{file}/versions', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
+        // A body is required, so this stops at validation for
+        // everybody on the surface and consumes nothing.
+        ['POST', 'employee/files/{file}/versions', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        // The delete rule, read straight off the row. The file is on Tapu's task and Tapu
+        // uploaded it, so:
+        //   MANAGER          403 — sees the task, may edit it, and it is not their upload
+        //   EMPLOYEE         404 — Yaseen is not on the task, so the file is absent, not refused
+        //   REMOTE_EMPLOYEE  302 — Tapu is the uploader, and this is the cell that consumes it
+        //   ACCOUNTANT       404 — the file is gone by the time the last cell runs
+        ['DELETE', 'employee/files/{file}', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 404]],
 
         // Accountant surface
         ['GET', 'accountant/dashboard', $accountant],
@@ -263,6 +426,33 @@ function permissionMatrix(): array
         ['DELETE', 'profile/two-factor', $everyone(302)],
         ['POST', 'profile/two-factor/recovery-codes', $everyone(302)],
         ['DELETE', 'profile/sessions/{session}', $everyone(404)],
+
+        // Shared — the bell and the Notification Center. No surface, like the file download
+        // above: a person's own mail is a fact about the person, not about the shell they are
+        // looking at, so all four roles that have a mailbox reach the same four routes.
+        //
+        // The ACCOUNTANT cell is 403 on every one of them, and it is not a rule about
+        // Accountants. `can:viewAny` asks whether this person could receive any kind of
+        // notification at all, and every Phase 2 notification type requires `tasks.view`;
+        // they hold no tasks.* key, exactly as they hold none in the task rows above.
+        ['GET', 'notifications', $notifications(200)],
+        ['GET', 'notifications/recent', $notifications(200)],
+        ['POST', 'notifications/read-all', $notifications(302)],
+        // The one row that states the other half of the rule. The notification belongs to
+        // Tapu, so:
+        //   ADMIN / MANAGER / EMPLOYEE  404 — somebody else's mail is ABSENT, not refused,
+        //                                     even to an Admin who can see the whole agency
+        //   REMOTE_EMPLOYEE             302 — it is Tapu's, and marking it read is idempotent
+        //   ACCOUNTANT                  403 — stopped at the gate before the row is looked up
+        ['POST', 'notifications/{notification}/read', ['guest' => '302 /login', 'ADMIN' => 404, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+
+        // Downloading a file: one route, no surface, its own file so that no earlier row has
+        // consumed it. The matrix sends no signature, and that is what this row asserts — every
+        // signed-in role is refused, whatever they could otherwise see, because the link has to
+        // be minted by FileService. Who may use a VALID link is a policy question and is
+        // answered in tests/Feature/Privacy/FilePrivacyTest.php, where an employee holding a
+        // perfectly good link to a task they are not on gets a 404.
+        ['GET', 'files/{file}', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403], ['{file}' => 'file:download']],
     ];
 }
 

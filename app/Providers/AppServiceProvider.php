@@ -2,12 +2,14 @@
 
 namespace App\Providers;
 
+use App\Listeners\NotificationDispatcher;
 use App\Models\User;
 use App\Services\SettingsService;
 use App\Services\TwoFactorService;
 use App\Support\Permission;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -38,6 +40,13 @@ class AppServiceProvider extends ServiceProvider
         $this->defineRateLimiters();
 
         // The login listeners in app/Listeners are registered by event auto-discovery.
+        //
+        // NotificationDispatcher is not, and cannot be: auto-discovery finds a listener by the
+        // event type-hinted on its handle() method, and this one answers nine events. It is a
+        // SUBSCRIBER, so the event => method map lives in the class itself (see its subscribe())
+        // and this line is the whole registration. That map is deliberately the only list of
+        // "which events produce notifications" in the application.
+        Event::subscribe(NotificationDispatcher::class);
     }
 
     /**

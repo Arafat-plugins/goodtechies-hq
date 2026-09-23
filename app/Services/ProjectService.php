@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\ProjectCancelled;
 use App\Exceptions\ProjectStateException;
 use App\Models\Employee;
 use App\Models\Project;
@@ -57,6 +58,24 @@ class ProjectService
         private readonly AuditLogger $audit,
         private readonly ActivityLogger $activity,
     ) {}
+
+    /**
+     * How many Active projects this user may see — the Company dashboard's fifth task card.
+     *
+     * Scoped through `Project::visibleTo()` like every other project list, and counted in SQL
+     * rather than by fetching rows. The two predicates are the ones `/admin/projects?status=
+     * active` applies, in the same order, so the card's number and the list it opens are the
+     * same set: `notArchived()` is that list's default, and a project is not Active once it
+     * has been archived anyway.
+     */
+    public function activeCount(User $actor): int
+    {
+        return Project::query()
+            ->visibleTo($actor)
+            ->where('status', ProjectStatus::Active->value)
+            ->notArchived()
+            ->count();
+    }
 
     /**
      * @param  array<string, mixed>  $attributes
@@ -197,12 +216,7 @@ class ProjectService
             );
 
             if ($to === ProjectStatus::Cancelled) {
-                // Phase 2: hook the bulk close-or-reassign prompt for the project's open tasks here.
-                $this->activity->record(
-                    $project,
-                    'Project cancelled — open tasks must be closed or reassigned (Phase 2)',
-                    $actor,
-                );
+                $this->promptToCloseOpenTasks($actor, $project);
             }
 
             return $project->refresh();
@@ -265,6 +279,54 @@ class ProjectService
 
             return $project->refresh();
         });
+    }
+
+    /**
+     * The Phase 1 side effect, made real (spec Part D §21: "Project cancelled → open tasks
+     * prompted bulk-close/reassign").
+     *
+     * Phase 1 could only leave a note. It recorded an activity line ending "(Phase 2)" —
+     * literally a comment in the timeline saying somebody would have to do this by hand —
+     * because there was no engine to prompt anybody through and no tasks table to count. Both
+     * exist now, so the line says what is actually outstanding and a High-priority System
+     * notification goes to the people who can deal with it: the project's PM and every Admin.
+     *
+     * Three things it deliberately does NOT do:
+     *
+     *   - **It does not close the tasks.** The spec says "prompted", and it is right to: the
+     *     tasks on a cancelled project are not all waste — some are owed to the client anyway,
+     *     some belong on another project. Cancelling a project is a decision about the project.
+     *     Cancelling twenty tasks is twenty decisions, and they are not this method's to make.
+     *   - **It does not move a status.** A task's status moves through TaskService::transition()
+     *     and the model's one door, and this class is not going to open a second one.
+     *   - **It says nothing when there is nothing to say.** A project cancelled with no open
+     *     tasks left leaves no line and sends no prompt — an empty to-do list is not news.
+     */
+    private function promptToCloseOpenTasks(User $actor, Project $project): void
+    {
+        // Every open task, whoever they belong to — not `visibleTo($actor)`. What a
+        // cancellation leaves behind is a fact about the project, and an Admin and a PM
+        // cancelling the same project must be told the same number.
+        $openTaskIds = $project->tasks()
+            ->open()
+            ->notArchived()
+            ->pluck('tasks.id')
+            ->map('intval')
+            ->all();
+
+        if ($openTaskIds === []) {
+            return;
+        }
+
+        $this->activity->record($project, sprintf(
+            'Project cancelled — %d open %s must be closed or reassigned',
+            count($openTaskIds),
+            count($openTaskIds) === 1 ? 'task' : 'tasks',
+        ), $actor);
+
+        // Inside changeStatus()'s transaction, so a cancellation that rolls back prompts
+        // nobody. NotificationDispatcher decides who hears it.
+        event(new ProjectCancelled($project, $actor, $openTaskIds));
     }
 
     /**

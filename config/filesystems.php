@@ -33,7 +33,14 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // Laravel registers GET /storage/{path} when this is true — a *bearer* route:
+            // signature-checked, but with no `auth` and no policy behind it. This app's file
+            // security model is the opposite (see FileService::url): a signed link proves the
+            // link is untampered, and FilePolicy still decides whether THIS viewer may have the
+            // bytes, so a forwarded link is 404 for someone who may not see the record.
+            // Nothing mints a Storage::url() today, so the route is unreachable — but leaving it
+            // registered means one such call, anywhere, silently opts a file out of the policy.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

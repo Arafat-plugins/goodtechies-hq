@@ -1,44 +1,30 @@
 <script setup lang="ts">
 import { Head } from '@inertiajs/vue3';
-import {
-    Bell,
-    CalendarClock,
-    CalendarDays,
-    CircleAlert,
-    CircleCheck,
-    History,
-    ListTodo,
-    LoaderCircle,
-    PartyPopper,
-    Video,
-} from '@lucide/vue';
+import { Bell, CalendarDays, History, PartyPopper, Video } from '@lucide/vue';
 import TimerHeroCard from '@/Components/Dashboard/TimerHeroCard.vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import PageShell from '@/Components/PageShell.vue';
+import StatCard from '@/Components/StatCard.vue';
+import type { MyTaskBucket } from '@/Components/Tasks/MyTasks.vue';
+import { bucketIcon, bucketSubline } from '@/Components/Tasks/MyTasks.vue';
 import { Card } from '@/Components/ui/card';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import type { TrackingMode } from '@/types';
 
 defineOptions({ layout: EmployeeLayout });
 
+/**
+ * `taskStats` is the plan's five cards — My Tasks, Due Today, Overdue, In Progress,
+ * Completed — each one a server-side COUNT over `Task::visibleTo()` narrowed to this person,
+ * and each one carrying the link to the bucket it counted. Nothing on this page computes a
+ * number, and there is no list here it could have been computed from.
+ */
 defineProps<{
     greetingName: string;
     today: string;
     trackingMode: TrackingMode;
+    taskStats: MyTaskBucket[];
 }>();
-
-/**
- * Demoted from five hero cards to one compact row inside a single card: they are counts
- * you read, not things you do, and the hero above is what the page is for. One shared
- * phase line under the row replaces five identical ones.
- */
-const taskStats = [
-    { label: 'Assigned', icon: ListTodo },
-    { label: 'Due today', icon: CalendarClock },
-    { label: 'Overdue', icon: CircleAlert },
-    { label: 'In progress', icon: LoaderCircle },
-    { label: 'Completed', icon: CircleCheck },
-];
 
 const panels = [
     { title: 'My schedule', phase: 4, icon: CalendarDays, description: 'Your working hours and shifts will show here.' },
@@ -59,22 +45,28 @@ const panels = [
     <PageShell title="Dashboard" :greeting="{ name: greetingName, today }">
         <TimerHeroCard :mode="trackingMode" />
 
-        <Card class="gap-4 p-4 shadow-xs">
-            <h2 class="text-sm font-medium">My tasks</h2>
-            <dl class="grid min-w-0 grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-                <div v-for="stat in taskStats" :key="stat.label" class="flex min-w-0 flex-col gap-1">
-                    <dt class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                        <component :is="stat.icon" class="size-3.5 shrink-0" aria-hidden="true" />
-                        <span class="truncate">{{ stat.label }}</span>
-                    </dt>
-                    <dd class="text-xl font-semibold tabular-nums text-muted-foreground">
-                        <span aria-hidden="true">—</span>
-                        <span class="sr-only">Not available yet</span>
-                    </dd>
-                </div>
-            </dl>
-            <p class="text-xs text-muted-foreground">Arrives in Phase 2</p>
-        </Card>
+        <!--
+            Cards rather than the read-only row this used to be: every one of them is now a
+            real number that leads to the tasks it counted, and a number you can act on is a
+            card, not a term in a definition list. Zero is a real answer here too — the
+            sub-line under a nought reads "Nothing is late", not an empty state.
+        -->
+        <section
+            v-if="taskStats.length > 0"
+            aria-label="My tasks"
+            class="grid min-w-0 grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5"
+        >
+            <StatCard
+                v-for="stat in taskStats"
+                :key="stat.key"
+                size="compact"
+                :label="stat.label"
+                :value="stat.count"
+                :sub="bucketSubline(stat.key, stat.count)"
+                :icon="bucketIcon(stat.key)"
+                :href="stat.href"
+            />
+        </section>
 
         <section aria-label="Coming up" class="grid gap-4 md:grid-cols-2">
             <Card v-for="panel in panels" :key="panel.title" class="min-w-0 gap-4 p-6 shadow-xs">

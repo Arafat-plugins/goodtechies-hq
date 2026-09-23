@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Comp
 import { cn } from '@/lib/utils';
 import { readGroupOpen, writeGroupOpen } from '@/lib/sidebarState';
 import type { NavGroup, NavItem } from '@/navigation/types';
-import { groupHasActive, isActiveItem, isPinnedGroup, liveGroups } from '@/navigation/types';
+import { activeItem, groupHasActive, isPinnedGroup, liveGroups } from '@/navigation/types';
 
 const props = withDefaults(
     defineProps<{
@@ -25,6 +25,20 @@ const emit = defineEmits<{
 const page = usePage();
 
 const role = computed(() => page.props.auth.user?.role ?? 'guest');
+
+/**
+ * The one row this URL belongs to, resolved across the whole nav rather than row by row.
+ *
+ * More than one row can legitimately claim a URL — the Tasks row owns the Calendar through
+ * its `activePrefix` and the Calendar row points straight at it; My Tasks owns
+ * `/admin/my-tasks` and Overdue owns `?bucket=overdue` on the same page. `activeItem()` picks
+ * the most specific claim, so exactly one row is ever lit.
+ */
+const active = computed(() => activeItem(props.groups, page.url));
+
+function isActive(item: NavItem): boolean {
+    return active.value === item;
+}
 
 /**
  * Only built rows live in the groups; everything with a `phase` is rendered by
@@ -57,7 +71,7 @@ function separatorBefore(index: number): boolean {
 const ADMIN_DEFAULT_OPEN = ['my work', 'company', 'work'];
 
 function defaultOpen(group: NavGroup): boolean {
-    if (groupHasActive(group, page.url)) {
+    if (groupHasActive(group, active.value)) {
         return true;
     }
 
@@ -110,7 +124,7 @@ function itemClass(item: NavItem): string {
     return cn(
         props.rail ? railRowClass : rowClass,
         'transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none',
-        isActiveItem(page.url, item) ? activeClass : inactiveClass,
+        isActive(item) ? activeClass : inactiveClass,
     );
 }
 </script>
@@ -132,7 +146,7 @@ function itemClass(item: NavItem): string {
                             <TooltipTrigger as-child>
                                 <Link
                                     :href="item.href!"
-                                    :aria-current="isActiveItem(page.url, item) ? 'page' : undefined"
+                                    :aria-current="isActive(item) ? 'page' : undefined"
                                     :class="itemClass(item)"
                                     @click="emit('navigate')"
                                 >
@@ -170,7 +184,7 @@ function itemClass(item: NavItem): string {
                             <li v-for="item in group.items" :key="item.label">
                                 <Link
                                     :href="item.href!"
-                                    :aria-current="isActiveItem(page.url, item) ? 'page' : undefined"
+                                    :aria-current="isActive(item) ? 'page' : undefined"
                                     :class="itemClass(item)"
                                     @click="emit('navigate')"
                                 >

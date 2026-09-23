@@ -2,12 +2,16 @@
 import { router } from '@inertiajs/vue3';
 import { Archive, ArchiveRestore, Trash2 } from '@lucide/vue';
 import { computed, ref } from 'vue';
+import FilePanel from '@/Components/Files/FilePanel.vue';
+import type { FileRoutes } from '@/Components/Files/files';
+import { fileRoutes } from '@/Components/Files/files';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
 import { formatTracked } from '@/Components/Tasks/TaskList.vue';
 import TaskActivityPanel from '@/Components/Tasks/TaskActivityPanel.vue';
 import TaskChecklistPanel from '@/Components/Tasks/TaskChecklistPanel.vue';
 import TaskDependenciesPanel from '@/Components/Tasks/TaskDependenciesPanel.vue';
+import TaskDiscussionPanel from '@/Components/Tasks/TaskDiscussionPanel.vue';
 import TaskFieldsPanel from '@/Components/Tasks/TaskFieldsPanel.vue';
 import TaskLinksPanel from '@/Components/Tasks/TaskLinksPanel.vue';
 import TaskPeoplePanel from '@/Components/Tasks/TaskPeoplePanel.vue';
@@ -16,6 +20,7 @@ import TaskSummaryPanel from '@/Components/Tasks/TaskSummaryPanel.vue';
 import type {
     TaskActivityEntry,
     TaskDetail,
+    TaskDiscussion,
     TaskSibling,
     TaskSurface,
 } from '@/Components/Tasks/taskDetail';
@@ -49,6 +54,11 @@ const props = withDefaults(
     defineProps<{
         task: TaskDetail;
         activity: TaskActivityEntry[];
+        /**
+         * The thread, inlined by both detail controllers so the panel paints with it. The panel
+         * refreshes itself from `…/discussion` after that — the same shape, one builder.
+         */
+        discussion: TaskDiscussion;
         surface: TaskSurface;
         reviewers: { id: number; name: string | null }[];
         /** Admin detail only: the assignee picker's options. */
@@ -74,6 +84,19 @@ const emit = defineEmits<{
 }>();
 
 const routes = computed(() => taskRoutes(props.surface, props.task.id));
+
+/**
+ * The attachment panel's URLs.
+ *
+ * Branched rather than passed through, because `fileRoutes` is overloaded on purpose: the
+ * employee surface has the task file routes and nothing else, so the narrow call is what keeps
+ * "an employee project's files" a compile error instead of a 404 somebody finds in staging.
+ */
+const attachmentRoutes = computed<FileRoutes>(() =>
+    props.surface === 'admin'
+        ? fileRoutes('admin', 'tasks', props.task.id)
+        : fileRoutes('employee', 'tasks', props.task.id),
+);
 
 const people = ref<InstanceType<typeof TaskPeoplePanel> | null>(null);
 
@@ -181,6 +204,29 @@ function confirmDelete(): void {
                 />
                 <TaskSummaryPanel :task="task" :surface="surface" @settled="emit('settled')" />
                 <TaskChecklistPanel :task="task" :surface="surface" @settled="emit('settled')" />
+
+                <!--
+                    `canUpload` is the task's OWN server-resolved permission — the ability
+                    `FileService::guardMayAttach()` asks for — never a role and never a surface.
+                    `changed` is how the drawer learns to re-read: it holds a payload it fetched
+                    itself, and `attachment_count` on it goes stale the moment a file lands.
+                -->
+                <FilePanel
+                    :routes="attachmentRoutes"
+                    :can-upload="task.permissions.can_update"
+                    title="Attachments"
+                    description="Briefs, screenshots and anything else this task is about."
+                    empty-description="Anything attached to this task shows up here."
+                    @changed="emit('settled')"
+                />
+
+                <TaskDiscussionPanel
+                    :task="task"
+                    :surface="surface"
+                    :discussion="discussion"
+                    @settled="emit('settled')"
+                />
+
                 <TaskActivityPanel :activity="activity" />
             </div>
 

@@ -20,9 +20,13 @@ defineProps<{
     transitions: TransitionMap;
     filters: TaskFilters;
     statuses: TaskOption[];
+    /** The bucket chip's options — "what is late", "what is due today". Server-labelled. */
+    buckets: TaskOption[];
     priorities: TaskOption[];
     projects: TaskNamedRef[];
     tags: TaskTag[];
+    /** `TagPolicy::create`, answered by the controller — whether the tag manager is offered. */
+    canManageTags: boolean;
     employees: TaskNamedRef[];
 }>();
 
@@ -64,9 +68,11 @@ if (quickAddOpen.value) {
             :filters="filters"
             surface="admin"
             :statuses="statuses"
+            :buckets="buckets"
             :priorities="priorities"
             :projects="projects"
             :tags="tags"
+            :can-manage-tags="canManageTags"
             :employees="employees"
             search-placeholder="Search tasks…"
             empty-title="No tasks yet"

@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  GoodTechies HQ - development mode (Windows)
+REM  goodERP - development mode (Windows)
 REM
 REM  Runs `composer run dev`: Laravel, the queue worker and the
 REM  Vite dev server together.
@@ -24,7 +24,7 @@ REM  a stranded one if it happens.
 REM ============================================================
 setlocal
 cd /d "%~dp0"
-title GoodTechies HQ - dev mode
+title goodERP - dev mode
 
 if not exist ".env" (
     echo   No .env found. Run setup-local.bat first.
@@ -48,12 +48,22 @@ REM Nobody is un-enrolled either - every secret and recovery code stays in
 REM the database, so deleting this line brings the prompt straight back.
 set "AUTH_TWO_FACTOR_ENFORCED=false"
 
+REM ---------- Product name ----------
+REM The app reads its name from APP_NAME. Setting it here means it takes effect
+REM without editing .env - which this tooling cannot write to anyway, because
+REM that file holds your database and seed passwords.
+REM
+REM To make it permanent (and for deployment), change line 1 of .env to:
+REM     APP_NAME="goodERP"
+REM ...and then this line does nothing, which is fine.
+set "APP_NAME=goodERP"
+
 for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_PASSWORD=" .env')          do set "SEED_PW=%%b"
 for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_TWO_FACTOR_SECRET=" .env') do set "SEED_2FA=%%b"
 
 echo.
 echo ============================================================
-echo   GoodTechies HQ - dev mode
+echo   goodERP - dev mode
 echo.
 echo   Open  http://localhost:8000
 echo   ^(Vite serves assets on 5173 - you do not open that one^)

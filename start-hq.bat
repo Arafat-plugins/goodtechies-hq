@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  GoodTechies HQ - start the app (Windows)
+REM  goodERP - start the app (Windows)
 REM  Double-click this. It updates dependencies, builds the
 REM  frontend, then serves the app on http://localhost:8000
 REM  Everything it prints is also written to start-hq.log, so a
@@ -9,13 +9,13 @@ REM  First time ever on a machine: run setup-local.bat instead.
 REM ============================================================
 setlocal
 cd /d "%~dp0"
-title GoodTechies HQ - running
+title goodERP - running
 set "LOG=start-hq.log"
-echo GoodTechies HQ start-hq.bat  %DATE% %TIME% > "%LOG%"
+echo goodERP start-hq.bat  %DATE% %TIME% > "%LOG%"
 
 echo.
 echo ============================================================
-echo   GoodTechies HQ
+echo   goodERP
 echo ============================================================
 echo.
 
@@ -39,6 +39,16 @@ REM this is set to, and there is a test that fails if anyone removes that.
 REM Nobody is un-enrolled either - every secret and recovery code stays in
 REM the database, so deleting this line brings the prompt straight back.
 set "AUTH_TWO_FACTOR_ENFORCED=false"
+
+REM ---------- Product name ----------
+REM The app reads its name from APP_NAME. Setting it here means it takes effect
+REM without editing .env - which this tooling cannot write to anyway, because
+REM that file holds your database and seed passwords.
+REM
+REM To make it permanent (and for deployment), change line 1 of .env to:
+REM     APP_NAME="goodERP"
+REM ...and then this line does nothing, which is fine.
+set "APP_NAME=goodERP"
 
 REM ---------- 1. JS dependencies ----------
 echo [1/4] Updating JS dependencies...

@@ -53,8 +53,10 @@ UI surfaces (Admin, Employee, Accountant) and **privacy by role is enforced on t
 - **Tests:** `tests/Pest.php` binds `TestCase` + `RefreshDatabase` for the `Feature` and `Permissions` folders.
 
 ### Surfaces
-Generated 2026-09-17 from `php artisan route:list --except-vendor` (plus framework `GET /up`), and
-still current: Phase 0.5 changed no route, controller or model. The **Styles** column is historical.
+Generated 2026-09-17 from `php artisan route:list --except-vendor` (plus framework `GET /up`).
+**Stale since Phase 2** — it does not list the tasks, files, tags or discussion routes that
+slices 1-4 added. Run the command for the truth; this table is still right about Phase 0 and 1.
+The **Styles** column is historical.
 Every page now opens with `PageShell`; admin lists use `DataTable` + the chip `FilterBar`; an
 unbuilt panel is `Card` + `EmptyState`. See DESIGN.md §4.
 | Surface (route) | Entry | View | Styles |
@@ -139,10 +141,26 @@ unbuilt panel is `Card` + `EmptyState`. See DESIGN.md §4.
 The local cloud workspace has PostgreSQL 16 on `127.0.0.1:5432`, superuser `postgres`, trust auth (dev only), and Redis on `127.0.0.1:6379`.
 
 ## Known-failing baseline
-Measured 2026-09-20 at `126c1de` (Phase 2, Board and Calendar) with `php artisan test`: none
-failing (**712 passed, 4199 assertions**). `vendor/bin/pint --test`: passed.
-`npx vue-tsc --noEmit`: passed. `npm run build`: passed. If your number is not 712, that is a
-finding, not drift.
+Measured 2026-09-22 at `b6d6146` (Phase 2, slice 5 complete — notifications, My Tasks, dashboard
+cards) with `php vendor/bin/pest`: none failing (**1011 passed, 5546 assertions**).
+`vendor/bin/pint --test`: passed. `npx vue-tsc --noEmit`: passed. `npm run build`: passed. If
+your number is not 1011, that is a finding, not drift.
+
+**Two suites cannot share this checkout.** `php artisan test` runs in parallel here and
+deadlocks on migration DDL before any test body runs — use `php vendor/bin/pest`. And if a
+second agent is testing at the same time, a private database is *not* enough isolation:
+`Storage::fake()` targets the shared `storage/framework/testing/disks/local`, so one suite's
+`beforeEach` deletes the other's bytes mid-run and the file tests fail on missing bytes. Two
+concurrent sub-agents must not both run the suite.
+
+**Files are policy-checked on every fetch, not bearer-signed.** `FileService::url()` mints a
+`temporarySignedRoute`, and the download route runs `FilePolicy::view` — a forwarded link is 404
+for someone who may not see the owning record. Never mint a `Storage::url()` or
+`temporaryUrl()`; `local.serve` is off so there is no bearer route to reach.
+
+**A conversation's membership is computed, never stored.** `ConversationPolicy` asks the linked
+task's `TaskPolicy::view`. `conversation_members` is read state (`last_read_at`) and grants
+nothing — do not add a membership check, and do not sync a list.
 
 **A task's status is guarded at the model.** `Task` throws
 `TaskStateException::statusWrittenOutsideTheMachine()` if `status` is dirty on an existing row

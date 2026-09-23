@@ -5,14 +5,18 @@ use App\Models\ActivityLog;
 use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Employee;
+use App\Models\Notification;
 use App\Models\Project;
+use App\Models\Task;
 use App\Models\User;
 use App\Services\ProjectService;
 use App\Support\BillingType;
+use App\Support\NotificationType;
 use App\Support\Priority;
 use App\Support\ProjectStatus;
 use App\Support\ProjectType;
 use App\Support\RoleName;
+use App\Support\TaskStatus;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
 
@@ -228,13 +232,36 @@ it('keeps cancelling and reopening to admins', function () {
         ->toBe(ProjectStatus::OnHold);
 })->group('phase1');
 
-it('leaves the Phase 2 line on the timeline when a project is cancelled', function () {
+it('records what a cancellation leaves open, and prompts somebody to deal with it', function () {
+    // Phase 1 could only leave a note here: it recorded "open tasks must be closed or
+    // reassigned (Phase 2)" because there was no tasks table to count and no engine to prompt
+    // anybody through. Phase 2 slice 5 connected both, so the line now says how much is
+    // outstanding and a System notification goes to the people who can act on it.
+    Task::factory()->count(2)->for($this->project)->create(['status' => TaskStatus::Todo]);
+    Task::factory()->for($this->project)->create(['status' => TaskStatus::Completed]);
+
     $this->service->changeStatus($this->admin, $this->project, ProjectStatus::Cancelled, 'Client stopped paying');
 
     $descriptions = ActivityLog::where('object_id', $this->project->id)->pluck('description')->all();
 
-    expect($descriptions)->toContain('Project cancelled — open tasks must be closed or reassigned (Phase 2)')
-        ->and($descriptions)->toContain('Status changed from Active to Cancelled — Client stopped paying');
+    expect($descriptions)->toContain('Project cancelled — 2 open tasks must be closed or reassigned')
+        ->and($descriptions)->toContain('Status changed from Active to Cancelled — Client stopped paying')
+        // The tasks are untouched. Cancelling a project is one decision; closing twenty tasks
+        // is twenty, and they are not this service's to make.
+        ->and(Task::query()->where('project_id', $this->project->id)->open()->count())->toBe(2)
+        // The prompt reached the PM, who is the person being asked to deal with it.
+        ->and(Notification::query()->forUser($this->manager)->where('type', NotificationType::ProjectCancelled->value)->count())
+        ->toBe(1);
+})->group('phase1');
+
+it('says nothing about open tasks when a cancelled project has none', function () {
+    $this->service->changeStatus($this->admin, $this->project, ProjectStatus::Cancelled);
+
+    $descriptions = ActivityLog::where('object_id', $this->project->id)->pluck('description')->all();
+
+    expect(collect($descriptions)->filter(fn (string $line): bool => str_contains($line, 'must be closed or reassigned')))
+        ->toBeEmpty()
+        ->and(Notification::query()->count())->toBe(0);
 })->group('phase1');
 
 it('archives and unarchives a project, remembering the status it had', function () {

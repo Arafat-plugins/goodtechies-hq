@@ -55,9 +55,9 @@ it('sends exactly the documented task keys', function () {
         'completed_at', 'completed_by', 'first_completion',
         'created_at', 'created_by',
         'project', 'assignees', 'primary_assignee', 'tags',
-        'subtask_count', 'subtasks_done_count', 'permissions',
-        // checklist, links, dependencies, dependents and available_transitions are the
-        // detail page's; on a list they are absent, not empty.
+        'subtask_count', 'subtasks_done_count', 'attachment_count', 'permissions',
+        // checklist, links, dependencies, dependents, attachments and available_transitions
+        // are the detail page's; on a list they are absent, not empty.
     ]);
 })->group('phase2');
 
@@ -69,6 +69,12 @@ it('sends the grouped envelope the List view loops over', function () {
 
     expect(array_keys($props))->toEqualCanonicalizing([
         'tasks', 'filters', 'groupByOptions', 'statuses', 'priorities', 'projects', 'tags',
+        // The bucket chip's options — the vocabulary the dashboard cards link in, so a
+        // card's count and the list it opens are the same predicate.
+        'buckets',
+        // Whether the filter bar offers the tag manager. `TagPolicy::create`, answered here so
+        // that no Vue file re-derives it from a role.
+        'canManageTags',
         // The assignee picker's options, which slice 1 left the chip bar unable to build.
         'employees',
         // The shared props every page gets from HandleInertiaRequests.

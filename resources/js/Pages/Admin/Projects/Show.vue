@@ -2,6 +2,8 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Archive, ArchiveRestore, Pencil } from '@lucide/vue';
 import { computed, ref } from 'vue';
+import FilePanel from '@/Components/Files/FilePanel.vue';
+import { fileRoutes } from '@/Components/Files/files';
 import PageShell from '@/Components/PageShell.vue';
 import FinanceCard from '@/Components/Projects/FinanceCard.vue';
 import MembersCard from '@/Components/Projects/MembersCard.vue';
@@ -81,6 +83,13 @@ function relativeTime(at: string): string {
 
 const recentActivity = computed(() => props.activity.slice(0, 20));
 
+/**
+ * The Files tab's endpoints. `can_update` is what `FileService::guardMayAttach()` asks for, so
+ * an archived project lists and downloads what it already has and takes nothing new — the same
+ * answer the endpoint gives, resolved once by `ProjectPolicy`.
+ */
+const files = computed(() => fileRoutes('admin', 'projects', project.value.id));
+
 const tab = ref('overview');
 
 const archiveOpen = ref(false);
@@ -147,7 +156,7 @@ function confirmArchiveToggle(): void {
                     <TabsTrigger value="members">Members</TabsTrigger>
                     <TabsTrigger value="activity">Activity</TabsTrigger>
                     <TabsTrigger value="tasks" disabled title="Arrives in Phase 2">Tasks</TabsTrigger>
-                    <TabsTrigger value="files" disabled title="Arrives in Phase 2">Files</TabsTrigger>
+                    <TabsTrigger value="files">Files</TabsTrigger>
                 </TabsList>
             </div>
 
@@ -197,6 +206,15 @@ function confirmArchiveToggle(): void {
                     :project="project"
                     :assignable-employees="assignableEmployees"
                     :can-manage="permissions.can_manage_members === true"
+                />
+            </TabsContent>
+
+            <TabsContent value="files">
+                <FilePanel
+                    :routes="files"
+                    :can-upload="permissions.can_update === true"
+                    description="Briefs, deliverables and anything else worth keeping with this project."
+                    empty-description="Attach a brief, a deliverable or a signed scope and it will be here next week."
                 />
             </TabsContent>
 

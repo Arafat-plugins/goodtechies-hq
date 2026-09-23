@@ -1,11 +1,14 @@
 import {
     Bell,
     CalendarCheck,
+    CalendarClock,
     CalendarDays,
     CalendarOff,
     ChartColumn,
+    CircleAlert,
     FolderKanban,
     LayoutDashboard,
+    ListChecks,
     ListTodo,
     MessagesSquare,
     Timer,
@@ -30,10 +33,20 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
             label: 'Menu',
             items: [
                 { label: 'Dashboard', href: '/employee/dashboard', icon: LayoutDashboard },
-                // Board by default here too, so both surfaces open on the same view.
-                { label: 'My Tasks', href: '/employee/tasks/board', activePrefix: '/employee/tasks', icon: ListTodo },
+                // The plate: seven buckets and their counts. Due Today and Overdue are buckets
+                // of it rather than routes of their own — one question, one screen, one query
+                // per count; see the same three rows on the Admin nav.
+                { label: 'My Tasks', href: '/employee/my-tasks', icon: ListTodo },
+                { label: 'Due Today', href: '/employee/my-tasks?bucket=due_today', icon: CalendarClock },
+                { label: 'Overdue', href: '/employee/my-tasks?bucket=overdue', icon: CircleAlert },
+                // The List, Board and Calendar of the work this person can see — every task
+                // they are assigned to, and for the Manager who shares this surface, every
+                // task. It was labelled "My Tasks" while there was no My Tasks page to point
+                // at; it is the Tasks views, and now says so. Board by default, as on Admin.
+                { label: 'Tasks', href: '/employee/tasks/board', activePrefix: '/employee/tasks', icon: ListChecks },
                 { label: 'Projects', href: '/employee/projects', icon: FolderKanban },
-                { label: 'Calendar', icon: CalendarDays, phase: 2 },
+                // Shipped in slice 3. The longer claim wins the row — see `activeItem()`.
+                { label: 'Calendar', href: '/employee/tasks/calendar', icon: CalendarDays },
                 { label: 'Meetings', icon: Video, phase: 7 },
                 { label: 'Messages', icon: MessagesSquare, phase: 6 },
                 { label: 'Notifications', icon: Bell, phase: 2 },

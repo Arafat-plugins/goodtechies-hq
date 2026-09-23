@@ -42,4 +42,14 @@ class Client extends Model
     {
         return $this->hasMany(Project::class);
     }
+
+    /**
+     * The client's Files tab (spec §28) — current versions only, newest first, like a task's.
+     *
+     * @return HasMany<File, $this>
+     */
+    public function files(): HasMany
+    {
+        return $this->hasMany(File::class)->whereNull('superseded_at')->orderByDesc('id');
+    }
 }

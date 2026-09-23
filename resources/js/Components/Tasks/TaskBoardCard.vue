@@ -112,9 +112,6 @@ const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || prop
             cn(
                 'group flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-card-foreground shadow-raised',
                 canDrag && 'cursor-grab active:cursor-grabbing',
-                // The strip behind it is `cursor-grab` because its background pans; a card that
-                // cannot be dragged must not borrow that promise.
-                !canDrag && 'cursor-default',
                 dragging && 'opacity-40',
                 busy && 'opacity-60',
             )

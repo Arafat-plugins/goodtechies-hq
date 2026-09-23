@@ -134,8 +134,17 @@ export function buildBreadcrumbs(
     const match = matchNavItem(groups, url);
 
     if (!match) {
-        // The only live screen outside every role's nav tree.
-        return pathOf(url).startsWith('/profile') ? [{ label: 'Profile' }] : [];
+        // The two live screens outside every role's nav tree: a person's own account, and a
+        // person's own mail. Neither has a sidebar row — the bell is how the Notification
+        // Center is reached, and the Admin sidebar's `Notifications` row is Phase 12's
+        // per-type settings, a different screen that happens to share the word.
+        const path = pathOf(url);
+
+        if (path.startsWith('/profile')) {
+            return [{ label: 'Profile' }];
+        }
+
+        return path.startsWith('/notifications') ? [{ label: 'Notifications' }] : [];
     }
 
     const crumbs: Crumb[] = [];
