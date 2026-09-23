@@ -2,6 +2,7 @@
 
 use App\Models\Employee;
 use App\Models\Project;
+use App\Models\RecurringTask;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\TaskService;
@@ -312,3 +313,78 @@ it('makes work_summary_by and the primary assignee comparable by id', function (
         // not identity: it is what the reader sees, not what the rule reads.
         ->and($payload['primary_assignee']['name'])->toBe($payload['work_summary_by']['name']);
 })->group('phase2');
+
+/*
+|--------------------------------------------------------------------------
+| Phase 3 — where a generated task came from
+|--------------------------------------------------------------------------
+*/
+
+it('says which template made a task and for which period, on the detail payload', function () {
+    Carbon::setTestNow(Carbon::parse('2026-10-09'));
+
+    $template = RecurringTask::where('title_template', 'Buffalo Modular Monthly SEO — {period}')
+        ->firstOrFail();
+
+    $this->actingAs($this->admin)
+        ->post(route('admin.recurring.generate', $template))
+        ->assertRedirect();
+
+    $task = Task::where('recurring_task_id', $template->id)->firstOrFail();
+
+    $payload = $this->actingAs($this->admin)
+        ->get(route('admin.tasks.show', $task))
+        ->assertOk()
+        ->inertiaPage()['props']['task'];
+
+    expect($payload['generated_from'])->not->toBeNull()
+        ->and($payload['generated_from']['template'])->toBe($template->title_template)
+        ->and($payload['generated_from']['template_id'])->toBe($template->id)
+        ->and($payload['generated_from']['project_id'])->toBe($template->project_id)
+        ->and($payload['generated_from']['period'])->toBe('2026-10')
+        // Read off the stored KEY, so it survives the template's rule being changed.
+        ->and($payload['generated_from']['period_label'])->toBe('October 2026')
+        ->and($payload['generated_from']['can_manage'])->toBeTrue();
+
+    Carbon::setTestNow();
+})->group('phase3');
+
+it('tells an assignee which template made their task, but offers them no way in', function () {
+    Carbon::setTestNow(Carbon::parse('2026-10-09'));
+
+    $template = RecurringTask::where('title_template', 'Buffalo Modular Monthly SEO — {period}')
+        ->firstOrFail();
+
+    $this->actingAs($this->admin)->post(route('admin.recurring.generate', $template));
+
+    $task = Task::where('recurring_task_id', $template->id)->firstOrFail();
+
+    $payload = $this->actingAs($this->tapu)
+        ->get(route('employee.tasks.show', $task))
+        ->assertOk()
+        ->inertiaPage()['props']['task'];
+
+    // Tapu is the assignee, so he reads the provenance of the task in front of him — the
+    // template's name is the pattern his own title was rendered from. Managing it is Admin's,
+    // and `can_manage` is the policy's answer rather than a role read in Vue, so the screen
+    // draws a sentence and not a link that would 403 him.
+    expect($payload['generated_from']['period_label'])->toBe('October 2026')
+        ->and($payload['generated_from']['template'])->toBe($template->title_template)
+        ->and($payload['generated_from']['can_manage'])->toBeFalse();
+
+    Carbon::setTestNow();
+})->group('phase3');
+
+it('leaves generated_from null on a hand-made task and off a list payload entirely', function () {
+    $payload = $this->actingAs($this->admin)
+        ->get(route('admin.tasks.show', Task::where('title', 'Fix the duplicate canonical tags on model pages')->firstOrFail()))
+        ->assertOk()
+        ->inertiaPage()['props']['task'];
+
+    expect($payload['generated_from'])->toBeNull();
+
+    // A list row is not a detail payload: the key is behind the same `task_detail` attribute
+    // `available_transitions` is, so a board of two hundred cards does not do two hundred
+    // relation reads and gate calls to print nothing.
+    expect(firstTaskPayload($this))->not->toHaveKey('generated_from');
+})->group('phase3');

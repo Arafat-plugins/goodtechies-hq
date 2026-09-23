@@ -85,6 +85,10 @@ class TaskController extends Controller
         // The attachment panel. Current versions only — the relation says so — each one's
         // uploader eager-loaded so FileResource does not query per row.
         'files.uploader',
+        // Phase 3: "Generated from: <template> · period <Month YYYY>". A belongsTo that is null
+        // on every hand-made task, which is most of them — eager-loaded rather than read lazily
+        // so the detail payload is one query here too.
+        'recurringTask',
     ];
 
     public function __construct(

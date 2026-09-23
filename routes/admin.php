@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\ProjectFileController;
 use App\Http\Controllers\Admin\ProjectFinanceController;
 use App\Http\Controllers\Admin\ProjectMemberController;
 use App\Http\Controllers\Admin\ProjectStatusController;
+use App\Http\Controllers\Admin\RecurringTaskController;
 use App\Http\Controllers\Admin\SettingsController;
 use App\Http\Controllers\Admin\TagController;
 use App\Http\Controllers\Admin\TaskController;
@@ -68,6 +69,35 @@ Route::prefix('admin')
             // The project detail page's Files tab (spec §7).
             Route::get('/{project}/files', [ProjectFileController::class, 'index'])->name('files.index');
             Route::post('/{project}/files', [ProjectFileController::class, 'store'])->name('files.store');
+
+            // The project detail page's Recurring tab (Phase 3). The tab is a panel inside
+            // Pages/Admin/Projects/Show.vue, so the list is JSON it fetches rather than a page
+            // of its own; the write is back() with a flash, like every other panel here.
+            //
+            // `preview` is a GET: it stores nothing and changes nothing — it hands an UNSAVED
+            // rule to RecurrenceRule and answers with the date it next fires and the period
+            // that run belongs to. A read stays a read, which also keeps the editor's live
+            // preview a plain fetch with no token to carry.
+            Route::get('/{project}/recurring', [RecurringTaskController::class, 'index'])->name('recurring.index');
+            Route::post('/{project}/recurring', [RecurringTaskController::class, 'store'])->name('recurring.store');
+            Route::get('/{project}/recurring/preview', [RecurringTaskController::class, 'preview'])->name('recurring.preview');
+        });
+
+        // One template, whatever project it belongs to — the same shape as `admin/files/{file}`
+        // above, and for the same reason: editing a template, running it and reading its log are
+        // acts on the template, which already knows which project it is on. Nesting them would
+        // put a project id in the URL that nothing reads and that a caller could get wrong.
+        //
+        // A template on a project the requester cannot see is 404 here, not 403: the controller
+        // re-resolves it through RecurringTask::visibleTo() before the policy is asked.
+        Route::prefix('recurring-tasks')->name('recurring.')->group(function () {
+            Route::put('/{recurringTask}', [RecurringTaskController::class, 'update'])->name('update');
+            // "Generate now" — RecurringTaskEngine::generate(force: true). Every rule but due()
+            // still applies, which is why pressing it twice produces a duplicate WARNING and
+            // never a second task.
+            Route::post('/{recurringTask}/generate', [RecurringTaskController::class, 'generate'])->name('generate');
+            // The generation log, JSON, fetched when the panel is opened.
+            Route::get('/{recurringTask}/log', [RecurringTaskController::class, 'log'])->name('log');
         });
 
         // Tasks. A status moves through ONE endpoint — `…/status` — and `PUT /{task}` does not

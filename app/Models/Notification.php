@@ -50,6 +50,9 @@ class Notification extends Model
             'count' => 'integer',
             'is_read' => 'boolean',
             'read_at' => 'datetime',
+            // When the subject was DEALT WITH, which is not the same as when it was looked at.
+            // See the migration and scopeGroupable().
+            'resolved_at' => 'datetime',
         ];
     }
 
@@ -73,12 +76,41 @@ class Notification extends Model
     }
 
     /**
+     * Still asking for attention: not looked at, and not dealt with.
+     *
+     * This is the badge's set, `markAllRead()`'s set and the per-tab counts' set. The second
+     * half is decision 2-48: a reviewer who has ruled on a task has paid the attention the row
+     * was asking for, so it stops counting — without anybody having pretended they read it.
+     *
+     * It reads off the partial index over `is_read = false`; `resolved_at IS NULL` then narrows
+     * a set that is already one person's unread mail. See scopeGroupable(), which deliberately
+     * asks a different question off the same index.
+     *
      * @param  Builder<Notification>  $query
      * @return Builder<Notification>
      */
     public function scopeUnread(Builder $query): Builder
     {
-        return $query->where('is_read', false);
+        return $query->where('is_read', false)->whereNull('resolved_at');
+    }
+
+    /**
+     * The rows the bell and the Center draw — everything except what has been resolved.
+     *
+     * A resolved row is not deleted and not marked read: it is done. It leaves the two lists
+     * because the lists are a queue of things asking for something, and this one no longer is.
+     * What happened instead is on the task's activity trail, which is where "Shahadat requested
+     * changes: two titles still run long" belongs and already lives.
+     *
+     * It is still there, and still unread, so the next event on the same subject can grow it
+     * and bring it back — see scopeGroupable() and NotificationService::deliver().
+     *
+     * @param  Builder<Notification>  $query
+     * @return Builder<Notification>
+     */
+    public function scopeStillOpen(Builder $query): Builder
+    {
+        return $query->whereNull('resolved_at');
     }
 
     /**
@@ -113,19 +145,26 @@ class Notification extends Model
     }
 
     /**
-     * The dedup candidate: an UNREAD row for this group key, written inside the window.
+     * The dedup candidate: an UNLOOKED-AT row for this group key, written inside the window.
      *
-     * Unread is half the rule and the half that is easy to miss. A row the person has already
-     * looked at must not quietly absorb the next event — they would never be told about it —
+     * Not looked at is half the rule and the half that is easy to miss. A row the person has
+     * already read must not quietly absorb the next event — they would never be told about it —
      * so reading a group closes it and the next event starts a new one. See
      * NotificationService::deliver().
+     *
+     * It asks `is_read` directly rather than going through unread(), and the difference is
+     * decision 2-48's whole point. A RESOLVED row — the review request whose reviewer has since
+     * ruled — is out of the badge and out of both lists, but it is still groupable: the
+     * assignee's resubmission grows it, `deliver()` clears `resolved_at`, and it comes back
+     * reading *"…is waiting for your review again"* rather than repeating the first request as
+     * if nothing had happened (decision 2-46). Resolving quietens a row; only reading closes it.
      *
      * @param  Builder<Notification>  $query
      * @return Builder<Notification>
      */
     public function scopeGroupable(Builder $query, string $groupKey, Carbon $since): Builder
     {
-        return $query->unread()
+        return $query->where('is_read', false)
             ->where('group_key', $groupKey)
             ->where('created_at', '>=', $since);
     }

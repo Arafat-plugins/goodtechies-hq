@@ -307,3 +307,161 @@ it('remembers which objects it has already sent a type about', function () {
         ->and($this->notifications->alreadySentFor(NotificationType::TaskCommented, [$this->task]))
         ->toBe([]);
 })->group('phase2');
+
+/*
+|--------------------------------------------------------------------------
+| Resolving — what CLOSES a row, as opposed to what opens one (decision 2-48)
+|--------------------------------------------------------------------------
+|
+| A notification is a request for attention, and attention has been paid when
+| the person acts on the thing. The engine's half of that rule is here; the
+| walk through a real review — reviewer rules, assignee resubmits — is in
+| NotificationDispatcherTest.
+|
+| Every assertion below keeps the two states apart on purpose. `is_read` is
+| "you looked", and decision 2-33 hangs off it. `resolved_at` is "you dealt
+| with it". Collapsing them would have been one column cheaper and would have
+| closed the group as well as quietened it.
+|
+*/
+
+it('closes the actor\'s own row when they do the thing it asked for', function () {
+    // Tapu is asked to look at the task…
+    $asked = $this->notifications
+        ->notify(NotificationType::TaskSubmittedForReview, $this->task, [$this->tapu], [], $this->admin)
+        ->first();
+
+    expect($this->notifications->unreadCount($this->tapu))->toBe(1);
+
+    // …and then rules on it. The verdict's own notification names Tapu as the actor, which is
+    // the whole input the rule needs: nothing here mentions tasks, statuses or reviews.
+    $this->notifications->notify(NotificationType::TaskCompleted, $this->task, [$this->admin], [], $this->tapu);
+
+    $asked = $asked->fresh();
+
+    expect($asked->resolved_at)->not->toBeNull()
+        // Not read. They never opened it — they answered it.
+        ->and($asked->is_read)->toBeFalse()
+        ->and($asked->read_at)->toBeNull()
+        // The count is the server's number and it follows.
+        ->and($this->notifications->unreadCount($this->tapu))->toBe(0)
+        // And it is out of both lists the screens read.
+        ->and($this->notifications->recent($this->tapu)->pluck('id')->all())->not->toContain($asked->id)
+        ->and($this->notifications->page($this->tapu, NotificationTab::All)->pluck('id')->all())
+        ->not->toContain($asked->id);
+})->group('phase2');
+
+it('closes only the actor\'s row, never a second reviewer\'s', function () {
+    // Two people are asked the same question. One of them answers it.
+    $this->notifications->notify(
+        NotificationType::TaskSubmittedForReview,
+        $this->task,
+        [$this->tapu, $this->yaseen],
+        [],
+        $this->admin,
+    );
+
+    $this->notifications->notify(NotificationType::TaskCompleted, $this->task, [$this->admin], [], $this->tapu);
+
+    // Yaseen has not looked at his and has not acted on it, so nothing about it has changed.
+    // Silently emptying his bell would lose the only sign he had that he was asked.
+    expect($this->notifications->unreadCount($this->tapu))->toBe(0)
+        ->and($this->notifications->unreadCount($this->yaseen))->toBe(1)
+        ->and(Notification::query()->forUser($this->yaseen)->first()->resolved_at)->toBeNull();
+})->group('phase2');
+
+it('closes nothing for a type that names no resolving act', function () {
+    // Nothing answers a comment. Reading it is not answering it, and replying to it is not
+    // either — a thread that cleared itself when you spoke in it would hide the reply.
+    $comment = $this->notifications
+        ->notify(NotificationType::TaskCommented, $this->task, [$this->tapu], [], $this->admin)
+        ->first();
+
+    $this->notifications->notify(NotificationType::TaskCompleted, $this->task, [$this->admin], [], $this->tapu);
+
+    expect($comment->fresh()->resolved_at)->toBeNull()
+        ->and($this->notifications->unreadCount($this->tapu))->toBe(1);
+})->group('phase2');
+
+it('closes nothing when a date drove the event and nobody acted', function () {
+    $asked = $this->notifications
+        ->notify(NotificationType::TaskSubmittedForReview, $this->task, [$this->tapu], [], $this->admin)
+        ->first();
+
+    // hq:flag-overdue passes no actor. Nobody did anything, so nothing is answered.
+    $this->notifications->notify(NotificationType::TaskOverdue, $this->task, [$this->tapu], []);
+
+    expect($asked->fresh()->resolved_at)->toBeNull();
+})->group('phase2');
+
+it('brings a resolved row back when the same subject asks again, rather than starting a new one', function () {
+    // This is the half that would have broken if resolving had been spelled `is_read`: the
+    // group would have been closed as well as quietened, the resubmission would have written a
+    // fresh row of one, and the reviewer would have been told for the second time exactly what
+    // they were told the first (decision 2-46).
+    $asked = $this->notifications
+        ->notify(NotificationType::TaskSubmittedForReview, $this->task, [$this->tapu], [], $this->admin)
+        ->first();
+
+    $this->notifications->notify(NotificationType::TaskCompleted, $this->task, [$this->admin], [], $this->tapu);
+
+    expect($asked->fresh()->resolved_at)->not->toBeNull();
+
+    $again = $this->notifications
+        ->notify(NotificationType::TaskSubmittedForReview, $this->task, [$this->tapu], ['title' => 'A task'], $this->admin)
+        ->first();
+
+    expect($again->id)->toBe($asked->id)
+        ->and((int) $again->count)->toBe(2)
+        ->and($again->resolved_at)->toBeNull()
+        ->and($this->notifications->unreadCount($this->tapu))->toBe(1)
+        ->and($again->summary())->toBe('"A task" is waiting for your review again')
+        ->and(Notification::query()->forUser($this->tapu)->count())->toBe(1);
+})->group('phase2');
+
+it('leaves a row the actor had already READ closed, resolved or not', function () {
+    // 2-33, asserted from the other side: reading still closes a group even when the reader is
+    // the person who went on to act. The read row does not absorb, so a new one is written.
+    $asked = $this->notifications
+        ->notify(NotificationType::TaskSubmittedForReview, $this->task, [$this->tapu], [], $this->admin)
+        ->first();
+
+    $this->notifications->markRead($this->tapu, $asked);
+    $this->notifications->notify(NotificationType::TaskCompleted, $this->task, [$this->admin], [], $this->tapu);
+
+    // Already read means already out of the count, so there was nothing left to resolve.
+    expect($asked->fresh()->resolved_at)->toBeNull();
+
+    $this->notifications->notify(NotificationType::TaskSubmittedForReview, $this->task, [$this->tapu], [], $this->admin);
+
+    expect(Notification::query()->forUser($this->tapu)->count())->toBe(2)
+        ->and($this->notifications->unreadCount($this->tapu))->toBe(1);
+})->group('phase2');
+
+it('leaves a resolved row out of "mark all read", so it can still come back', function () {
+    $asked = $this->notifications
+        ->notify(NotificationType::TaskSubmittedForReview, $this->task, [$this->tapu], [], $this->admin)
+        ->first();
+
+    $this->notifications->notify(NotificationType::TaskCompleted, $this->task, [$this->admin], [], $this->tapu);
+
+    expect($this->notifications->markAllRead($this->tapu))->toBe(0)
+        ->and($asked->fresh()->is_read)->toBeFalse();
+})->group('phase2');
+
+it('names a resolving act on the type and nowhere else', function () {
+    // The fact is one line in the enum. Everything else in the engine reads it, which is what
+    // makes adding a resolving act in Phase 5 or 9 a case here and nothing else.
+    expect(NotificationType::TaskSubmittedForReview->resolvedBy())
+        ->toBe([NotificationType::TaskStatusChanged, NotificationType::TaskCompleted])
+        ->and(NotificationType::TaskCommented->resolvedBy())->toBe([])
+        // resolves() is the same fact read backwards, derived rather than written twice.
+        ->and(NotificationType::TaskCompleted->resolves())->toBe([NotificationType::TaskSubmittedForReview])
+        ->and(NotificationType::TaskAssigned->resolves())->toBe([]);
+
+    foreach (NotificationType::cases() as $type) {
+        foreach ($type->resolvedBy() as $act) {
+            expect($act->resolves())->toContain($type);
+        }
+    }
+})->group('phase2');

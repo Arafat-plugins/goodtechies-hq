@@ -107,6 +107,60 @@ enum NotificationType: string
     }
 
     /**
+     * The acts that RESOLVE a notification of this type — the things a recipient can do that
+     * mean the request for attention has been answered (decision 2-48).
+     *
+     * An act is named by the type the act itself produces, because that is the one vocabulary
+     * this enum already has for "something happened to this object": approving a task is
+     * `TaskCompleted`, requesting changes is `TaskStatusChanged`. NotificationService then has
+     * to know nothing about tasks, reviews or statuses to apply the rule — it matches the type
+     * it is writing against this list, for the same object, for the actor alone.
+     *
+     * **Most types answer `[]`, and that is the point.** A notification is a request for
+     * attention and attention has been paid when the person acts on the thing — but only some
+     * types have an act that means that. A reviewer asked to review rules on the task, and the
+     * question is closed. Nothing resolves `TaskCommented`: reading a comment is not answering
+     * it, replying to it is not answering it either, and a discussion that quietly cleared
+     * itself when you spoke in it would hide the reply. So this is a fact about the KIND,
+     * listed here beside priority(), tab(), requires() and channels(), rather than a blanket
+     * rule in the engine that would have to grow an exception per type.
+     *
+     * @return list<self>
+     */
+    public function resolvedBy(): array
+    {
+        return match ($this) {
+            // The two review verdicts, and the only two moves out of In review a reviewer can
+            // make (TaskStatus::TRANSITIONS): approve, which fires TaskCompleted, and request
+            // changes, which fires TaskStatusChanged. Either one answers "is this good?", which
+            // is the whole content of the request.
+            self::TaskSubmittedForReview => [self::TaskStatusChanged, self::TaskCompleted],
+
+            // Everything else is news, not a question. There is nothing you can do that means
+            // "assignment dealt with" or "comment dealt with" other than reading it, and
+            // reading is already a state this table keeps.
+            default => [],
+        };
+    }
+
+    /**
+     * The inverse of resolvedBy(), asked the way the engine asks it: an act of THIS type has
+     * just happened — which types does it close?
+     *
+     * Derived rather than written out, so the fact is stated once. There are ten cases; this is
+     * a loop over an enum, not a query.
+     *
+     * @return list<self>
+     */
+    public function resolves(): array
+    {
+        return array_values(array_filter(
+            self::cases(),
+            fn (self $type): bool => in_array($this, $type->resolvedBy(), true),
+        ));
+    }
+
+    /**
      * The permission a person must hold before they may receive this type at all.
      *
      * `tasks.view` for everything in Phase 2, including the cancelled-project prompt: that
@@ -143,9 +197,19 @@ enum NotificationType: string
             self::TaskReassigned => $grouped
                 ? sprintf('%d assignment changes on "%s"', $count, $title)
                 : sprintf('"%s" was reassigned', $title),
+            // The reason the mover typed, when there is one and when this row still stands for
+            // one event — decision 2-49. "…moved to Changes requested" tells an assignee
+            // nothing about why, and the why was already in the payload's context block; it
+            // simply never reached the sentence. The grouped branch drops it deliberately: a
+            // row standing for five moves cannot carry five reasons, and printing the last
+            // one would attach it to a sentence that is about all of them. Five moves in two
+            // minutes is also the one case where the reason is least worth reading.
             self::TaskStatusChanged => $grouped
                 ? sprintf('%d status changes on "%s"', $count, $title)
-                : sprintf('"%s" moved to %s', $title, (string) ($context['to_label'] ?? 'another status')),
+                : self::withReason(
+                    sprintf('"%s" moved to %s', $title, (string) ($context['to_label'] ?? 'another status')),
+                    $context,
+                ),
             self::TaskCommented => $grouped
                 ? sprintf('%d new comments in "%s"', $count, $title)
                 : sprintf('New comment in "%s"', $title),
@@ -169,6 +233,49 @@ enum NotificationType: string
                 (int) ($context['open_task_count'] ?? 0) === 1 ? 'task' : 'tasks',
             ),
         };
+    }
+
+    /**
+     * The longest a reason may be inside a summary.
+     *
+     * The field itself allows 500 characters (ChangeTaskStatusRequest), which is right for the
+     * activity trail, where it has a paragraph to sit in. A notification summary is one line in
+     * a 320 px popover and one line in a list row, both of which truncate with an ellipsis — so
+     * a 500-character reason would not overflow the layout, it would simply push the part that
+     * says what happened off the end of every row it appeared in. Cutting it here means the
+     * sentence the reader needs — the task and the status — is never the part that is lost, and
+     * the full text is one click away on the task where it was typed.
+     */
+    private const REASON_LIMIT = 120;
+
+    /**
+     * A summary with the actor's own words appended, when the event carried any.
+     *
+     * Free text a person typed, so two things happen to it before it joins a sentence:
+     *
+     *   - **whitespace is collapsed.** The reason box is a textarea and people press Enter in
+     *     it. A newline in a one-line summary either breaks the row's height or is swallowed by
+     *     `truncate` along with everything after it.
+     *   - **it is cut to REASON_LIMIT.** See above.
+     *
+     * Nothing is escaped here: the summary is interpolated as text by Vue, never as HTML, and
+     * escaping at composition time would put `&amp;` into an export and a `sr-only` table.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private static function withReason(string $sentence, array $context): string
+    {
+        $reason = trim((string) preg_replace('/\s+/u', ' ', (string) ($context['reason'] ?? '')));
+
+        if ($reason === '') {
+            return $sentence;
+        }
+
+        if (mb_strlen($reason) > self::REASON_LIMIT) {
+            $reason = rtrim(mb_substr($reason, 0, self::REASON_LIMIT)).'…';
+        }
+
+        return $sentence.': '.$reason;
     }
 
     /**

@@ -33,6 +33,16 @@ withDefaults(
         emptyTitle: string;
         emptyDescription?: string;
         emptyIcon?: Component;
+        /**
+         * A standing footnote, drawn under either state.
+         *
+         * A panel fed by four sources of which two are built cannot say what it is missing in
+         * its empty state alone: the moment one real item arrives the empty state is gone and
+         * the reader is looking at a list that silently claims to be everything. The note is
+         * where "approvals arrive in Phase 8" keeps being true whether the list has rows in it
+         * or not.
+         */
+        note?: string;
     }>(),
     { items: () => [], emptyIcon: () => Inbox },
 );
@@ -79,5 +89,7 @@ withDefaults(
                 </Link>
             </li>
         </ul>
+
+        <p v-if="note" class="text-xs text-muted-foreground">{{ note }}</p>
     </Card>
 </template>

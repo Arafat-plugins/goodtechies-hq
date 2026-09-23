@@ -5,6 +5,7 @@ use App\Models\Employee;
 use App\Models\File;
 use App\Models\Notification;
 use App\Models\Project;
+use App\Models\RecurringTask;
 use App\Models\Tag;
 use App\Models\Task;
 use App\Models\TaskChecklistItem;
@@ -93,7 +94,21 @@ function matrixParameters(): array
         // privacy rule in one line: an Admin who can see everything else in the agency gets
         // 404 on one line of somebody else's mail.
         '{notification}' => matrixNotificationId(),
+
+        // The retainer template on the same Buffalo project the `{project}` rows point at, so
+        // the Recurring rows read against a project the roles already line up on. It is one of
+        // RecurringTaskSeeder's three, which is also what keeps the generate row honest: it
+        // runs the real engine against a real rule.
+        '{recurringTask}' => matrixRecurringTaskId(MATRIX_RECURRING_TEMPLATE),
     ];
+}
+
+/** The retainer template the Recurring rows point at. */
+const MATRIX_RECURRING_TEMPLATE = 'Buffalo Modular Monthly SEO — {period}';
+
+function matrixRecurringTaskId(string $titleTemplate): string
+{
+    return (string) RecurringTask::where('title_template', $titleTemplate)->firstOrFail()->id;
 }
 
 /** The task the task rows point at by default. */
@@ -263,6 +278,33 @@ function permissionMatrix(): array
         // The project Files tab (spec §7), the same FileService as the client tab above.
         ['GET', 'admin/projects/{project}/files', $admin],
         ['POST', 'admin/projects/{project}/files', $adminAction],
+
+        // Admin surface — the project detail page's Recurring tab (Phase 3). A retainer template
+        // is an Admin object: the plan scopes these screens to this surface, and
+        // RecurringTaskPolicy refuses a Manager for the same reason even though a Manager may
+        // perfectly well edit the tasks the template will produce.
+        //
+        // Every cell here is 403 and not 404, and that is the whole shape of the rule on this
+        // surface: an Admin sees every project, so there is no template that is
+        // visible-to-one-Admin-and-not-another for a 404 to be about, and everybody else is
+        // refused by `surface:admin` before a record is looked up at all. The 404 that DOES
+        // exist — a template on a project outside the requester's scope, and an unknown id — is
+        // asserted directly in tests/Feature/Admin/RecurringTaskEndpointsTest.php, where a
+        // request can be made for an id that is not there.
+        ['GET', 'admin/projects/{project}/recurring', $admin],
+        // Body-less, so an Admin stops at the validation redirect, which is proof it got past
+        // every gate.
+        ['POST', 'admin/projects/{project}/recurring', $adminAction],
+        // A GET with a Form Request in front of it: no rule in the query string is a
+        // validation redirect, which is proof enough it got past every gate.
+        ['GET', 'admin/projects/{project}/recurring/preview', $adminAction],
+        // The three per-template routes. `generate` carries no Form Request, so the Admin cell
+        // really does run the engine against the seeded Buffalo retainer — which is the point:
+        // the button is the engine's forced entry point, not a second creation path, and a row
+        // that only ever reached a validator would not have shown that.
+        ['PUT', 'admin/recurring-tasks/{recurringTask}', $adminAction],
+        ['POST', 'admin/recurring-tasks/{recurringTask}/generate', $adminAction],
+        ['GET', 'admin/recurring-tasks/{recurringTask}/log', $admin],
 
         // Admin surface — tasks. A status moves through `…/status` and nowhere else: there is
         // no second endpoint here for the board drag to use, which is the point.

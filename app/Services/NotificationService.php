@@ -89,6 +89,13 @@ class NotificationService
         array $payload = [],
         ?User $actor = null,
     ): Collection {
+        // Before anybody is told, the actor's own mail about this object is closed where this
+        // act answers it — and BEFORE the empty-recipient return below, because the commonest
+        // resolving act on this team has no recipients at all. Shahadat is the reviewer, the
+        // creator and the actor, so his approval writes zero rows; if resolving hung off a row
+        // being written, the one flow 2-48 was raised about would be the one flow it missed.
+        $this->resolveFor($type, $target, $actor);
+
         $recipients = $this->eligible($type, $recipients, $actor);
 
         if ($recipients->isEmpty()) {
@@ -102,6 +109,63 @@ class NotificationService
         return $recipients->map(
             fn (User $user): Notification => $this->deliver($type, $user, $groupKey, $body, $since),
         );
+    }
+
+    /**
+     * Close the ACTOR's own rows that this act answers (decision 2-48).
+     *
+     * ## The rule
+     *
+     * A notification asks for attention, and attention has been paid when the person acts on
+     * the thing. `NotificationType::resolvedBy()` says which acts count for which type —
+     * a review request is answered by a verdict, and nothing answers a comment. So: when an act
+     * of type T happens to object O by person P, every row of P's about O whose type names T as
+     * resolving is marked resolved.
+     *
+     * ## Three things it deliberately is not
+     *
+     *   1. **Not read.** `is_read` and `read_at` are untouched. Decision 2-33 is written on top
+     *      of `is_read` — a row you have looked at does not absorb the next event — and mixing
+     *      the two would close the group as well as quieten it, so the resubmission would start
+     *      a fresh row of one and say, for the second time, exactly what it said the first.
+     *      Resolving takes the row out of the badge and out of both lists; the group stays open
+     *      and `deliver()` re-opens it when it grows.
+     *   2. **Not everybody's.** `forUser($actor)` and nothing wider. Two Admins can both be
+     *      reviewers of the same task; one of them ruling on it has told the other nothing, and
+     *      silently emptying their bell would lose the only sign they had that they were asked.
+     *   3. **Not a second door.** It is here because this service is the only thing that writes
+     *      `notifications`, and it is called from notify() rather than from the dispatcher so
+     *      that adding a resolving act is a line in the enum and nothing else.
+     *
+     * One UPDATE over a set of group keys — the same `type:Class:id` strings groupKey() builds,
+     * so "about this object" means here what it means everywhere else in this file.
+     */
+    private function resolveFor(NotificationType $type, Model $target, ?User $actor): void
+    {
+        // A date-driven send (overdue, due tomorrow) has no actor: nobody acted, so nothing is
+        // answered.
+        if ($actor === null) {
+            return;
+        }
+
+        $resolves = $type->resolves();
+
+        if ($resolves === []) {
+            return;
+        }
+
+        $keys = array_map(
+            fn (NotificationType $resolved): string => $this->groupKey($resolved, $target),
+            $resolves,
+        );
+
+        $now = now();
+
+        Notification::query()
+            ->forUser($actor)
+            ->unread()
+            ->whereIn('group_key', $keys)
+            ->update(['resolved_at' => $now, 'updated_at' => $now]);
     }
 
     /**
@@ -207,12 +271,17 @@ class NotificationService
      * Read ones included on purpose — a bell that empties itself the moment you glance at it
      * gives you no way back to what you just dismissed.
      *
+     * Resolved ones are not, and the two are not the same thing. Glancing at a row is not
+     * dealing with it, so a read row stays; a row whose subject you have ruled on is finished,
+     * and leaving it in the bell is exactly the complaint 2-48 records.
+     *
      * @return EloquentCollection<int, Notification>
      */
     public function recent(User $user, int $limit = Notification::BELL_LIMIT): EloquentCollection
     {
         return Notification::query()
             ->forUser($user)
+            ->stillOpen()
             ->newestFirst()
             ->limit(max(1, $limit))
             ->get();
@@ -221,12 +290,17 @@ class NotificationService
     /**
      * The Notification Center's list, one tab at a time.
      *
+     * Same set as the bell, one page at a time: read rows stay, resolved rows are gone. The
+     * Center is the long form of the bell, not an archive — what became of a task is on the
+     * task, where the activity trail records who ruled on it and why.
+     *
      * @return LengthAwarePaginator<int, Notification>
      */
     public function page(User $user, NotificationTab $tab, int $perPage = Notification::PAGE_SIZE): LengthAwarePaginator
     {
         return Notification::query()
             ->forUser($user)
+            ->stillOpen()
             ->onTab($tab)
             ->newestFirst()
             ->paginate($perPage)
@@ -306,6 +380,12 @@ class NotificationService
                     // reading of a group. `created_at` is left alone — it is when the group
                     // started, and `updated_at` is when it last grew.
                     'payload' => $payload,
+                    // The group is asking again, so it is open again. A reviewer who ruled on
+                    // this task resolved their row; the assignee has now sent it back, and the
+                    // row returns to the bell and the badge carrying count 2 — which is what
+                    // makes it read *"…is waiting for your review again"* (decision 2-46)
+                    // instead of a fresh row of one repeating the first request.
+                    'resolved_at' => null,
                 ])->save();
 
                 return $existing;

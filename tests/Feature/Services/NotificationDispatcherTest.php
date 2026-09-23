@@ -5,6 +5,7 @@ use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\ConversationService;
+use App\Services\NotificationService;
 use App\Services\ProjectService;
 use App\Services\TaskService;
 use App\Support\NotificationType;
@@ -327,4 +328,183 @@ it('says nothing when a cancelled project has no open tasks left', function () {
     $this->projects->changeStatus($this->admin, $empty, ProjectStatus::Cancelled);
 
     expect(Notification::query()->count())->toBe(0);
+})->group('phase2');
+
+/*
+|--------------------------------------------------------------------------
+| Ruling on a task clears the reviewer's own bell (decision 2-48)
+|--------------------------------------------------------------------------
+|
+| Walked the way the Phase 2 close-out walked it, through TaskService::transition()
+| rather than by firing events: submit, rule, resubmit.
+|
+*/
+
+it('clears the reviewer\'s waiting-for-review row when they request changes', function () {
+    Notification::query()->delete();
+
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'First pass.');
+
+    $notifications = app(NotificationService::class);
+
+    // Two unread: Tapu's move to In progress (Shahadat created the task) and the review
+    // request. Only one of them is a question Shahadat can answer.
+    $before = $notifications->unreadCount($this->admin);
+
+    expect($before)->toBe(2);
+
+    // Shahadat rules on it. He never opened the bell; he answered the question it was asking.
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::ChangesRequested, null, 'Titles run long.');
+
+    $row = Notification::query()->forUser($this->admin)
+        ->where('type', NotificationType::TaskSubmittedForReview->value)
+        ->sole();
+
+    expect($row->resolved_at)->not->toBeNull()
+        ->and($row->is_read)->toBeFalse()
+        // The count is the server's number and it follows — by exactly one, because the row
+        // about somebody else's move is not answered by anything Shahadat just did.
+        ->and($notifications->unreadCount($this->admin))->toBe($before - 1)
+        ->and($notifications->recent($this->admin)->pluck('id')->all())->not->toContain($row->id);
+})->group('phase2');
+
+it('clears it when they approve, too', function () {
+    Notification::query()->delete();
+
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'Ready.');
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::Completed);
+
+    // The approval is also the case where notify() writes NOTHING for the actor — Shahadat is
+    // the creator, the reviewer and the actor — so this is the flow that would have been missed
+    // had resolving hung off a row being written.
+    expect(Notification::query()->forUser($this->admin)
+        ->where('type', NotificationType::TaskSubmittedForReview->value)
+        ->sole()->resolved_at)->not->toBeNull()
+        // One left: Tapu's move to In progress, which nothing here answers.
+        ->and(app(NotificationService::class)->unreadCount($this->admin))->toBe(1);
+})->group('phase2');
+
+it('clears one reviewer\'s row and leaves the other reviewer\'s alone', function () {
+    // No PM on the project, so TaskReviewers hands the task to every Admin — Shahadat and
+    // Faruk. One of them ruling has told the other nothing.
+    $this->project->forceFill(['pm_id' => null])->save();
+
+    Notification::query()->delete();
+
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'Ready.');
+
+    $notifications = app(NotificationService::class);
+
+    // Shahadat also created the task, so he carries Tapu's move to In progress as well.
+    expect($notifications->unreadCount($this->admin))->toBe(2)
+        ->and($notifications->unreadCount($this->faruk))->toBe(1);
+
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::ChangesRequested, null, 'Not yet.');
+
+    expect($notifications->unreadCount($this->admin))->toBe(1)
+        // Faruk was asked and has not answered. His bell still says so.
+        ->and($notifications->unreadCount($this->faruk))->toBe(1)
+        ->and(Notification::query()->forUser($this->faruk)
+            ->where('type', NotificationType::TaskSubmittedForReview->value)
+            ->sole()->resolved_at)->toBeNull();
+})->group('phase2');
+
+it('brings the resolved row back when the assignee sends it in again', function () {
+    Notification::query()->delete();
+
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'First pass.');
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::ChangesRequested, null, 'Titles run long.');
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'Shortened.');
+
+    $row = Notification::query()->forUser($this->admin)
+        ->where('type', NotificationType::TaskSubmittedForReview->value)
+        ->sole();
+
+    // One row, back in the count, and saying it is back — which is the sentence decision 2-46
+    // added and the reason resolving is not spelled `is_read`.
+    expect($row->resolved_at)->toBeNull()
+        ->and((int) $row->count)->toBe(2)
+        ->and($row->summary())->toBe('"'.$this->task->title.'" is waiting for your review again')
+        ->and(app(NotificationService::class)->unreadCount($this->admin))->toBeGreaterThan(0)
+        ->and(app(NotificationService::class)->recent($this->admin)->pluck('id')->all())->toContain($row->id);
+})->group('phase2');
+
+/*
+|--------------------------------------------------------------------------
+| The reviewer's reason reaches the notification (decision 2-49)
+|--------------------------------------------------------------------------
+*/
+
+it('puts the reason the reviewer typed into the assignee\'s notification', function () {
+    Notification::query()->delete();
+
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'Ready.');
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::ChangesRequested, null, 'Two titles still run long.');
+
+    $row = Notification::query()->forUser($this->tapu)
+        ->where('type', NotificationType::TaskStatusChanged->value)
+        ->orderByDesc('id')
+        ->first();
+
+    // The sentence is the server's, composed once (decision 2-40). The screen prints `summary`
+    // and builds no phrasing of its own.
+    expect($row->summary())
+        ->toBe('"'.$this->task->title.'" moved to Changes requested: Two titles still run long.');
+})->group('phase2');
+
+it('says what happened even when nobody gave a reason', function () {
+    Notification::query()->delete();
+
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+
+    expect(Notification::query()->forUser($this->admin)
+        ->where('type', NotificationType::TaskStatusChanged->value)
+        ->sole()->summary())
+        ->toBe('"'.$this->task->title.'" moved to In progress');
+})->group('phase2');
+
+it('keeps the reason to one line and to a length a row can hold', function () {
+    Notification::query()->delete();
+
+    // A textarea, so people press Enter in it — and 500 characters is what the Form Request
+    // allows, which is right for the activity trail and far too long for a bell.
+    $reason = "Line one.\n\n  Line two, ".str_repeat('and more detail ', 40);
+
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InProgress);
+    $this->tasks->transition($this->tapu, $this->task->fresh(), TaskStatus::InReview, 'Ready.');
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::ChangesRequested, null, $reason);
+
+    $summary = Notification::query()->forUser($this->tapu)
+        ->where('type', NotificationType::TaskStatusChanged->value)
+        ->orderByDesc('id')
+        ->first()
+        ->summary();
+
+    expect($summary)->toContain('moved to Changes requested: Line one. Line two,')
+        ->and($summary)->not->toContain("\n")
+        ->and($summary)->toEndWith('…')
+        // The part that says WHAT happened is never the part that gets cut.
+        ->and(mb_strlen($summary))->toBeLessThan(mb_strlen($this->task->title) + 200);
+})->group('phase2');
+
+it('drops the reason from a row that stands for several moves', function () {
+    Notification::query()->delete();
+
+    // Two moves inside the group window collapse into one row (decision 2-33), and a row about
+    // several moves cannot carry several reasons.
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::Waiting, null, 'Waiting on the client.');
+    $this->tasks->transition($this->admin, $this->task->fresh(), TaskStatus::Todo, null, 'Assets arrived.');
+
+    $row = Notification::query()->forUser($this->tapu)
+        ->where('type', NotificationType::TaskStatusChanged->value)
+        ->sole();
+
+    expect((int) $row->count)->toBe(2)
+        ->and($row->summary())->toBe('2 status changes on "'.$this->task->title.'"');
 })->group('phase2');

@@ -67,6 +67,29 @@ export interface TaskFirstCompletion {
     work_summary: string | null;
 }
 
+/**
+ * Where a generated task came from — Phase 3's *"Generated from: <template> · period <Month
+ * YYYY>"*.
+ *
+ * Null on a task somebody made by hand, which is most of them, and absent from a LIST payload
+ * entirely: the key sits behind the same `task_detail` attribute `available_transitions` does,
+ * so a board of two hundred cards does not do two hundred relation reads to print nothing.
+ *
+ * `period_label` is derived by the server from the stored period KEY, never from the template's
+ * current rule — so a template edited from monthly to weekly does not relabel every task it has
+ * ever made, and a task outlives its template's changes. `can_manage` is
+ * `RecurringTaskPolicy::view`, resolved per record: it is what decides whether the line is a
+ * link to the project's Recurring tab or just a sentence, and it is never a role read here.
+ */
+export interface TaskGeneratedFrom {
+    template_id: number | null;
+    template: string | null;
+    project_id: number | null;
+    period: string | null;
+    period_label: string | null;
+    can_manage: boolean;
+}
+
 /** A task as the detail endpoints send it: the list payload plus the panels' relations. */
 export interface TaskDetail extends Task {
     /** Who wrote the summary on the task. Completion checks this against the primary. */
@@ -79,6 +102,7 @@ export interface TaskDetail extends Task {
     dependencies: TaskStub[];
     dependents: TaskStub[];
     available_transitions: TaskTransition[];
+    generated_from: TaskGeneratedFrom | null;
 }
 
 export interface TaskActivityEntry {

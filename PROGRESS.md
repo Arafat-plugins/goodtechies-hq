@@ -377,12 +377,12 @@ withdrawn at the client's request (kept in history at `1148417`).
 | 2-21 | An Admin board card carries the whole project finance fragment to print a name |
 | 2-30 | The task detail payload ships an `attachments` array no screen reads |
 
-## Phase 3 — Recurring tasks (engine done, screens next)
+## Phase 3 — Recurring tasks ✅ complete
 
 **Goal (from the plan):** monthly retainer work generates itself with zero manual re-creation,
 for at least two simulated cycles.
 
-The engine is built and seeded; the Admin screens are not.
+Engine and screens both built.
 
 - `recurring_tasks` and `recurring_generation_log`; `tasks.recurring_template_id` renamed to the
   spec's own `recurring_task_id` (every value was still NULL) and given the partial unique index
@@ -396,11 +396,23 @@ The engine is built and seeded; the Admin screens are not.
   Heat Gap Monthly SEO (Tapu), Buffalo Modular Monthly SEO (Tapu). The seeder creates templates
   and generates nothing — a pre-generated month would be a second creation path.
 
-**Still to build:** Recurring templates under a project (list, create/edit, next-run preview,
-"Generate now", the generation log with its duplicate warnings), a Recurring tab on project
-detail, and "Generated from: <template> · period <Month YYYY>" on task detail.
+**The screens.** A Recurring tab on admin project detail: the project's templates with their
+recurrence in words, next run and last outcome; a create/edit dialog whose recurrence editor
+sends `frequency` plus that frequency's parameters and lets one server-side `match` pick the
+rule (3-9), with the next-run preview coming back from the server rather than from date maths
+in Vue; "Generate now" calling the engine's own `force: true` entry point; and the generation
+log with its duplicate warnings spelled as sentences. Task detail says which template made it
+and for which period, on both surfaces and both mounts. Six Admin routes, all 403 for everyone
+else, with 404 reserved for the record (3-8).
 
-**Tests: 1111 passing, 5898 assertions.**
+**Three Phase 2 follow-ups closed at the same time.** A handled review notification now resolves
+— `resolved_at` is a *separate* column from `is_read`, because collapsing them would have broken
+the dedup rule and told a reviewer the same thing twice (2-52, 2-53). The reviewer's reason
+reaches the assignee's notification (2-54). And the Admin dashboard's attention panel and
+"Tasks by status" donut are fed from real, scoped queries instead of showing an empty state under
+cards counting six overdue.
+
+**Tests: 1184 passing, 6280 assertions.**
 
 ## Deployment log
 
@@ -412,20 +424,20 @@ detail, and "Generated from: <template> · period <Month YYYY>" on task detail.
 
 ## Next step
 
-**Phase 3's screens**, then Phase 4 and **GATE C**.
+**Phase 4 — remote timer, Timesheet, office attendance, schedules, workload.** It is the next
+phase in the table and it ends at **GATE C**, the next place this build stops for you.
 
-1. Recurring templates under a project: list, create/edit (title template, checklist template,
-   recurrence, default assignee, active toggle), next-run preview, "Generate now", and the
-   generation log with its duplicate warnings. `RecurringTaskEngine::generate($template, $asOf,
-   force: true)` is the entry point that button calls; the engine deliberately added no routes.
-2. A Recurring tab on project detail, and "Generated from: … · period …" on task detail.
-3. Then **Phase 4** — remote timer, Timesheet, office attendance, schedules, workload — which
-   ends at **GATE C**, the next place this build stops for you.
+Its shape, from the plan (line 660): a timer widget for the remote employee on task detail and
+as a persistent bar, with offline handling and manual entries; the weekly Timesheet grid; clock
+in/out for the office roles; the admin's attendance roster, month grid and per-employee schedule
+editor; the Time approval queue for flagged and manual entries; and the Workload view. Plus the
+dashboard cards those produce — including AC2's "Tapu 4h 18m / 5h" on the Company dashboard.
 
 **Still open, and blocking nothing yet:** the GATE A questions (Sun–Thu week, real email
 addresses, VPS and backup bucket, Google Workspace, spec §46, the ClickUp export, holidays) and
 the GATE B ones (contacts per client, employee priority visibility, the unarchive target status,
-the "Internal" label).
+the "Internal" label). **Phase 4 will need the GATE A answer about the working week and holidays**
+— attendance cannot be scored without knowing which days are working days.
 
 **One thing only you can do:** the file bridge refuses to write `.env` (it holds the database and
 seed passwords), so line 1 of `D:\goodtechies-hq\.env` still reads `APP_NAME="GoodTechies HQ"`.

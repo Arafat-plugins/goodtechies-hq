@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { router } from '@inertiajs/vue3';
-import { Archive, ArchiveRestore, Trash2 } from '@lucide/vue';
+import { Link, router } from '@inertiajs/vue3';
+import { Archive, ArchiveRestore, Repeat, Trash2 } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
 import type { FileRoutes } from '@/Components/Files/files';
@@ -175,6 +175,34 @@ function confirmDelete(): void {
                 </span>
                 <span class="text-xs text-muted-foreground">{{ task.priority_label }} priority</span>
             </div>
+
+            <!--
+                Phase 3: where this task came from. Both mounts get it, because there is one
+                body — the page under `PageShell` and the drawer over the List are the same
+                component, so "on both surfaces and both mounts" is one line rather than four.
+
+                The link is `can_manage`, which is `RecurringTaskPolicy::view` resolved per
+                record on the server. An assignee reads the sentence and is offered no way into
+                a screen that would refuse them; nothing here looks at a role.
+            -->
+            <p
+                v-if="task.generated_from"
+                class="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 text-xs text-muted-foreground"
+            >
+                <Repeat class="size-3 shrink-0" aria-hidden="true" />
+                <span>Generated from:</span>
+                <Link
+                    v-if="task.generated_from.can_manage && task.generated_from.project_id"
+                    :href="`/admin/projects/${task.generated_from.project_id}`"
+                    class="rounded-sm font-medium text-foreground underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                >
+                    {{ task.generated_from.template }}
+                </Link>
+                <span v-else class="font-medium text-foreground">{{ task.generated_from.template }}</span>
+                <span v-if="task.generated_from.period_label">
+                    · period {{ task.generated_from.period_label }}
+                </span>
+            </p>
 
             <TaskStatusActions
                 :task="task"

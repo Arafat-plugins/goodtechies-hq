@@ -81,7 +81,10 @@ it('gives each dashboard exactly its documented props', function (string $email,
 })->with([
     // `workStats` / `taskStats` are the Phase 2 task cards: five counts apiece, each one a
     // server-side query with the link to the tasks it counted.
-    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats']],
+    // `attention` and `taskStatuses` arrive with decision 2-50: the "Needs your attention"
+    // panel's task feed and the "Tasks by status" donut, both server-counted and both scoped
+    // by `Task::visibleTo()`.
+    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats', 'attention', 'taskStatuses']],
     'accountant' => ['accountant@goodtechies.test', '/accountant/dashboard', ['greetingName', 'today']],
     'employee' => ['yaseen@goodtechies.test', '/employee/dashboard', ['greetingName', 'today', 'trackingMode', 'taskStats']],
 ])->group('phase0');

@@ -129,6 +129,15 @@ class TaskResource extends JsonResource
                 fn (): array => $this->availableTransitions($user),
             ),
 
+            // Phase 3: "Generated from: <template> · period <Month YYYY>". Detail only, for the
+            // same reason as the transitions above — it is a relation read and a gate call, fine
+            // once and wrong on a list of two hundred rows. Null on a task nobody generated,
+            // which is most of them.
+            'generated_from' => $this->when(
+                $request->attributes->get('task_detail') === true,
+                fn (): ?array => $this->generatedFrom($user),
+            ),
+
             'permissions' => $this->permissions($user),
         ];
     }
@@ -202,6 +211,46 @@ class TaskResource extends JsonResource
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * Where a generated task came from — the template that made it and the period it is for.
+     *
+     * Three things about this are deliberate:
+     *
+     *   - **The period label is derived from the stored KEY**, through `Task::recurringPeriodLabel()`
+     *     → `RecurrenceRule::labelForPeriod()`, and never from the template's current rule. A
+     *     template edited from monthly to weekly must not relabel every task it has ever made,
+     *     and a task whose template is gone still knows which month it was for.
+     *   - **The template's name is shown on both surfaces.** It is the pattern the task's own
+     *     title was rendered from — "abc.com Monthly Maintenance — {period}" — so it tells the
+     *     assignee nothing the title in front of them does not already say. What is Admin-only
+     *     is *managing* it, and that is `can_manage`.
+     *   - **`can_manage` is the policy's answer, per record**, not a role read in Vue: it is what
+     *     decides whether the line is a link to the project's Recurring tab or just a sentence.
+     *     `RecurringTaskPolicy::view` is Admin-plus-project-scope, so an assignee sees the
+     *     sentence and no link, and is not offered a page that would 403 them.
+     *
+     * @return array{template_id: int|null, template: string|null, project_id: int|null, period: string|null, period_label: string|null, can_manage: bool}|null
+     */
+    private function generatedFrom(?User $user): ?array
+    {
+        if (! $this->resource->isGenerated()) {
+            return null;
+        }
+
+        $template = $this->resource->recurringTask;
+
+        return [
+            'template_id' => $template?->getKey(),
+            'template' => $template?->title_template,
+            'project_id' => $template === null ? null : (int) $template->project_id,
+            'period' => $this->resource->recurring_period,
+            'period_label' => $this->resource->recurringPeriodLabel(),
+            'can_manage' => $user !== null
+                && $template !== null
+                && Gate::forUser($user)->allows('view', $template),
+        ];
     }
 
     /**

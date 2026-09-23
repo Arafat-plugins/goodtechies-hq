@@ -183,6 +183,26 @@ class RecurringTask extends Model
     }
 
     /**
+     * The templates this user may be shown, scoped through the project that owns them.
+     *
+     * Part C: a record somebody may not see is ABSENT, not refused — so every screen lookup
+     * goes through this rather than through `find()` plus a 403, and a template on a project
+     * they cannot see is a 404 exactly as the project itself is. `RecurringTaskPolicy` answers
+     * the other half (whether they may manage templates at all) once the row has been found.
+     *
+     * Deliberately the same `Project::visibleTo()` the projects list uses, and not a second
+     * rule: the tab is part of the project, so "can see the project" and "can see the project's
+     * retainers" cannot be allowed to drift apart.
+     *
+     * @param  Builder<RecurringTask>  $query
+     * @return Builder<RecurringTask>
+     */
+    public function scopeVisibleTo(Builder $query, User $user): Builder
+    {
+        return $query->whereHas('project', fn (Builder $project) => $project->visibleTo($user));
+    }
+
+    /**
      * Keep `next_run_at` in step with the rule. Called by the engine after every attempt, so the
      * preview a screen shows is never older than the last run.
      */

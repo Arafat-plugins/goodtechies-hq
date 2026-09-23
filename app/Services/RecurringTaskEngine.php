@@ -334,8 +334,16 @@ class RecurringTaskEngine
      *     would stop every retainer in the agency within a week, silently, which is the exact
      *     failure this module exists to prevent. The end of a retainer is a decision somebody
      *     makes, and it is spelled Completed, Cancelled or Archived.
+     *
+     * **Public because the templates screen asks it too** (Phase 3's screens: "a stopped template
+     * says why"). A stop is derived, never stored, so a row whose project was cancelled this
+     * morning looks perfectly active in the list until the next run writes the refusal down — and
+     * a screen that worked the answer out for itself would be the second copy of §21 this module
+     * exists to avoid. It asks the same method the run asks, so the sentence a reader sees before
+     * the run is the sentence the log will carry after it. Nothing about the method changed but
+     * its visibility.
      */
-    private function stopReason(?Project $project): ?string
+    public function stopReason(?Project $project): ?string
     {
         if ($project === null) {
             return 'The project no longer exists.';

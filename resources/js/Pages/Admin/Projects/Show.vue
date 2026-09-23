@@ -11,6 +11,7 @@ import MembersCard from '@/Components/Projects/MembersCard.vue';
 import type { EmployeeOption, Option, Project } from '@/Components/Projects/ProjectForm.vue';
 import ProjectMetaList from '@/Components/Projects/ProjectMetaList.vue';
 import StatusActions from '@/Components/Projects/StatusActions.vue';
+import RecurringPanel from '@/Components/Recurring/RecurringPanel.vue';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
@@ -157,6 +158,7 @@ function confirmArchiveToggle(): void {
                     <TabsTrigger value="members">Members</TabsTrigger>
                     <TabsTrigger value="activity">Activity</TabsTrigger>
                     <TabsTrigger value="tasks">Tasks</TabsTrigger>
+                    <TabsTrigger value="recurring">Recurring</TabsTrigger>
                     <TabsTrigger value="files">Files</TabsTrigger>
                 </TabsList>
             </div>
@@ -240,6 +242,19 @@ function confirmArchiveToggle(): void {
                         </template>
                     </EmptyState>
                 </Card>
+            </TabsContent>
+
+            <!--
+                Phase 3's Recurring tab: this project's retainer templates. Like the Files tab,
+                the panel fetches its own list as JSON and writes with ordinary Inertia visits —
+                so the tab costs the project payload nothing until somebody opens it.
+            -->
+            <TabsContent value="recurring" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+                <RecurringPanel
+                    :project-id="project.id"
+                    :can-manage="permissions.can_update === true"
+                    :employees="assignableEmployees"
+                />
             </TabsContent>
 
             <TabsContent value="files" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">

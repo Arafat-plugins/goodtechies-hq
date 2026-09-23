@@ -15,10 +15,11 @@ import {
     UserCheck,
     Users,
 } from '@lucide/vue';
-import type { Component } from 'vue';
-import AttentionList from '@/Components/Dashboard/AttentionList.vue';
+import { computed, type Component } from 'vue';
+import AttentionList, { type AttentionItem } from '@/Components/Dashboard/AttentionList.vue';
 import AreaTrend from '@/Components/Charts/AreaTrend.vue';
-import DonutBreakdown from '@/Components/Charts/DonutBreakdown.vue';
+import DonutBreakdown, { type DonutSlice } from '@/Components/Charts/DonutBreakdown.vue';
+import type { StatusKey } from '@/Components/StatusBadge.vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatCard from '@/Components/StatCard.vue';
 import { Button } from '@/Components/ui/button';
@@ -35,7 +36,29 @@ interface WorkStat {
     href: string;
 }
 
-defineProps<{
+/**
+ * One thing this Admin should open. The server decides what is on the list, what it says and
+ * where it goes; the screen only chooses the icon, which cannot travel as JSON.
+ */
+interface AttentionRow {
+    id: string;
+    /** `review` or `overdue` — which of the panel's sources put it here. */
+    kind: string;
+    title: string;
+    meta: string;
+    href: string;
+    tone: 'default' | 'urgent';
+}
+
+/** One slice of "Tasks by status", already counted and already toned by the server. */
+interface TaskStatusCount {
+    key: string;
+    label: string;
+    tone: string;
+    count: number;
+}
+
+const props = defineProps<{
     greetingName: string;
     today: string;
     stats: {
@@ -49,6 +72,14 @@ defineProps<{
      * to the same query as a list.
      */
     workStats: WorkStat[];
+    /**
+     * The tier-2 panel's feed: tasks awaiting this Admin's review, then what is overdue. Every
+     * row is a query scoped by `Task::visibleTo()` with its predicate from `TaskBucket`, and
+     * every row carries the URL of the task itself. Empty when they hold no `tasks.view`.
+     */
+    attention: AttentionRow[];
+    /** Open tasks per status, for the donut. Server-counted, server-toned. */
+    taskStatuses: TaskStatusCount[];
 }>();
 
 /**
@@ -83,6 +114,40 @@ function subFor(stat: WorkStat): string {
 
     return copy ? (stat.count === 0 ? copy.zero : copy.some) : '';
 }
+
+/**
+ * The icon each kind of attention row wears. Same split as WORK_ICON above and for the same
+ * reason: an icon is a component, so it cannot come from PHP. What the row SAYS, where it goes
+ * and whether it is urgent all do.
+ */
+const ATTENTION_ICON: Record<string, Component> = {
+    review: ClipboardCheck,
+    overdue: CircleAlert,
+};
+
+const attentionItems = computed<AttentionItem[]>(() =>
+    props.attention.map((row) => ({
+        id: row.id,
+        icon: ATTENTION_ICON[row.kind] ?? Inbox,
+        title: row.title,
+        meta: row.meta,
+        href: row.href,
+        tone: row.tone,
+    })),
+);
+
+/**
+ * The donut's slices. The tone is the server's `TaskStatus::tone()`, which is the same mapping
+ * every `StatusBadge` on every other screen uses — so the ring and the badges agree, and there
+ * is no second copy of it here to drift (decision 2-28's reasoning, applied to a colour).
+ */
+const taskStatusSlices = computed<DonutSlice[]>(() =>
+    props.taskStatuses.map((status) => ({
+        label: status.label,
+        value: status.count,
+        tone: status.tone as StatusKey,
+    })),
+);
 
 /**
  * Tier 4. Money is a footnote on the company dashboard, so these are the compact card:
@@ -149,18 +214,23 @@ const monthStats = [
         <!--
             Tier 2 — the block that tells you what to do, before any chart.
 
-            It still has no feed: no controller sends `items`, so it draws its empty state. The
-            copy had to change all the same. It promised "overdue work" in "Phases 2–5" while
-            the row of cards directly above it was already counting six overdue tasks and one
-            awaiting review — a panel saying nothing needs you, under a number saying six things
-            do. The work Phase 2 delivered is named where it actually lives; the marker keeps
-            only the phases that have not happened.
+            It has a feed now (decision 2-50): what is waiting on this Admin's verdict, then
+            what is late. Both are server queries scoped by `Task::visibleTo()`, both link to
+            the task, and the empty state is now a real answer rather than a placeholder — the
+            panel used to sit under a card counting six overdue tasks saying nothing needed
+            anybody.
+
+            The `note` stays whether or not there are rows. Two of this panel's four sources are
+            not built, and a list that silently dropped that sentence the moment it had one item
+            in it would claim to be the whole of what needs you.
         -->
         <AttentionList
             title="Needs your attention"
+            :items="attentionItems"
             :empty-icon="Inbox"
-            empty-title="Nothing is queued here yet"
-            empty-description="Overdue work and the review queue are the cards above. Approvals and leave decisions arrive in Phases 3–5."
+            empty-title="Nothing is waiting on you"
+            empty-description="No task is sitting in your review queue, and nothing is past its due date."
+            note="Tasks only for now — approvals arrive in Phases 8–9 and leave decisions in Phase 5."
         />
 
         <!-- Tier 3 — two charts, the screen's whole chart budget. -->
@@ -168,7 +238,14 @@ const monthStats = [
             <Card class="min-w-0 gap-4 p-6 shadow-xs">
                 <h2 class="text-sm font-medium">Tasks by status</h2>
                 <div class="flex min-h-56 min-w-0 flex-col justify-center">
-                    <DonutBreakdown :data="[]" center-label="Open tasks" />
+                    <!--
+                        The open work, split by status — the same scoped, non-archived set the
+                        cards above are counted from, so the centre number and "Overdue" can be
+                        reconciled against each other. It was `:data="[]"` under copy reading
+                        "fills in once there is something to count" on a dashboard with 25
+                        tasks on it.
+                    -->
+                    <DonutBreakdown :data="taskStatusSlices" center-label="Open tasks" />
                 </div>
             </Card>
             <Card class="min-w-0 gap-4 p-6 shadow-xs">
