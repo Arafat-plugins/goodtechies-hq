@@ -7,13 +7,17 @@ use App\Exceptions\FileStateException;
 use App\Http\Controllers\Concerns\BuildsDiscussionPayload;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Conversation\StoreMessageRequest;
+use App\Http\Resources\FileResource;
 use App\Models\Conversation;
+use App\Models\File;
 use App\Models\Message;
+use App\Models\Task;
 use App\Models\User;
 use App\Services\ConversationService;
 use App\Services\MessageService;
 use App\Support\ConversationType;
 use App\Support\Permission;
+use App\Support\Surface;
 use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
@@ -101,6 +105,60 @@ class MessageController extends Controller
     }
 
     /**
+     * Search this person's messages, as JSON.
+     *
+     * **Scoped before it is run, never filtered after.** ConversationService::search() builds the
+     * candidate ids from the inbox — already policy-checked row by row — and the `ILIKE` runs
+     * only inside them, so a term that appears in a project channel the requester is not on is
+     * not discoverable here, not as a row and not as a count (Part C).
+     *
+     * A term shorter than two characters, or none at all, is **200 with nothing in it**. A
+     * half-typed search box is not a malformed request, and a 422 there would make a screen that
+     * searches as you type flash an error on every first keystroke. Over a hundred characters
+     * IS a 422: that is not somebody typing.
+     *
+     * The excerpt is cut HERE rather than in the service, because how much of a message a row
+     * shows is presentation — the same split `summary()` below draws for the inbox list.
+     */
+    public function search(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'q' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $term = trim((string) ($validated['q'] ?? ''));
+
+        if (mb_strlen($term) < ConversationService::SEARCH_MINIMUM) {
+            return response()->json(['query' => $term, 'results' => [], 'has_more' => false]);
+        }
+
+        $found = $this->conversations->search($user, $term);
+
+        return response()->json([
+            'query' => $term,
+            'results' => $found
+                ->take(ConversationService::SEARCH_LIMIT)
+                ->map(fn (Message $message): array => [
+                    'message_id' => (int) $message->getKey(),
+                    'conversation_id' => (int) $message->conversation_id,
+                    'conversation_label' => $message->conversation?->labelFor($user) ?? 'Conversation',
+                    'conversation_type' => $message->conversation?->type?->value,
+                    'author' => $message->author?->name,
+                    'excerpt' => self::matchExcerpt((string) $message->body, $term),
+                    'created_at' => $message->created_at?->toIso8601String(),
+                ])
+                ->values()
+                ->all(),
+            // The service read one row past the window precisely so this is not a second count
+            // over the same scope.
+            'has_more' => $found->count() > ConversationService::SEARCH_LIMIT,
+        ]);
+    }
+
+    /**
      * One thread, as JSON.
      *
      * What the screen re-reads after posting, after being told a message arrived, and when its
@@ -124,6 +182,83 @@ class MessageController extends Controller
         $before = $request->integer('before');
 
         return response()->json($this->threadPayload($request, $conversation, $before > 0 ? $before : null));
+    }
+
+    /**
+     * What is beside a thread: who is in it, what has been posted into it, and the work it is
+     * about. The right-hand panel of the Messages page.
+     *
+     * Resolved through the same `visibleConversation()` `show()` uses, so a conversation this
+     * person may not open is **404** here exactly as it is there — one answer to "may you see
+     * this room", not two.
+     *
+     * **It does not mark anything read.** A side panel is not a visit: the unread line moves
+     * when somebody OPENS a thread, and a panel that quietly cleared it would make the count on
+     * the list row disagree with what the reader has actually seen.
+     *
+     * `members` carries an id and a name and **nothing else** — no role, no availability, no
+     * email. A members list is not a second, unpoliced copy of the Team directory's payload;
+     * this panel answers "who is in this room", and the Team page answers the other question.
+     * The requester is in it, because they are in the room.
+     *
+     * `project` and `tasks` are **absent** when there is no linked project or when this reader
+     * may not see it — the key is gone, not null (Part C, decisions C-1…C-7). A null would say
+     * "there is a project here and you may not have it", which is the sentence the whole rule
+     * exists to avoid.
+     */
+    public function context(Request $request, Conversation $conversation): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $conversation = $this->visibleConversation($request, $conversation);
+
+        $payload = [
+            'conversation_id' => (int) $conversation->getKey(),
+            'type' => $conversation->type?->value,
+            'members' => $this->conversations->mentionableIn($conversation)
+                ->map(fn (User $person): array => [
+                    'id' => (int) $person->getKey(),
+                    'name' => (string) $person->name,
+                ])
+                ->values()
+                ->all(),
+            // Through FileResource unchanged — the same signed expiring URL and the same
+            // `permissions` block the bubble and the Files tab get — with the pivot's `kind`
+            // laid beside it, the way MessageResource already does it.
+            'files' => $this->conversations->attachmentsIn($conversation)
+                ->map(fn (File $file): array => (new FileResource($file))->resolve($request) + [
+                    'kind' => $file->pivot?->kind,
+                ])
+                ->values()
+                ->all(),
+        ];
+
+        $project = $conversation->project;
+
+        if ($project === null || ! Gate::forUser($user)->allows('view', $project)) {
+            return response()->json($payload);
+        }
+
+        $base = $this->surfaceBase($user);
+
+        return response()->json($payload + [
+            'project' => [
+                'id' => (int) $project->getKey(),
+                'name' => (string) $project->name,
+                'status' => $project->status?->value,
+                'href' => $base.'/projects/'.$project->getKey(),
+            ],
+            'tasks' => $this->conversations->projectTasksFor($user, $project)
+                ->map(fn (Task $task): array => [
+                    'id' => (int) $task->getKey(),
+                    'title' => (string) $task->title,
+                    'status' => $task->status?->value,
+                    'href' => $base.'/tasks/'.$task->getKey(),
+                ])
+                ->values()
+                ->all(),
+        ]);
     }
 
     /**
@@ -245,6 +380,51 @@ class MessageController extends Controller
         }
 
         return mb_strlen($body) > 120 ? rtrim(mb_substr($body, 0, 120)).'…' : $body;
+    }
+
+    /**
+     * The window of a message a search hit shows: plain text, cut on the server, centred on the
+     * first match.
+     *
+     * Centred rather than taken from the front, because a hit four thousand characters in would
+     * otherwise be reported as an excerpt that does not contain the word the reader typed — a
+     * result that looks like a bug. The `…` are only added on the side that was actually cut, so
+     * the marks mean something.
+     *
+     * It carries no markup. Highlighting is the screen's job and a server that emitted `<mark>`
+     * would be a server emitting HTML into a JSON payload for a Vue template to trust.
+     */
+    private static function matchExcerpt(string $body, string $term): string
+    {
+        $text = trim((string) preg_replace('/\s+/u', ' ', $body));
+        $length = 160;
+        $total = mb_strlen($text);
+
+        if ($total <= $length) {
+            return $text;
+        }
+
+        $position = mb_stripos($text, $term);
+        $lead = max(0, (int) (($length - mb_strlen($term)) / 2));
+
+        $start = max(0, ($position === false ? 0 : $position) - $lead);
+        $start = min($start, $total - $length);
+
+        $cut = mb_substr($text, $start, $length);
+
+        return ($start > 0 ? '…' : '').trim($cut).($start + $length < $total ? '…' : '');
+    }
+
+    /**
+     * Where this reader's own shell keeps a project or a task.
+     *
+     * The panel links into the surface the person is actually in — an employee sent to
+     * `/admin/projects/12` would meet a 403 dressed up as a link. The Accountant never reaches
+     * this code at all: the whole route group is gated on `messages.use` and they hold none.
+     */
+    private function surfaceBase(User $user): string
+    {
+        return $user->surface() === Surface::Admin ? '/admin' : '/employee';
     }
 
     /**

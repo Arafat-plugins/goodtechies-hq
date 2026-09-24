@@ -19,8 +19,15 @@ import { cn } from '@/lib/utils';
  * ## Unread is never a dot alone
  *
  * An unread row carries a COUNT in a pill, `font-medium` on the label, and an `sr-only` sentence
- * spelling it out. The selected row carries `aria-current="page"` and a filled track. Neither
- * state is a hue on its own (DESIGN.md §5.6).
+ * spelling it out. The selected row carries `aria-current="page"`, the brand tint and a rail on
+ * its left edge — the shell's own active treatment (DESIGN.md §1.7). Neither state is a hue on
+ * its own (DESIGN.md §5.6).
+ *
+ * ## The rhythm
+ *
+ * Two lines per row, `py-1`, groups a hairline apart. The rail is the thing somebody scans
+ * twenty times an hour, so it is dense on purpose; the label truncates and the excerpt
+ * truncates, because a row that wraps is a row whose neighbours move.
  *
  * There is no message count per person anywhere here, and there is not going to be: what the
  * row shows is who spoke last and how much of it this reader has not seen. Part H.
@@ -57,13 +64,13 @@ function unreadLabel(row: ConversationSummary): string {
 </script>
 
 <template>
-    <nav aria-label="Conversations" class="flex min-w-0 flex-col gap-4">
-        <section v-for="group in groups" :key="group.name" class="flex min-w-0 flex-col gap-1">
-            <h2 class="px-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+    <nav aria-label="Conversations" class="flex min-w-0 flex-col gap-3">
+        <section v-for="group in groups" :key="group.name" class="flex min-w-0 flex-col gap-0.5">
+            <h2 class="px-2 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {{ group.name }}
             </h2>
 
-            <ul class="flex min-w-0 flex-col gap-0.5">
+            <ul class="flex min-w-0 flex-col">
                 <li v-for="row in group.rows" :key="row.id" class="min-w-0">
                     <Link
                         :href="messagesHref(row.id)"
@@ -71,10 +78,11 @@ function unreadLabel(row: ConversationSummary): string {
                         :aria-current="row.id === activeId ? 'page' : undefined"
                         :class="
                             cn(
-                                'flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm',
+                                'flex min-w-0 items-center gap-2 rounded-md border-l-2 py-1 pr-2 pl-1.5 text-sm',
                                 'focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
-                                'hover:bg-muted',
-                                row.id === activeId && 'bg-muted font-medium',
+                                row.id === activeId
+                                    ? 'border-brand bg-brand-tint font-medium hover:bg-brand-tint-strong'
+                                    : 'border-transparent hover:bg-accent',
                             )
                         "
                     >
@@ -86,9 +94,7 @@ function unreadLabel(row: ConversationSummary): string {
 
                         <span class="flex min-w-0 flex-1 flex-col">
                             <span
-                                :class="
-                                    cn('truncate', row.unread_count > 0 && 'font-medium')
-                                "
+                                :class="cn('truncate', row.unread_count > 0 && 'font-medium')"
                             >{{ row.label }}</span>
                             <span v-if="row.last_message" class="truncate text-xs text-muted-foreground">
                                 {{ row.last_message.is_mine ? 'You' : (row.last_message.author ?? 'Somebody') }}:

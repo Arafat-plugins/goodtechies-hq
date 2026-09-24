@@ -876,6 +876,14 @@ function permissionMatrix(): array
         // 404-shaped question and is asserted in tests/Feature/Privacy/MessagePrivacyTest.php.
         ['GET', 'messages', $messaging(200)],
         ['GET', 'messages/{conversation}', $messaging(200)],
+        // Search with no term at all is a 200 with an empty result list, which is the point of
+        // the row: it proves the gate, not the query. WHAT a search may find is the
+        // 404-shaped question above, asserted in tests/Feature/Messages/MessageSearchTest.php
+        // against a channel the searcher is not on.
+        ['GET', 'messages/search', $messaging(200)],
+        // The context panel reads the same conversation these rows already read, so it refuses
+        // in the same two ways: 403 without the key, 404 for a room they may not enter.
+        ['GET', 'messages/{conversation}/context', $messaging(200)],
         // Body-less, so it stops at the validation redirect — which is proof it got past every
         // gate. Whether an ordinary member may post in the ANNOUNCEMENTS channel is a policy
         // question, not a route one, and MessageEndpointsTest asserts it directly.

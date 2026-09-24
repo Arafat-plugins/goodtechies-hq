@@ -4,6 +4,7 @@ import { ChevronDown } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/Components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
+import { usePagePoll } from '@/lib/pagePoll';
 import { cn } from '@/lib/utils';
 import { readGroupOpen, writeGroupOpen } from '@/lib/sidebarState';
 import type { NavGroup, NavItem } from '@/navigation/types';
@@ -127,6 +128,35 @@ function itemClass(item: NavItem): string {
         isActive(item) ? activeClass : inactiveClass,
     );
 }
+
+/**
+ * The number on a row, or null for no pill.
+ *
+ * Read from the page props by the key the nav data names, so this component knows nothing about
+ * messages — add a `badgeKey` to a row and the pill follows. Zero is null: a badge that reads 0
+ * is telling the reader nothing while asking for their attention.
+ */
+function badgeFor(item: NavItem): number | null {
+    if (!item.badgeKey) {
+        return null;
+    }
+
+    const value = (page.props as Record<string, unknown>)[item.badgeKey];
+
+    return typeof value === 'number' && value > 0 ? value : null;
+}
+
+function badgeLabel(item: NavItem, count: number): string {
+    return `${item.label}, ${count} unread`;
+}
+
+/**
+ * Part 0.5 refresh rule: the badge counts something somebody else does, and the sidebar is on
+ * every page — so it is the sidebar that keeps it current, not each page in turn. Mounted twice
+ * (rail and drawer) on some viewports; `usePagePoll` is reference-counted, so that is still one
+ * interval and one request.
+ */
+usePagePoll(['messagesUnread']);
 </script>
 
 <template>
@@ -152,6 +182,20 @@ function itemClass(item: NavItem): string {
                                 >
                                     <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
                                     <span :class="rail ? 'sr-only' : 'truncate'">{{ item.label }}</span>
+                                    <span
+                                        v-if="badgeFor(item) !== null"
+                                        :class="
+                                            cn(
+                                                'shrink-0 rounded-full bg-primary text-xs font-medium tabular-nums text-primary-foreground',
+                                                rail
+                                                    ? 'absolute top-1 right-1 size-2 p-0'
+                                                    : 'ml-auto px-1.5 py-0.5',
+                                            )
+                                        "
+                                    >
+                                        <template v-if="!rail">{{ badgeFor(item)! > 99 ? '99+' : badgeFor(item) }}</template>
+                                        <span class="sr-only">{{ badgeLabel(item, badgeFor(item)!) }}</span>
+                                    </span>
                                 </Link>
                             </TooltipTrigger>
                             <TooltipContent v-if="rail" side="right">{{ item.label }}</TooltipContent>
@@ -190,6 +234,13 @@ function itemClass(item: NavItem): string {
                                 >
                                     <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
                                     <span class="truncate">{{ item.label }}</span>
+                                    <span
+                                        v-if="badgeFor(item) !== null"
+                                        class="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-xs font-medium tabular-nums text-primary-foreground"
+                                    >
+                                        {{ badgeFor(item)! > 99 ? '99+' : badgeFor(item) }}
+                                        <span class="sr-only">{{ badgeLabel(item, badgeFor(item)!) }}</span>
+                                    </span>
                                 </Link>
                             </li>
                         </ul>

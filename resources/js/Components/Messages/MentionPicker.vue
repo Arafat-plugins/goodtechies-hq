@@ -3,6 +3,7 @@ import { AtSign } from '@lucide/vue';
 import { computed, nextTick, ref, useId, watch } from 'vue';
 import type { MessagePerson } from '@/Components/Messages/messages';
 import { Button } from '@/Components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 /**
@@ -160,20 +161,31 @@ function choose(person: MessagePerson | undefined): void {
 
 <template>
     <div class="relative">
-        <Button
-            ref="triggerEl"
-            type="button"
-            variant="outline"
-            size="sm"
-            :disabled="disabled || people.length === 0"
-            :aria-expanded="open"
-            aria-haspopup="listbox"
-            :aria-controls="open ? listId : undefined"
-            @click="open ? hide() : show()"
-        >
-            <AtSign aria-hidden="true" />
-            Mention
-        </Button>
+        <!--
+            Icon-only, so it carries an `aria-label` AND a tooltip — the accessible name and the
+            sighted name being the same words is the rule for every icon-only control here.
+        -->
+        <TooltipProvider :delay-duration="150">
+            <Tooltip>
+                <TooltipTrigger as-child>
+                    <Button
+                        ref="triggerEl"
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        :disabled="disabled || people.length === 0"
+                        :aria-expanded="open"
+                        aria-haspopup="listbox"
+                        :aria-controls="open ? listId : undefined"
+                        aria-label="Mention somebody"
+                        @click="open ? hide() : show()"
+                    >
+                        <AtSign aria-hidden="true" />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent>Mention somebody</TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
 
         <div
             v-if="open"

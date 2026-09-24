@@ -10,28 +10,27 @@ import {
     Send,
     X,
 } from '@lucide/vue';
-import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
-import { FILE_ACCEPT, FILE_MAX_LABEL, iconFor, rejectionFor } from '@/Components/Files/files';
+import { FILE_ACCEPT, FILE_MAX_LABEL, rejectionFor } from '@/Components/Files/files';
 import MentionPicker from '@/Components/Messages/MentionPicker.vue';
-import MessageBody from '@/Components/Messages/MessageBody.vue';
+import MessageRow from '@/Components/Messages/MessageRow.vue';
 import type {
     MessagePerson,
-    ThreadAttachment,
     ThreadMessage,
     ThreadPayload,
     ThreadRoutes,
 } from '@/Components/Messages/messages';
 import {
     MESSAGE_MAX_BODY,
-    formatDuration,
-    formatMessageTime,
     mutateMessage,
+    renderThread,
     useMentions,
 } from '@/Components/Messages/messages';
 import { Button } from '@/Components/ui/button';
 import { Label } from '@/Components/ui/label';
 import { Textarea } from '@/Components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 /**
@@ -50,14 +49,28 @@ import { cn } from '@/lib/utils';
  * The announcements channel is the one place it is false for most readers, and that is the
  * policy speaking, not this file.
  *
+ * ## Grouping
+ *
+ * Consecutive messages by one person inside five minutes are one run: the avatar and the name
+ * are on the first, and the rest are tight rows whose clock appears on hover or focus. A change
+ * of author, a longer gap, a change of day and the unread line each break the run. The decision
+ * is made once for the whole list by `renderThread()` rather than per bubble.
+ *
  * ## Focus, which is the hard part of a chat screen
  *
  * **A new message never takes focus.** It is spoken by a polite live region and the list is
  * scrolled only when the reader was already at the bottom — somebody reading back through
  * yesterday is not yanked to now because a colleague typed. The list itself is one tab stop
  * (`role="log"`, `tabindex="0"`) so a keyboard can reach it and scroll it with the arrow keys
- * without putting a stop on every bubble; the links and attachments inside it are the stops
- * that matter.
+ * without putting a stop on every bubble; the links, attachments and the one row action inside
+ * it are the stops that matter.
+ *
+ * ## Enter sends — and it does so on all three screens
+ *
+ * `Enter` posts, `Shift + Enter` starts a new line, `Ctrl`/`⌘ + Enter` also posts. That is a
+ * change from "only Ctrl/⌘ + Enter", it applies to the task discussion too, and the hint under
+ * the composer says all three out loud rather than leaving somebody to discover it by losing a
+ * paragraph.
  *
  * ## The realtime seam
  *
@@ -114,6 +127,24 @@ const mentions = useMentions(body);
 const fieldError = computed(() => pickedError.value ?? serverError.value);
 const remaining = computed(() => MESSAGE_MAX_BODY - body.value.length);
 
+/** The textarea grows with what is typed and then scrolls inside itself. */
+const COMPOSER_MAX_PX = 160;
+
+function field(): HTMLTextAreaElement | undefined {
+    return bodyEl.value?.$el as HTMLTextAreaElement | undefined;
+}
+
+function grow(): void {
+    const el = field();
+
+    if (el === undefined) {
+        return;
+    }
+
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_PX)}px`;
+}
+
 function clearPicked(): void {
     picked.value = null;
     pickedError.value = null;
@@ -129,6 +160,8 @@ function resetComposer(): void {
     serverError.value = null;
     mentions.reset();
     clearPicked();
+
+    void nextTick(grow);
 }
 
 function choose(event: Event): void {
@@ -148,18 +181,41 @@ function choose(event: Event): void {
  * never lands nowhere; it lands where the work is.
  */
 function mention(person: MessagePerson): void {
-    const field = bodyEl.value?.$el as HTMLTextAreaElement | undefined;
-    const caret = field?.selectionStart ?? null;
+    const el = field();
+    const caret = el?.selectionStart ?? null;
 
     mentions.insert(person, caret);
 
     void Promise.resolve().then(() => {
-        field?.focus();
+        el?.focus();
 
         const at = body.value.length;
 
-        field?.setSelectionRange?.(at, at);
+        el?.setSelectionRange?.(at, at);
+        grow();
     });
+}
+
+/**
+ * Enter sends; Shift + Enter is a newline.
+ *
+ * `isComposing` is checked because an IME's own Enter — the one that accepts a candidate — is
+ * delivered here as a keydown, and a composer that posted on it would cut every Bangla or
+ * Japanese sentence in half at its first word.
+ */
+function onEnter(event: KeyboardEvent): void {
+    if (event.isComposing) {
+        return;
+    }
+
+    // Shift is the newline, unless a modifier that means "send" is also down. One handler for
+    // all three shortcuts, because three handlers on the same key posted the message twice.
+    if (event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        return;
+    }
+
+    event.preventDefault();
+    post();
 }
 
 /* ------------------------------------------------------------------ the unread line */
@@ -194,6 +250,9 @@ function isUnread(message: ThreadMessage): boolean {
 const unreadCount = computed(() => thread.value.messages.filter(isUnread).length);
 const firstUnreadId = computed(() => thread.value.messages.find(isUnread)?.id ?? null);
 
+/** Every message, with what it needs to know about its neighbours to be drawn. */
+const rendered = computed(() => renderThread(thread.value.messages, firstUnreadId.value));
+
 /* ------------------------------------------------------------------ announcing */
 
 /**
@@ -203,6 +262,9 @@ const firstUnreadId = computed(() => thread.value.messages.find(isUnread)?.id ??
  * server said about it, and DESIGN.md §5.19 allows a message exactly one channel.
  */
 const announcement = ref('');
+
+/** A second region, for what the reader just DID — copying a message. Never a new message. */
+const actionStatus = ref('');
 
 let seen = highestId(props.thread.messages);
 
@@ -334,6 +396,7 @@ watch(
             anchor.value = parseAt(payload.last_read_at);
             seen = highestId(payload.messages);
             announcement.value = '';
+            actionStatus.value = '';
             loadError.value = null;
             resetComposer();
             thread.value = payload;
@@ -403,6 +466,7 @@ onMounted(() => {
     void load();
 
     keepAtBottom(true);
+    grow();
 
     ticker = setInterval(refreshIfStale, TICK_MS);
     document.addEventListener('visibilitychange', refreshIfStale);
@@ -421,9 +485,12 @@ onBeforeUnmount(() => {
  * Deliberately not blocked on an empty composer: "neither text nor a file" is a rule
  * `StoreMessageRequest` states in a sentence of its own, and the sentence the reader should get
  * is that one rather than a disabled button that explains nothing.
+ *
+ * It IS blocked on `can_post`, which is the server's answer and the only thing allowed to say
+ * yes — a keyboard shortcut must not reach an endpoint the composer itself is not drawn for.
  */
 function post(): void {
-    if (posting.value || pickedError.value !== null) {
+    if (!thread.value.can_post || posting.value || pickedError.value !== null) {
         return;
     }
 
@@ -463,20 +530,21 @@ function post(): void {
 
 /* ------------------------------------------------------------------ presentation */
 
-function authorOf(message: ThreadMessage): string {
-    return message.is_mine ? 'You' : (message.author?.name ?? 'Somebody who has since left');
-}
-
-/** An image and a voice note render themselves; everything else is a line with a link on it. */
-function rendersInline(file: ThreadAttachment, kind: 'image' | 'voice'): boolean {
-    return !linksStale.value && file.kind === kind;
-}
-
 const isAnnouncements = computed(() => thread.value.type === 'announcement');
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-4">
+    <div
+        :class="
+            cn(
+                'flex h-full min-h-0 min-w-0 flex-col gap-3',
+                // An auto-height parent — the project Discussion tab, the task panel — gets a
+                // ceiling so the thread cannot become the whole page. A parent with a definite
+                // height (the Messages page) lifts it with `lg:max-h-none` from outside.
+                scroll && 'max-h-[min(68svh,40rem)]',
+            )
+        "
+    >
         <div v-if="heading !== null" class="flex min-w-0 flex-wrap items-start justify-between gap-2">
             <div class="min-w-0">
                 <h2 class="text-sm font-medium break-words">{{ heading }}</h2>
@@ -503,6 +571,8 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
 
         <!-- New messages are spoken here. Focus stays wherever the reader put it. -->
         <p class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</p>
+        <!-- And what the reader just did, which is a different sentence on a different channel. -->
+        <p class="sr-only" aria-live="polite" aria-atomic="true">{{ actionStatus }}</p>
 
         <EmptyState
             v-if="loadError"
@@ -522,7 +592,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
         <template v-else>
             <div
                 v-if="linksStale && attachmentCount > 0"
-                class="flex flex-col gap-2 rounded-md border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+                class="flex shrink-0 flex-col gap-2 rounded-md border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
             >
                 <p class="text-sm text-muted-foreground">
                     The attachment links in this conversation have expired.
@@ -543,7 +613,8 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
             <!--
                 One tab stop for the whole thread, not one per bubble: `role="log"` tells a
                 screen reader what it is, `tabindex="0"` lets a keyboard reach and scroll it,
-                and the links inside it are the stops that actually lead somewhere.
+                and the links and the one row action inside it are the stops that actually lead
+                somewhere.
             -->
             <div
                 ref="listEl"
@@ -553,7 +624,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 :class="
                     cn(
                         'min-w-0 rounded-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
-                        scroll && 'max-h-[min(60vh,32rem)] overflow-y-auto pr-1',
+                        scroll && 'min-h-0 flex-1 overflow-y-auto pr-1',
                     )
                 "
             >
@@ -568,8 +639,8 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     "
                 />
 
-                <ol v-else class="flex min-w-0 flex-col gap-3">
-                    <li v-if="thread.has_more" class="flex justify-center">
+                <ol v-else class="flex min-w-0 flex-col">
+                    <li v-if="thread.has_more" class="flex justify-center pb-2">
                         <Button
                             type="button"
                             variant="ghost"
@@ -582,124 +653,41 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         </Button>
                     </li>
 
-                    <template v-for="message in thread.messages" :key="message.id">
+                    <template v-for="entry in rendered" :key="entry.message.id">
+                        <!-- The day rule. A word, so it reads the same without colour. -->
+                        <li
+                            v-if="entry.dayLabel"
+                            class="flex min-w-0 items-center gap-3 py-3"
+                        >
+                            <span class="h-px flex-1 bg-border" aria-hidden="true" />
+                            <span class="shrink-0 text-xs font-medium text-muted-foreground">
+                                {{ entry.dayLabel }}
+                            </span>
+                            <span class="h-px flex-1 bg-border" aria-hidden="true" />
+                        </li>
+
                         <!--
                             The unread line. A rule and a count, not a tint: it has to read the
                             same to somebody who cannot tell two greys apart.
                         -->
                         <li
-                            v-if="message.id === firstUnreadId"
-                            class="flex min-w-0 items-center gap-3 pt-1"
+                            v-if="entry.unreadLine"
+                            class="flex min-w-0 items-center gap-3 py-2"
                         >
-                            <span class="h-px flex-1 bg-border" aria-hidden="true" />
-                            <span class="shrink-0 text-xs font-medium text-muted-foreground">
+                            <span class="h-px flex-1 bg-primary" aria-hidden="true" />
+                            <span class="shrink-0 text-xs font-medium text-primary">
                                 {{ unreadCount === 1 ? '1 new message' : `${unreadCount} new messages` }}
                             </span>
-                            <span class="h-px flex-1 bg-border" aria-hidden="true" />
+                            <span class="h-px flex-1 bg-primary" aria-hidden="true" />
                         </li>
 
-                        <li
-                            :class="
-                                cn(
-                                    'flex min-w-0 flex-col gap-2 rounded-md border p-3',
-                                    // Whose it is, said by the author line first. The indent
-                                    // and the fill are a second and third way of saying the
-                                    // same thing, never the only one.
-                                    message.is_mine && 'bg-muted/40 sm:ml-6',
-                                    // Addressed to the reader. The word in the header line is
-                                    // the carrier; the border is the second.
-                                    message.mentions_me && 'border-primary',
-                                )
-                            "
-                        >
-                            <p class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                                <span class="text-sm font-medium break-words">
-                                    {{ authorOf(message) }}
-                                </span>
-                                <span class="text-xs text-muted-foreground">
-                                    {{ formatMessageTime(message.created_at) }}
-                                </span>
-                                <span
-                                    v-if="message.mentions_me"
-                                    class="text-xs font-medium text-primary"
-                                >
-                                    Mentions you
-                                </span>
-                            </p>
-
-                            <MessageBody
-                                v-if="message.body"
-                                :body="message.body"
-                                :mentions="message.mentions"
+                        <li class="min-w-0">
+                            <MessageRow
+                                :message="entry.message"
+                                :starts-run="entry.startsRun"
+                                :links-stale="linksStale"
+                                @announce="actionStatus = $event"
                             />
-
-                            <ul
-                                v-if="message.attachments.length > 0"
-                                class="flex min-w-0 flex-col gap-2"
-                            >
-                                <li
-                                    v-for="file in message.attachments"
-                                    :key="file.id"
-                                    class="flex min-w-0 flex-col gap-1.5 rounded-md border p-2"
-                                >
-                                    <a
-                                        v-if="rendersInline(file, 'image')"
-                                        :href="file.url"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        class="min-w-0 rounded-sm focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-                                    >
-                                        <img
-                                            :src="file.url"
-                                            :alt="file.name"
-                                            loading="lazy"
-                                            class="max-h-64 w-auto max-w-full rounded-sm"
-                                        >
-                                        <span class="sr-only">(opens in a new tab)</span>
-                                    </a>
-
-                                    <!--
-                                        Nothing records audio yet. This is here so a voice note
-                                        written by the later slice plays, instead of arriving as
-                                        a download link nobody expected.
-                                    -->
-                                    <audio
-                                        v-else-if="rendersInline(file, 'voice')"
-                                        :src="file.url"
-                                        controls
-                                        class="w-full min-w-0"
-                                    ></audio>
-
-                                    <div class="flex min-w-0 items-center gap-2">
-                                        <component
-                                            :is="iconFor(file)"
-                                            class="size-3.5 shrink-0 text-muted-foreground"
-                                            aria-hidden="true"
-                                        />
-                                        <a
-                                            v-if="!linksStale"
-                                            :href="file.url"
-                                            :target="file.is_previewable ? '_blank' : undefined"
-                                            rel="noopener noreferrer"
-                                            class="min-w-0 rounded-sm text-xs break-all hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-                                        >
-                                            {{ file.name }}
-                                            <span v-if="file.is_previewable" class="sr-only">
-                                                (opens in a new tab)
-                                            </span>
-                                        </a>
-                                        <span v-else class="min-w-0 text-xs break-all">
-                                            {{ file.name }}
-                                        </span>
-                                        <span class="shrink-0 text-xs text-muted-foreground">
-                                            {{ file.size_label }}
-                                            <template v-if="formatDuration(file.duration_seconds)">
-                                                · {{ formatDuration(file.duration_seconds) }}
-                                            </template>
-                                        </span>
-                                    </div>
-                                </li>
-                            </ul>
                         </li>
                     </template>
                 </ol>
@@ -712,11 +700,11 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
             -->
             <form
                 v-if="thread.can_post"
-                class="flex min-w-0 flex-col gap-2 border-t pt-4"
+                class="flex min-w-0 shrink-0 flex-col gap-2 border-t pt-3"
                 novalidate
                 @submit.prevent="post"
             >
-                <Label :for="bodyId" class="text-xs text-muted-foreground">
+                <Label :for="bodyId" class="sr-only">
                     {{ isAnnouncements ? 'Write an announcement' : 'Write a message' }}
                 </Label>
 
@@ -727,16 +715,15 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     :disabled="posting"
                     :aria-describedby="fieldError ? `${errorId} ${hintId}` : hintId"
                     :aria-invalid="fieldError ? true : undefined"
-                    rows="3"
+                    rows="1"
                     :placeholder="isAnnouncements ? 'Tell everybody.' : 'Say something.'"
-                    class="min-w-0"
-                    @keydown.ctrl.enter.prevent="post"
-                    @keydown.meta.enter.prevent="post"
+                    class="max-h-40 min-h-9 min-w-0 resize-none overflow-y-auto py-2"
+                    @input="grow"
+                    @keydown.enter="onEnter"
                 />
 
-                <Label :for="pickerId" class="text-xs text-muted-foreground">
-                    Attach a file (optional)
-                </Label>
+                <!-- The picker itself is off-screen; the paperclip is the control. -->
+                <Label :for="pickerId" class="sr-only">Attach a file</Label>
                 <input
                     :id="pickerId"
                     ref="pickerEl"
@@ -744,17 +731,30 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     :accept="FILE_ACCEPT"
                     :disabled="posting"
                     :aria-describedby="hintId"
-                    class="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs transition-[color,box-shadow] outline-none file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:font-medium file:text-secondary-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+                    class="sr-only"
                     @change="choose"
                 >
 
-                <p :id="hintId" class="text-xs text-muted-foreground">
-                    Up to {{ FILE_MAX_LABEL }} per file.
-                    <span :class="remaining < 0 ? 'text-destructive' : undefined">
-                        <span class="tabular-nums">{{ remaining }}</span> characters left.
+                <!-- The picked file, with the control that unpicks it. -->
+                <div
+                    v-if="picked"
+                    class="flex min-w-0 items-center gap-2 self-start rounded-md border bg-muted/40 py-1 pr-1 pl-2"
+                >
+                    <Paperclip class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span class="min-w-0 truncate text-xs" :title="picked.name">
+                        {{ picked.name }}
                     </span>
-                    Ctrl or ⌘ with Enter sends it.
-                </p>
+                    <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost"
+                        :disabled="posting"
+                        :aria-label="`Remove ${picked.name}`"
+                        @click="clearPicked"
+                    >
+                        <X aria-hidden="true" />
+                    </Button>
+                </div>
 
                 <p
                     v-if="fieldError"
@@ -766,10 +766,23 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 </p>
 
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
-                    <Button type="submit" size="sm" variant="outline" :disabled="posting">
-                        <Send aria-hidden="true" />
-                        {{ posting ? 'Sending…' : 'Send' }}
-                    </Button>
+                    <TooltipProvider :delay-duration="150">
+                        <Tooltip>
+                            <TooltipTrigger as-child>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    :disabled="posting"
+                                    aria-label="Attach a file"
+                                    @click="pickerEl?.click()"
+                                >
+                                    <Paperclip aria-hidden="true" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Attach a file</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
 
                     <MentionPicker
                         :people="thread.mentionable"
@@ -777,28 +790,26 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         @pick="mention"
                     />
 
-                    <template v-if="picked">
-                        <span class="flex min-w-0 items-center gap-1.5">
-                            <Paperclip
-                                class="size-3 shrink-0 text-muted-foreground"
-                                aria-hidden="true"
-                            />
-                            <span class="min-w-0 text-xs break-all text-muted-foreground">
-                                {{ picked.name }}
-                            </span>
-                        </span>
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            :disabled="posting"
-                            @click="clearPicked"
-                        >
-                            <X aria-hidden="true" />
-                            Remove file
-                        </Button>
-                    </template>
+                    <span class="flex-1" aria-hidden="true" />
+
+                    <Button type="submit" size="sm" class="shrink-0" :disabled="posting">
+                        <Send aria-hidden="true" />
+                        {{ posting ? 'Sending…' : 'Send' }}
+                    </Button>
                 </div>
+
+                <!--
+                    The shortcut is stated rather than discovered. Enter sending is a CHANGE, it
+                    applies to the task discussion too, and somebody who finds it out by losing a
+                    half-written paragraph has been told by the wrong teacher.
+                -->
+                <p :id="hintId" class="min-w-0 text-xs text-muted-foreground">
+                    Enter sends · Shift + Enter starts a new line · Ctrl or ⌘ with Enter also
+                    sends · up to {{ FILE_MAX_LABEL }} per file ·
+                    <span :class="remaining < 0 ? 'text-destructive' : undefined">
+                        <span class="tabular-nums">{{ remaining }}</span> characters left
+                    </span>
+                </p>
             </form>
         </template>
     </div>

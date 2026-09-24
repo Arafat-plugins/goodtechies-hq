@@ -51,23 +51,58 @@ REM ...and then this line does nothing, which is fine.
 set "APP_NAME=goodERP"
 
 REM ---------- 0. PHP dependencies ----------
-REM Phase 6 added laravel/reverb, and a phase that adds a composer package leaves this
-REM machine's vendor/ a package behind the moment the new files land. Without this the app
-REM 500s on a class that does not exist yet, which reads as a broken build rather than a
-REM missing install. `composer install` only installs what composer.lock already pins; it
-REM never resolves a new version and never touches composer.json.
-echo [1/5] Updating PHP dependencies...
-echo === composer install === >> "%LOG%"
-call composer install --no-interaction >> "%LOG%" 2>&1
+REM A phase that adds a composer package (Phase 6 added laravel/reverb) leaves this machine's
+REM vendor\ a package behind the moment the new files land, and the app then 500s on a class
+REM that does not exist yet - which reads as a broken build rather than a missing install.
+REM
+REM But this does NOT run every start. `composer install` is a no-op when nothing changed,
+REM except that it still rewrites the optimised autoloader - roughly 15,000 files on Windows,
+REM with Defender reading every one. That turned a fast start into a minutes-long stare at a
+REM window with nothing on it. So we run it only when composer.lock is not the one we last
+REM installed from, which is the only time it has anything to do.
+REM
+REM Output goes to the SCREEN, not the log. Composer prints per-package progress; hiding it is
+REM what made a slow step look like a frozen one.
+set "LOCKSTAMP=storage\app\.composer-lock-stamp"
+set "LOCKNOW="
+for %%F in (composer.lock) do set "LOCKNOW=%%~tF %%~zF"
+set "LOCKWAS="
+if exist "%LOCKSTAMP%" set /p LOCKWAS=<"%LOCKSTAMP%"
+
+if "%LOCKNOW%"=="%LOCKWAS%" (
+    echo [1/5] PHP dependencies are already current.
+    echo.
+    goto :phpdone
+)
+
+echo [1/5] Installing PHP dependencies ^(composer.lock changed^).
+echo       This one takes a few minutes and prints as it goes.
+echo.
+echo       If it stops on "Generating optimized autoload files", close any OTHER
+echo       goodERP window first - a server still running in one holds files in
+echo       vendor\ open, and composer cannot write over them.
+echo.
+echo === composer install (output on screen) === >> "%LOG%"
+call composer install --no-interaction
 if errorlevel 1 (
-    echo    [X] composer install failed - see %LOG%
+    echo.
+    echo    [X] composer install failed - the reason is on the screen just above.
     goto :hold
 )
+
+REM Only stamp it once composer actually succeeded, so a failed install is retried next start
+REM rather than skipped because the file exists.
+>"%LOCKSTAMP%" echo %LOCKNOW%
+echo.
 echo    [ok]
 echo.
 
+:phpdone
+
 REM ---------- 1. JS dependencies ----------
-echo [2/5] Updating JS dependencies...
+REM Also quiet, and also slow the first time after package.json changes. The line below is
+REM the expectation, since the window has nothing else to show while it works.
+echo [2/5] Updating JS dependencies ^(quiet; up to a minute after a change^)...
 echo === npm install === >> "%LOG%"
 call npm install >> "%LOG%" 2>&1
 if errorlevel 1 (

@@ -83,6 +83,16 @@ Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
         ->group(function () {
             Route::get('/', [MessageController::class, 'index'])->name('index');
 
+            // Search, INSIDE this group so it inherits `can:messages.use` like everything else
+            // here — a search endpoint hanging outside the gate would be the one route where
+            // "the Accountant has no messaging routes" was not said. It cannot collide with
+            // `/{conversation}`, because that one is numeric and this is a word.
+            //
+            // The scope is the requester's own inbox and it is built BEFORE the term is: see
+            // ConversationService::search(). A term that appears only in a project channel they
+            // are not on is not discoverable, not even as a count (Part C).
+            Route::get('/search', [MessageController::class, 'search'])->name('search');
+
             // Declared before `{conversation}` for readability; they cannot collide, because
             // this one is two segments deep and that one is numeric.
             Route::post('/direct/{user}', [MessageController::class, 'direct'])
@@ -92,6 +102,15 @@ Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
             Route::get('/{conversation}', [MessageController::class, 'show'])
                 ->whereNumber('conversation')
                 ->name('show');
+
+            // The thread's right-hand panel: who is in the room, what has been posted into it,
+            // and the work it is about. The SAME 404 `show()` gives for a conversation this
+            // person may not open, and deliberately no read-marking — a side panel is not a
+            // visit, and one that moved the unread line would make the list row disagree with
+            // what the reader has actually seen.
+            Route::get('/{conversation}/context', [MessageController::class, 'context'])
+                ->whereNumber('conversation')
+                ->name('context');
             Route::post('/{conversation}', [MessageController::class, 'store'])
                 ->whereNumber('conversation')
                 ->name('store');

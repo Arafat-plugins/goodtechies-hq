@@ -315,3 +315,327 @@ export function formatDuration(seconds: number | null): string {
 
     return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
 }
+
+/* -------------------------------------------------------------------- people, drawn */
+
+/**
+ * Somebody's initials, for an avatar.
+ *
+ * There is **no avatar field on `users`** and this slice did not invent one, so a face here is
+ * two letters of a name on a neutral medallion. Spelled locally rather than imported from
+ * `Tasks/taskDetail` so the messaging client does not depend on the task client.
+ */
+export function initialsOf(name: string | null | undefined): string {
+    return (name ?? '?')
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((word) => word[0]?.toUpperCase() ?? '')
+        .join('') || '?';
+}
+
+/* -------------------------------------------------------------------- time, drawn */
+
+const CLOCK = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+const DAY = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+});
+
+function parseTimestamp(value: string | null | undefined): Date | null {
+    if (!value) {
+        return null;
+    }
+
+    const date = new Date(value);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Just the clock, for a message inside a run that already prints its day. */
+export function formatClockTime(value: string | null | undefined): string {
+    const date = parseTimestamp(value);
+
+    return date === null ? '—' : CLOCK.format(date);
+}
+
+/** The day rule between two runs of messages: Today, Yesterday, or the date. */
+export function formatDayLabel(value: string | null | undefined): string {
+    const date = parseTimestamp(value);
+
+    if (date === null) {
+        return 'Undated';
+    }
+
+    const startOfToday = new Date();
+
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const days = Math.floor((startOfToday.getTime() - startOfDay(date).getTime()) / 86_400_000);
+
+    if (days === 0) {
+        return 'Today';
+    }
+
+    if (days === 1) {
+        return 'Yesterday';
+    }
+
+    return date.getFullYear() === startOfToday.getFullYear() ? DAY.format(date) : DAY_WITH_YEAR.format(date);
+}
+
+function startOfDay(date: Date): Date {
+    const copy = new Date(date.getTime());
+
+    copy.setHours(0, 0, 0, 0);
+
+    return copy;
+}
+
+/* -------------------------------------------------------------------- grouping */
+
+/**
+ * How long a run of messages by one person stays one run. Five minutes, which is the window
+ * every chat client in the building already trains people to expect.
+ */
+export const MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * One message, with what the thread needs to know about its NEIGHBOURS to draw it.
+ *
+ * Computed once for the whole list rather than asked per bubble, because "is this the first of
+ * a run" is a question about the message before it and a template that asks it per row ends up
+ * indexing backwards into the array from inside a `v-for`.
+ */
+export interface RenderedMessage {
+    message: ThreadMessage;
+    /** First of a run by one author: it carries the avatar and the name. */
+    startsRun: boolean;
+    /** Set on the first message of a day, which is where the day rule is drawn. */
+    dayLabel: string | null;
+    /** Draw the "New messages" rule immediately above this one. */
+    unreadLine: boolean;
+}
+
+/**
+ * Group consecutive messages by the same author inside the window.
+ *
+ * A run is broken by a change of author, a gap wider than the window, a change of day, and by
+ * the unread line — a run that straddled "everything below here is new" would hide the one
+ * boundary on the screen that a reader is actually looking for.
+ */
+export function renderThread(
+    messages: ThreadMessage[],
+    firstUnreadId: number | null,
+): RenderedMessage[] {
+    let previous: ThreadMessage | null = null;
+    let previousDay: string | null = null;
+
+    return messages.map((message) => {
+        const unreadLine = firstUnreadId !== null && message.id === firstUnreadId;
+        const at = parseTimestamp(message.created_at);
+        const day = at === null ? 'Undated' : startOfDay(at).toISOString();
+        const dayChanged = day !== previousDay;
+
+        const previousAt = parseTimestamp(previous?.created_at);
+        const sameAuthor =
+            previous !== null &&
+            previous.is_mine === message.is_mine &&
+            (previous.author?.id ?? null) === (message.author?.id ?? null);
+        const withinWindow =
+            at !== null &&
+            previousAt !== null &&
+            at.getTime() - previousAt.getTime() <= MESSAGE_GROUP_WINDOW_MS;
+
+        const startsRun = !sameAuthor || !withinWindow || dayChanged || unreadLine;
+
+        const rendered: RenderedMessage = {
+            message,
+            startsRun,
+            dayLabel: dayChanged ? formatDayLabel(message.created_at) : null,
+            unreadLine,
+        };
+
+        previous = message;
+        previousDay = day;
+
+        return rendered;
+    });
+}
+
+/* -------------------------------------------------------------------- search */
+
+/** `GET /messages/search?q=…` — the rail's search, answered across every conversation. */
+export const MESSAGE_SEARCH_URL = '/messages/search';
+
+/** Shorter than this is not a search: the server is not asked and the rail keeps its list. */
+export const MESSAGE_SEARCH_MIN = 2;
+
+/** Long enough that a typed word is one request, short enough to feel immediate. */
+export const MESSAGE_SEARCH_DEBOUNCE_MS = 250;
+
+export interface MessageSearchResult {
+    message_id: number;
+    conversation_id: number;
+    conversation_label: string;
+    conversation_type: ConversationTypeKey | null;
+    author: string | null;
+    excerpt: string;
+    created_at: string | null;
+}
+
+export interface MessageSearchResponse {
+    query: string;
+    results: MessageSearchResult[];
+    has_more: boolean;
+}
+
+/**
+ * Ask the server. The caller owns the `AbortController`, because the term changing is what
+ * cancels the request and only the caller knows that it has.
+ *
+ * Throws on anything that is not a 2xx, so the rail can draw a real error rather than an empty
+ * list — "no results" and "the request failed" are different sentences and a screen that prints
+ * the first when it means the second is lying.
+ */
+export async function searchMessages(
+    query: string,
+    signal: AbortSignal,
+): Promise<MessageSearchResponse> {
+    const response = await fetch(`${MESSAGE_SEARCH_URL}?q=${encodeURIComponent(query)}`, {
+        credentials: 'same-origin',
+        signal,
+        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    });
+
+    if (!response.ok) {
+        throw new Error(`Search failed with ${response.status}`);
+    }
+
+    return (await response.json()) as MessageSearchResponse;
+}
+
+/* -------------------------------------------------------------------- the context panel */
+
+export function conversationContextUrl(conversationId: number): string {
+    return `/messages/${conversationId}/context`;
+}
+
+export interface ConversationContextFile extends FileSummary {
+    kind: 'file' | 'image' | 'voice' | null;
+}
+
+export interface ConversationContextProject {
+    id: number;
+    name: string;
+    status: string;
+    href: string;
+}
+
+export interface ConversationContextTask {
+    id: number;
+    title: string;
+    status: string;
+    href: string;
+}
+
+/**
+ * What the panel beside a conversation knows about it.
+ *
+ * `project` and `tasks` are **absent** when there is nothing this requester may see — absent,
+ * not null, which is the repo's privacy shape (a field you may not see is not in the payload).
+ * So every reader of this branches on `'project' in context`, never on `context.project !== null`.
+ */
+export interface ConversationContext {
+    conversation_id: number;
+    type: ConversationTypeKey | null;
+    members: MessagePerson[];
+    files: ConversationContextFile[];
+    project?: ConversationContextProject;
+    tasks?: ConversationContextTask[];
+}
+
+export type ConversationContextStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+export interface ConversationContextState {
+    status: ConversationContextStatus;
+    data: ConversationContext | null;
+}
+
+/**
+ * One cache for the life of the page, keyed by VIEWER and conversation.
+ *
+ * Module scope rather than component state because the rail's rows are `Link`s: opening another
+ * conversation re-renders the page, and a cache that lived in the page would be a cache that
+ * emptied every time somebody clicked. The viewer's id is in the key because signing out is an
+ * Inertia visit and not a reload — without it, the next person in this tab would inherit the
+ * last one's panels.
+ */
+const contextCache = new Map<string, Ref<ConversationContextState>>();
+
+function contextKey(viewerId: number | null, conversationId: number): string {
+    return `${viewerId ?? 'anonymous'}:${conversationId}`;
+}
+
+export function conversationContextState(
+    viewerId: number | null,
+    conversationId: number,
+): Ref<ConversationContextState> {
+    const key = contextKey(viewerId, conversationId);
+    const held = contextCache.get(key);
+
+    if (held !== undefined) {
+        return held;
+    }
+
+    const fresh = ref<ConversationContextState>({ status: 'idle', data: null });
+
+    contextCache.set(key, fresh);
+
+    return fresh;
+}
+
+/**
+ * Fetch it, once.
+ *
+ * Nothing calls this on mount: the panel asks the first time it is OPENED, and a second open of
+ * the same conversation is answered from the ref above without a request. `force` is the Retry
+ * button, which is the only thing that asks twice.
+ */
+export async function loadConversationContext(
+    viewerId: number | null,
+    conversationId: number,
+    force = false,
+): Promise<void> {
+    const state = conversationContextState(viewerId, conversationId);
+
+    if (state.value.status === 'loading') {
+        return;
+    }
+
+    if (state.value.status === 'ready' && !force) {
+        return;
+    }
+
+    state.value = { status: 'loading', data: state.value.data };
+
+    try {
+        const response = await fetch(conversationContextUrl(conversationId), {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        });
+
+        if (!response.ok) {
+            state.value = { status: 'error', data: null };
+
+            return;
+        }
+
+        state.value = { status: 'ready', data: (await response.json()) as ConversationContext };
+    } catch {
+        state.value = { status: 'error', data: null };
+    }
+}

@@ -562,6 +562,57 @@ and Phase 9's payroll reads this view (6-14).
 - The **announcement banner app-wide** rather than on the Messages page only (6-18).
 - Then **GATE D**: you check chat and voice on phone and desktop.
 
+### Messages redesign — 24 Sep 2026 ✅
+
+A client-requested redesign of the **existing** Messages module, not a new page: the backend,
+the routes, the schema, the policies and the messaging logic are untouched except for two new
+read-only endpoints.
+
+**The page is now a three-column workspace** — rail · conversation · context panel — sharing one
+fixed-height row, so only the message log scrolls and the composer never leaves the screen.
+Measured in `svh` rather than `vh`, so a phone's address bar cannot cut it off. Zero horizontal
+overflow at 360, 375, 768 and 1280, in light and dark. At 1024 the panel becomes a Sheet; at 375
+the rail *is* the page and a conversation opens over it with a Back control.
+
+**New components** (all under `resources/js/Components/Messages/`): `MessagesRail.vue`,
+`MessageRow.vue`, `AttachmentCard.vue`, `ConversationContextPanel.vue`, `NewMessageDialog.vue`.
+`MessageThread.vue` was reworked **inside its frozen public API** (M-2), so the task Discussion
+panel and the project Discussion tab got the same improvements and none of the risk.
+
+**Two new endpoints**, both inside the existing `messages` group and therefore behind the same
+`messages.use` key:
+
+- `GET /messages/search?q=` — a real `ILIKE` over `messages.body`, scoped by ids taken from
+  `inboxFor()` **before** the term runs (M-3). 30 hits, newest first, excerpt cut on the server
+  and centred on the match.
+- `GET /messages/{conversation}/context` — members, shared files, the linked project and its
+  visible tasks. Fetched lazily, cached per viewer+conversation, and it marks nothing read (M-5).
+
+**Preserved and re-checked:** DMs, the team channel, project channels, announcements, the
+announcement banner's one rule (it goes quiet when read, it is not dismissed by a button),
+attachments, mentions and the whole `MentionPicker` a11y wiring, unread counts, the unread
+separator, `role="log"`, opening at the bottom, "Load earlier messages", `aria-current` and
+`preserve-scroll` on the rail, `can_post` as the only thing that draws a composer, and
+`defineOptions({ layout })` picking the shell from `auth.user.surface`.
+
+**Deliberately not built** — reactions, pinned messages, threaded replies, presence and "last
+seen", call and video, rich-text bodies, deep-link-to-a-single-message. Every one of them is in
+the reference image and **none of them has a table, a column or an endpoint** (M-11). What each
+would cost:
+
+| Feature | What it needs |
+| --- | --- |
+| Reactions | a `message_reactions` table (message, user, emoji), a toggle endpoint, an aggregate on `MessageResource` |
+| Pinned messages | `pinned_at`/`pinned_by` on `messages`, a pin/unpin endpoint, a policy for who may pin, a section on the context payload |
+| Threaded replies | `parent_message_id` on `messages`, a per-thread read model, reply counts, an endpoint reading one sub-thread |
+| Presence / last seen | a Reverb presence channel plus a `last_seen_at`, and a privacy decision this repo has not taken |
+| Call / video | a third-party provider and a whole integration |
+| Rich text | a sanitising store path and a render path; `MessageBody` renders *segments* precisely so a message is never HTML |
+| Jump to a search hit | `GET /messages/{conversation}?around=<message>`. Without it a result opens the conversation, which is what it does |
+
+**Tests:** 29 new (`tests/Feature/Messages/MessageSearchTest.php`,
+`ConversationContextTest.php`) plus two rows in the permission matrix. Suite **1614 passed**.
+
 ## Deployment log
 
 | Date | Commit | Server | Result |
@@ -572,7 +623,9 @@ and Phase 9's payroll reads this view (6-14).
 
 ## Next step
 
-**Phase 6's voice slice, then GATE D.**
+**Phase 6's voice slice, then GATE D.** The Messages redesign (24 Sep) is in and synced;
+restart `start-hq.bat` before testing it — it seeds `messages.use`, without which every
+messaging route answers 403.
 
 1. **Voice messages**: hold-to-record in the composer with a live waveform and timer, preview
    (play / re-record / send), upload through the same `FileService` pipeline as every other

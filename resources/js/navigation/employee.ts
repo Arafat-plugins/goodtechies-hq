@@ -69,7 +69,7 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
                 // Phase 6. The shared Messages page — whose mail a thread is belongs to the
                 // person and not to the shell, so this points at `/messages` and the page picks
                 // `EmployeeLayout` from the viewer's surface, exactly as My Leave does.
-                { label: 'Messages', href: '/messages', icon: MessagesSquare },
+                { label: 'Messages', href: '/messages', icon: MessagesSquare, badgeKey: 'messagesUnread' },
                 // Phase 6. Part D §2 words the employee's entry point as "Messages → Team",
                 // and the Messages page has no sub-navigation to hang it off — so the row sits
                 // directly under Messages, which is the same neighbourhood and one fewer click.

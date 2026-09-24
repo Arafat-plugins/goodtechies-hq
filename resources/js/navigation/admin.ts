@@ -86,7 +86,7 @@ export const adminNav: NavGroup[] = [
             { label: 'Team', href: '/team', icon: UsersRound },
             // Phase 6. Shared with the Employee surface — one route, one page, the layout
             // picked from the viewer's own surface.
-            { label: 'Messages', href: '/messages', icon: MessagesSquare },
+            { label: 'Messages', href: '/messages', icon: MessagesSquare, badgeKey: 'messagesUnread' },
         ],
     },
     {

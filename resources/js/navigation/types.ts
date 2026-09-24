@@ -19,6 +19,15 @@ export interface NavItem {
      * pointing a row at a sub-view silently unlights it everywhere else.
      */
     activePrefix?: string;
+    /**
+     * A shared Inertia prop holding a count to show on this row as a pill.
+     *
+     * The nav data stays static and testable — it names *which* number, never what the number
+     * is — and the sidebar reads it from the page props at render. A row whose prop is absent
+     * or zero shows no pill at all, so a surface that never receives the prop degrades to the
+     * row it always was rather than to a `0` nobody asked for.
+     */
+    badgeKey?: 'messagesUnread';
 }
 
 export interface NavGroup {

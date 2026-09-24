@@ -1,28 +1,44 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
-import { MessagesSquare, Megaphone, UserPlus } from '@lucide/vue';
-import { computed, ref, useId } from 'vue';
+import { Head, Link, usePage } from '@inertiajs/vue3';
+import {
+    ArrowLeft,
+    Hash,
+    Info,
+    Megaphone,
+    MessageSquare,
+    MessagesSquare,
+    PanelRightClose,
+    RefreshCw,
+    Users,
+} from '@lucide/vue';
+import { useMediaQuery } from '@vueuse/core';
+import { computed, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
-import ConversationList from '@/Components/Messages/ConversationList.vue';
+import ConversationContextPanel from '@/Components/Messages/ConversationContextPanel.vue';
+import MessagesRail from '@/Components/Messages/MessagesRail.vue';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
 import type {
     AnnouncementBanner,
     ConversationSummary,
+    ConversationTypeKey,
     MessagePerson,
     ThreadPayload,
 } from '@/Components/Messages/messages';
-import { conversationRoutes, formatMessageTime } from '@/Components/Messages/messages';
+import { conversationRoutes, formatMessageTime, messagesHref } from '@/Components/Messages/messages';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
-import { Card, CardContent } from '@/Components/ui/card';
+import { Card } from '@/Components/ui/card';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/Components/ui/sheet';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
+import { cn } from '@/lib/utils';
 import type { SharedProps } from '@/types';
 
 /**
  * Messages: the team channel, the announcements channel, the project channels and this
- * person's DMs, with one thread open beside them (master prompt Part D §10).
+ * person's DMs, as a three-column workspace — rail, conversation, context.
  *
  * **One shared page on one route, not three.** Whose mail a thread is belongs to the person and
  * not to the shell they are in, which is why `routes/shared.php` carries the endpoints and why
@@ -36,9 +52,23 @@ import type { SharedProps } from '@/types';
  * when nothing is asked for, and — deliberately — also when a stale id is asked for: a bookmark
  * to a project you have since left is not an error screen.
  *
+ * ## The three columns share one row, and only the log scrolls
+ *
+ * From `lg` the workspace is one fixed-height row measured in `svh`, not `vh`, so a phone's
+ * address bar cannot slice the composer off the bottom of it. The page header stays put, the
+ * page itself does not scroll, and the one thing that does is the message list. Every column
+ * carries `min-w-0`, which is what makes a 300-character URL wrap inside a bubble instead of
+ * widening the grid it sits in.
+ *
+ * Below `lg` the page scrolls normally and there is **one** column: `/messages` is the rail and
+ * `/messages?conversation=<id>` is the thread, with a Back control between them. The pane a
+ * phone is on is therefore in the URL like everything else here, rather than in a piece of
+ * component state that the next `Link` click would throw away.
+ *
  * This page has **no poll and no realtime of its own**. It reads what the server rendered, and
  * `MessageThread` re-reads its own thread when told to; the transport that does the telling is
- * a separate slice and lands on that one method.
+ * a separate slice and lands on that one method — which is also what the Refresh control in the
+ * conversation header calls, through `defineExpose`.
  */
 
 defineOptions({
@@ -60,11 +90,23 @@ const props = defineProps<{
     people: MessagePerson[];
 }>();
 
-const uid = useId();
-const dmPickerId = `${uid}-dm`;
+const page = usePage();
 
-const chosen = ref<string>('');
-const opening = ref(false);
+const viewerId = computed(() => page.props.auth.user?.id ?? null);
+
+/**
+ * How much of the viewport the shell has already spent, before the workspace gets the rest.
+ *
+ * Top bar, page padding, the page header and the gap under it — plus, on the one surface that
+ * carries it, the sticky timer bar. `canTrackTime` is the same server-answered fact the layout
+ * mounts `TimerBar` from, so the two cannot disagree; deriving it from the role here would be
+ * the second copy of a policy decision that this repo has already been bitten by twice.
+ */
+const workspaceHeight = computed(() =>
+    page.props.auth.user?.canTrackTime === true
+        ? 'lg:h-[calc(100svh-19.5rem)]'
+        : 'lg:h-[calc(100svh-15.5rem)]',
+);
 
 const activeId = computed(() => props.active?.conversation_id ?? null);
 
@@ -82,138 +124,322 @@ const description = computed(() => {
     return unread === 1 ? '1 unread message.' : `${unread} unread messages.`;
 });
 
-/** Start a direct message. A POST, because it may create the conversation. */
-function openDirect(): void {
-    const id = Number.parseInt(chosen.value, 10);
+/* ------------------------------------------------------------------ the one-column pane */
 
-    if (!Number.isFinite(id) || id <= 0 || opening.value) {
-        return;
-    }
+/**
+ * Below `lg` the rail and the thread are two screens, and which one you are on is the URL.
+ *
+ * `?conversation=` present means the thread; absent means the rail. The server still renders a
+ * thread either way — it picks the team channel when nothing is asked for — so this changes
+ * nothing about what is fetched, only about what a narrow screen draws.
+ */
+const showsThread = computed(() => {
+    const [, query = ''] = page.url.split('?');
 
-    opening.value = true;
+    return new URLSearchParams(query).has('conversation');
+});
 
-    router.post(`/messages/direct/${id}`, {}, {
-        preserveScroll: true,
-        onFinish: () => {
-            opening.value = false;
-            chosen.value = '';
-        },
-    });
+/* ------------------------------------------------------------------ the context panel */
+
+/** From `xl` the panel is a column; below it, and on a phone, the same panel is a Sheet. */
+const isWide = useMediaQuery('(min-width: 80rem)');
+
+const panelOpen = ref(false);
+
+const asColumn = computed(() => panelOpen.value && isWide.value);
+const asSheet = computed(() => panelOpen.value && !isWide.value);
+
+/** A conversation this reader may not open has no details to show either. */
+watch(activeId, () => {
+    panelOpen.value = false;
+});
+
+/* ------------------------------------------------------------------ the thread's seam */
+
+const threadEl = ref<InstanceType<typeof MessageThread> | null>(null);
+
+/**
+ * The same `refresh()` a realtime transport will call.
+ *
+ * The header lives here rather than inside `MessageThread` — this screen needs the context
+ * toggle and a Back control in the same bar — so the manual refresh reaches the thread through
+ * the one method it exposes, which is exactly what that seam is for.
+ */
+function refresh(): void {
+    threadEl.value?.refresh();
 }
+
+/* ------------------------------------------------------------------ presentation */
+
+const ICONS: Record<ConversationTypeKey, typeof Hash> = {
+    team: Users,
+    announcement: Megaphone,
+    project: Hash,
+    dm: MessageSquare,
+    task: MessageSquare,
+};
+
+/**
+ * One line about who can read what is on screen.
+ *
+ * Each of these is a sentence about `ConversationPolicy`, not a guess about membership: a
+ * project channel is readable by whoever may see the project, and nothing is synced anywhere.
+ */
+const LINES: Record<ConversationTypeKey, string> = {
+    team: 'The whole agency can read this.',
+    announcement: 'Read by everybody. Only an Admin can post here.',
+    project: 'Everybody who can see this project can read and post here.',
+    task: 'Everybody who can see this task can read and post here.',
+    dm: 'Just the two of you.',
+};
+
+const activeIcon = computed(() =>
+    props.active?.type == null ? MessagesSquare : ICONS[props.active.type],
+);
+
+const activeLine = computed(() =>
+    props.active?.type == null ? null : LINES[props.active.type],
+);
 </script>
 
 <template>
     <Head title="Messages" />
 
     <PageShell title="Messages" :description="description">
-        <div class="flex min-w-0 flex-col gap-4">
+        <!--
+            One fixed-height row from `lg`, measured in `svh`. The banner takes what it needs and
+            the workspace takes the rest, so an announcement never steals the height the thread
+            was going to use for messages.
+        -->
+        <div :class="cn('flex min-w-0 flex-col gap-3 lg:min-h-[30rem]', workspaceHeight)">
             <!--
-                The announcement banner the plan asks for. It is not dismissed by a button: it
-                goes quiet when the announcements channel is read, which is one state and not
+                The announcement banner the plan asks for. It is **not dismissed by a button**:
+                it goes quiet when the announcements channel is read, which is one state and not
                 two. `Megaphone` plus the word "Announcement" carry it; the border is third.
+                It is a link into that channel, which is navigation — not a dismissal.
             -->
-            <Card
+            <Link
                 v-if="announcement"
-                :class="announcement.is_unread ? 'border-primary' : undefined"
+                :href="messagesHref(announcement.conversation_id)"
+                preserve-scroll
+                :class="
+                    cn(
+                        'flex min-w-0 shrink-0 items-start gap-3 rounded-lg border bg-card p-3 shadow-raised',
+                        'hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
+                        announcement.is_unread && 'border-primary',
+                    )
+                "
             >
-                <CardContent class="flex min-w-0 flex-col gap-2">
-                    <p class="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
-                        <Megaphone class="size-3.5 shrink-0" aria-hidden="true" />
+                <Megaphone class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span class="flex min-w-0 flex-col gap-0.5">
+                    <span class="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
                         <span class="font-medium text-foreground">
                             Announcement{{ announcement.is_unread ? ' — unread' : '' }}
                         </span>
                         <span>{{ announcement.author ?? 'Somebody' }}</span>
                         <span>{{ formatMessageTime(announcement.created_at) }}</span>
-                    </p>
-                    <p class="min-w-0 text-sm break-words whitespace-pre-line">
+                    </span>
+                    <span class="line-clamp-2 min-w-0 text-sm break-words">
                         {{ announcement.body }}
-                    </p>
-                </CardContent>
-            </Card>
+                    </span>
+                </span>
+            </Link>
 
-            <div class="grid min-w-0 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
+            <div
+                :class="
+                    cn(
+                        'grid min-w-0 gap-3 lg:min-h-0 lg:flex-1',
+                        'lg:grid-cols-[18rem_minmax(0,1fr)]',
+                        asColumn && 'xl:grid-cols-[18rem_minmax(0,1fr)_18rem]',
+                    )
+                "
+            >
                 <!--
-                    The rail. On a phone it sits above the thread; from `lg` it sits beside it.
-                    `min-w-0` on both columns is what keeps a long message from widening the
-                    grid instead of wrapping inside it.
+                    The rail. It IS the page below `lg` — the thread replaces it there rather
+                    than sitting under it — and a column beside the thread from `lg`.
                 -->
-                <div class="flex min-w-0 flex-col gap-4">
-                    <Card>
-                        <CardContent class="flex min-w-0 flex-col gap-3">
-                            <label :for="dmPickerId" class="text-xs font-medium text-muted-foreground">
-                                Start a direct message
-                            </label>
-                            <div class="flex min-w-0 flex-wrap items-center gap-2">
-                                <select
-                                    :id="dmPickerId"
-                                    v-model="chosen"
-                                    class="min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
-                                >
-                                    <option value="">Choose somebody</option>
-                                    <option
-                                        v-for="person in people"
-                                        :key="person.id"
-                                        :value="String(person.id)"
-                                    >
-                                        {{ person.name ?? 'Somebody' }}
-                                    </option>
-                                </select>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    class="shrink-0"
-                                    :disabled="chosen === '' || opening"
-                                    @click="openDirect"
-                                >
-                                    <UserPlus aria-hidden="true" />
-                                    Open
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    <Card>
-                        <CardContent class="min-w-0">
-                            <ConversationList
-                                v-if="conversations.length > 0"
-                                :conversations="conversations"
-                                :active-id="activeId"
-                            />
-                            <EmptyState
-                                v-else
-                                :icon="MessagesSquare"
-                                title="No conversations yet"
-                                description="The team channel appears here as soon as it exists."
-                            />
-                        </CardContent>
-                    </Card>
-                </div>
-
-                <Card class="min-w-0">
-                    <CardContent class="min-w-0">
-                        <MessageThread
-                            v-if="active && routes"
-                            :key="active.conversation_id"
-                            :thread="active"
-                            :routes="routes"
-                            :heading="active.label"
-                            :description="
-                                active.type === 'announcement'
-                                    ? 'Read by everybody. Only an Admin can post here.'
-                                    : null
-                            "
-                            scroll
+                <Card
+                    :class="
+                        cn(
+                            'min-h-0 min-w-0 gap-0 overflow-hidden py-0 shadow-raised',
+                            'lg:flex',
+                            showsThread && 'hidden',
+                        )
+                    "
+                >
+                    <div class="flex min-h-0 min-w-0 flex-1 flex-col p-3">
+                        <MessagesRail
+                            :conversations="conversations"
+                            :active-id="activeId"
+                            :people="people"
                         />
+                    </div>
+                </Card>
+
+                <!-- The conversation: a header that stays put, the log, the composer. -->
+                <Card
+                    :class="
+                        cn(
+                            'min-h-0 min-w-0 gap-0 overflow-hidden py-0 shadow-raised',
+                            'lg:flex',
+                            !showsThread && 'hidden',
+                        )
+                    "
+                >
+                    <template v-if="active && routes">
+                        <div class="flex min-w-0 shrink-0 items-center gap-2 border-b p-3">
+                            <Button
+                                as-child
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                class="shrink-0 lg:hidden"
+                            >
+                                <Link :href="messagesHref()" aria-label="Back to conversations">
+                                    <ArrowLeft aria-hidden="true" />
+                                </Link>
+                            </Button>
+
+                            <component
+                                :is="activeIcon"
+                                class="hidden size-4 shrink-0 text-muted-foreground lg:block"
+                                aria-hidden="true"
+                            />
+
+                            <div class="min-w-0 flex-1">
+                                <h2 class="min-w-0 truncate text-sm font-medium">
+                                    {{ active.label }}
+                                </h2>
+                                <p v-if="activeLine" class="min-w-0 truncate text-xs text-muted-foreground">
+                                    {{ activeLine }}
+                                </p>
+                            </div>
+
+                            <TooltipProvider :delay-duration="150">
+                                <Tooltip>
+                                    <TooltipTrigger as-child>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            class="shrink-0"
+                                            aria-label="Refresh this conversation"
+                                            @click="refresh"
+                                        >
+                                            <RefreshCw aria-hidden="true" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Refresh this conversation</TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                    <TooltipTrigger as-child>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            class="shrink-0"
+                                            :aria-expanded="panelOpen"
+                                            :aria-label="
+                                                panelOpen
+                                                    ? 'Hide conversation details'
+                                                    : 'Show conversation details'
+                                            "
+                                            @click="panelOpen = !panelOpen"
+                                        >
+                                            <PanelRightClose v-if="panelOpen" aria-hidden="true" />
+                                            <Info v-else aria-hidden="true" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        {{ panelOpen ? 'Hide details' : 'Show details' }}
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        </div>
+
+                        <div class="flex min-h-0 min-w-0 flex-1 flex-col p-3">
+                            <!--
+                                `lg:max-h-none` is this page taking responsibility for the
+                                thread's height: it has given the column a definite one, so the
+                                ceiling the thread carries for auto-height parents (the project
+                                Discussion tab, the task panel) must come off here.
+                            -->
+                            <MessageThread
+                                ref="threadEl"
+                                :key="active.conversation_id"
+                                :thread="active"
+                                :routes="routes"
+                                scroll
+                                class="lg:max-h-none"
+                            />
+                        </div>
+                    </template>
+
+                    <div v-else class="flex min-h-0 min-w-0 flex-1 items-center justify-center p-3">
                         <EmptyState
-                            v-else
                             :icon="MessagesSquare"
                             title="Nothing open"
-                            description="Choose a conversation on the left, or start a direct message."
+                            description="Choose a conversation, or start a direct message."
                         />
-                    </CardContent>
+                    </div>
+                </Card>
+
+                <!--
+                    The context panel as a column, from `xl` and only while it is open. Mounting
+                    is what fetches it, so a panel nobody opens costs nothing.
+                -->
+                <Card
+                    v-if="asColumn && active"
+                    class="hidden min-h-0 min-w-0 gap-0 overflow-hidden py-0 shadow-raised xl:flex"
+                >
+                    <div class="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b p-3">
+                        <h2 class="min-w-0 truncate text-sm font-medium">Details</h2>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            class="shrink-0"
+                            aria-label="Hide conversation details"
+                            @click="panelOpen = false"
+                        >
+                            <PanelRightClose aria-hidden="true" />
+                        </Button>
+                    </div>
+                    <div class="min-h-0 min-w-0 flex-1 overflow-y-auto p-3">
+                        <ConversationContextPanel
+                            :conversation-id="active.conversation_id"
+                            :viewer-id="viewerId"
+                            :label="active.label"
+                        />
+                    </div>
                 </Card>
             </div>
         </div>
+
+        <!--
+            The same panel as an overlay, below `xl`. Reka's dialog owns the focus trap, the
+            Escape key and the focus restore back to the control that opened it.
+        -->
+        <Sheet
+            :open="asSheet && active !== null"
+            @update:open="(value: boolean) => { panelOpen = value; }"
+        >
+            <SheetContent side="right" class="w-full gap-0 p-0 sm:max-w-sm">
+                <SheetHeader class="gap-1 border-b p-4 pr-12 text-left">
+                    <SheetTitle class="text-base">Details</SheetTitle>
+                    <SheetDescription>
+                        Who is here, what has been shared, and what this conversation is about.
+                    </SheetDescription>
+                </SheetHeader>
+                <div v-if="active" class="min-h-0 flex-1 overflow-y-auto p-4">
+                    <ConversationContextPanel
+                        :conversation-id="active.conversation_id"
+                        :viewer-id="viewerId"
+                        :label="active.label"
+                    />
+                </div>
+            </SheetContent>
+        </Sheet>
     </PageShell>
 </template>

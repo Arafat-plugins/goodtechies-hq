@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\TimeEntry;
+use App\Services\ConversationService;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -50,7 +51,34 @@ class HandleInertiaRequests extends Middleware
             'app' => [
                 'name' => config('app.name'),
             ],
+            // Phase 6. The sidebar's Messages badge is on every page, so its number has to be
+            // too — `conversations` is a prop of the Messages page and nothing else can see it.
+            // The sidebar refreshes it with `usePagePoll(['messagesUnread'])` (Part 0.5), so it
+            // moves without a navigation and without a second endpoint to keep in step.
+            'messagesUnread' => fn (): int => $this->messagesUnread($request),
         ];
+    }
+
+    /**
+     * How many messages are waiting for this person, across every conversation in their inbox.
+     *
+     * Both halves are `ConversationService`'s, deliberately: `inboxFor()` already answers "which
+     * conversations may this person see" through `ConversationPolicy` and already returns an
+     * empty collection for somebody without `messages.use` — so the Accountant gets 0 here
+     * without this file naming a role, and a change to who may message whom changes this number
+     * by itself. Restating either rule here would be the second copy nobody updates.
+     */
+    private function messagesUnread(Request $request): int
+    {
+        $user = $request->user();
+
+        if (! $user instanceof User) {
+            return 0;
+        }
+
+        $conversations = app(ConversationService::class);
+
+        return array_sum($conversations->unreadCounts($user, $conversations->inboxFor($user)));
     }
 
     /**

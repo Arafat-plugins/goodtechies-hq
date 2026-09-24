@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Conversation;
+use App\Models\File;
 use App\Models\Message;
 use App\Models\Project;
 use App\Models\Task;
@@ -12,6 +13,7 @@ use App\Support\Permission;
 use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
@@ -63,6 +65,34 @@ class ConversationService
      * thread that is read upwards.
      */
     public const THREAD_WINDOW = 50;
+
+    /**
+     * How many hits a search answers with.
+     *
+     * One screenful and a bit. Search here is "find the message I am thinking of", not a report
+     * — somebody who needs the thirty-first hit needs a better term, and paginating a result set
+     * that is already scoped to one person's inbox would be a second window to keep in step
+     * with the thread's.
+     */
+    public const SEARCH_LIMIT = 30;
+
+    /**
+     * The shortest term worth running.
+     *
+     * A single character matches most of the inbox, so it is answered with nothing rather than
+     * with everything — and with 200, because a half-typed term is not a malformed request.
+     */
+    public const SEARCH_MINIMUM = 2;
+
+    /**
+     * How many attachments and tasks the context panel carries.
+     *
+     * The panel is a glance, not the Files tab and not the Tasks list; both of those already
+     * exist and both are reached from it.
+     */
+    public const CONTEXT_FILES = 20;
+
+    public const CONTEXT_TASKS = 10;
 
     public function __construct(private readonly ActivityLogger $activity) {}
 
@@ -295,6 +325,138 @@ class ConversationService
         }
 
         return $counts;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Searching
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Messages matching a term — inside the conversations this person may open, and nowhere
+     * else.
+     *
+     * **The scope is built before the term is, and that order is the whole rule.** The candidate
+     * ids come from `inboxFor()`, which has already put every row through
+     * `ConversationPolicy::view` one at a time, and the `ILIKE` runs only inside them. The
+     * alternative — search `messages`, then drop what the reader may not have — would have made
+     * the *number* of hits a fact about conversations they cannot open: a term that appears once
+     * in a project channel they are not on would be discoverable by the shape of the answer even
+     * when no row of it was ever sent. Part C says a record they may not see is absent, and a
+     * count of absent records is not absent.
+     *
+     * Task discussions are outside it for the reason they are outside the inbox: they are read
+     * inside their task, and a search over three hundred of them is not this feature.
+     *
+     * Returns up to `$limit + 1` rows. The extra one is the probe a *has more* flag is decided
+     * from, read in the same statement rather than as a second `count()` over the same scope.
+     *
+     * @return Collection<int, Message>
+     */
+    public function search(User $user, string $term, int $limit = self::SEARCH_LIMIT): Collection
+    {
+        $term = trim($term);
+
+        if (mb_strlen($term) < self::SEARCH_MINIMUM) {
+            return new Collection;
+        }
+
+        $ids = $this->inboxFor($user)
+            ->map(fn (Conversation $conversation): int => (int) $conversation->getKey())
+            ->all();
+
+        if ($ids === []) {
+            return new Collection;
+        }
+
+        return Message::query()
+            ->whereIn('conversation_id', $ids)
+            // ILIKE because this is PostgreSQL and a search nobody can spell the case of is not
+            // a search. A message with no body is an attachment-only one and cannot match.
+            ->where('body', 'ILIKE', '%'.self::escapeLike($term).'%')
+            // The row's own conversation, with what `labelFor()` needs to name it: the label is
+            // per reader, so it cannot be a column and it cannot be a query per hit.
+            ->with(['author', 'conversation.project', 'conversation.dmOne', 'conversation.dmTwo'])
+            ->orderByDesc('id')
+            ->limit(max(1, $limit) + 1)
+            ->get();
+    }
+
+    /**
+     * Make a user's term mean itself inside a `LIKE` pattern.
+     *
+     * Without this a `%` typed into the search box matches everything and a `_` matches any
+     * character — not a security hole, the scope above is what holds, but a search that quietly
+     * ignores two of the characters on the keyboard.
+     */
+    private static function escapeLike(string $term): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $term);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The context panel
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * The files posted into this conversation, newest first.
+     *
+     * Read through the MESSAGES rather than off `files.message_id` directly, because the panel
+     * wants each file with the `message_attachments` pivot beside it — `kind` is how the file
+     * rides on its bubble and is not a fact about the file — and that is the same relation, and
+     * therefore the same answer, `MessageResource` already draws attachments from. Deriving the
+     * kind again from the mime type here would be a second opinion about a stored column.
+     *
+     * A file that has been removed drops out on its own: `attachments()` goes through the File
+     * model, which soft-deletes, so the row in the join table is not what decides whether there
+     * is a file.
+     *
+     * The caller has ALREADY established that this person may see the conversation. An
+     * attachment is exactly as visible as the thread it was posted into, which is the shape
+     * `messages()` above has and for the same reason.
+     *
+     * @return SupportCollection<int, File>
+     */
+    public function attachmentsIn(Conversation $conversation, int $limit = self::CONTEXT_FILES): SupportCollection
+    {
+        $limit = max(1, $limit);
+
+        /** @var Collection<int, Message> $carriers */
+        $carriers = $conversation->messages()
+            ->whereHas('attachments')
+            ->with(['attachments.uploader'])
+            ->reorder('id', 'desc')
+            ->limit($limit)
+            ->get();
+
+        return $carriers
+            ->flatMap(fn (Message $message): iterable => $message->attachments->sortByDesc('id')->values())
+            ->take($limit)
+            ->values();
+    }
+
+    /**
+     * This project's tasks, as far as THIS reader can see them, newest first.
+     *
+     * `Task::visibleTo()` and not the project's task list: somebody can be on a project channel
+     * and still not be on every task in it, and the panel is a shortcut into work rather than a
+     * second, unpoliced copy of the Tasks list. The caller has already asked
+     * `ProjectPolicy::view` about the project itself; this is the narrower question underneath
+     * it.
+     *
+     * @return Collection<int, Task>
+     */
+    public function projectTasksFor(User $user, Project $project, int $limit = self::CONTEXT_TASKS): Collection
+    {
+        return Task::query()
+            ->visibleTo($user)
+            ->where('project_id', $project->getKey())
+            ->orderByDesc('id')
+            ->limit(max(1, $limit))
+            ->get();
     }
 
     /*

@@ -175,10 +175,11 @@ overloaded so asking for one is a compile error rather than a 404 found in stagi
 The local cloud workspace has PostgreSQL 16 on `127.0.0.1:5432`, superuser `postgres`, trust auth (dev only), and Redis on `127.0.0.1:6379`.
 
 ## Known-failing baseline
-Measured 2026-09-27 at Phase 6's core (conversations, messages, realtime, Team) with
-`php vendor/bin/pest`: none failing (**1585 passed, ~8430 assertions**).
+Measured 2026-09-24 after the Messages redesign (search + context endpoints, the
+three-column page) with
+`php vendor/bin/pest`: none failing (**1614 passed, ~8535 assertions**). The suite now exceeds a 10-minute tool timeout, so it is run in two halves — see the note below.
 `vendor/bin/pint --test`: passed. `npx vue-tsc --noEmit`: passed. `npm run build`: passed. If
-your number is not 1585, that is a finding, not drift.
+your number is not 1614, that is a finding, not drift.
 
 **Two concurrent agents must not share a dev-server port.** `php artisan serve` defaults to
 the same port for both; the loser silently reads the winner's database, and three measurement
