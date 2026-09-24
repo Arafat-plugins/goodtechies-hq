@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Listeners\ConversationBroadcaster;
 use App\Listeners\NotificationDispatcher;
 use App\Models\User;
 use App\Services\SettingsService;
@@ -47,6 +48,14 @@ class AppServiceProvider extends ServiceProvider
         // and this line is the whole registration. That map is deliberately the only list of
         // "which events produce notifications" in the application.
         Event::subscribe(NotificationDispatcher::class);
+
+        // The live half, registered the same way and for the same reason. ConversationBroadcaster
+        // turns one MessagePosted into one ConversationActivity on `conversation.{id}` — the
+        // broadcast the channel in routes/channels.php was built for and never had
+        // (POLISH-BACKLOG §A.2). It is a SUBSCRIBER rather than a discovered handle() listener so
+        // that this line is its only registration: a class with both would be subscribed twice
+        // and would broadcast twice. Its subscribe() is the map.
+        Event::subscribe(ConversationBroadcaster::class);
     }
 
     /**

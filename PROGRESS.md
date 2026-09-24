@@ -621,6 +621,125 @@ would cost:
 
 ---
 
+### Chat colour — 24 Sep 2026 ✅
+
+Built out of turn, at the client's request: they tested the redesign and said the chat *"have
+not colorfull for chating"*. They were right — the redesign gave all five conversation types the
+channel treatment, which is correct for a room with eight people in it and wrong for a DM.
+
+**A DM is now two-sided.** The viewer's own messages sit right in a solid brand bubble
+(`--primary` / `--primary-foreground`, 4.99:1 light and 7.31:1 dark — the only solid pair in the
+token set that passes); the other person's sit left on `--muted`. No names, no avatars: there are
+two people and the side says which. Bubbles cap at 80% of the column on a phone and 60% from
+`lg`, so a one-word reply is a one-word bubble.
+
+**Channels keep their shape** — avatars, author lines, one side — and gain a `--brand-tint` band
+on the viewer's own messages, a real weight on the author name, and a `mentions_me` treatment
+that reads as a highlight instead of a hairline.
+
+`MessageBody` and `AttachmentCard` gained an `onAccent` prop, because a mention inside a brand
+bubble was `text-primary` on `--primary`: **1.00:1, invisible.** On accent a mention is semibold
+with a dotted underline and a link is a solid underline — weight and underline instead of hue,
+which is what §5.6 always required anyway.
+
+Every new pair was computed from `app.css` in both modes. **Two designs were changed because the
+measurement refused them** (M-20: an own row in a channel does not darken on hover, because under
+`--brand-tint-strong` the clock falls to 4.47:1; M-21: the focus ring on a brand bubble went
+opaque, because `ring-ring/50` measured 1.19:1 there). **Two bugs fell out of it** — see below.
+
+Decisions M-17…M-23. `MessageThread`'s public API is byte-identical, so the task Discussion panel
+and the project Discussion tab are unchanged in shape and got the improvements for free.
+
+### ⚠️ Found on the way: the focus ring is under the 3:1 floor **everywhere**
+
+`app.css` sets `outline-ring/50` and every control in this repo writes
+`focus-visible:ring-ring/50`. `DESIGN.md` §2.2 records the ring at 3.45:1 / 3.61:1 and marks both
+✅ — but that is the ring measured **opaque**, and the app renders it at 50%. Composited it is
+**1.87–1.93:1 in light and 2.31–2.44:1 in dark**. Computed twice, independently.
+
+This is not a messaging bug: it is every button, link, input and row in goodERP, and it means the
+"visible focus ring at every tab stop" line this repo has held itself to since Phase 0.5 was
+measuring *presence*, not *visibility*. Written up in `POLISH-BACKLOG.md` §E.1, and it should be
+fixed **before** the next gate makes an accessibility claim.
+
+### Live sync for messaging — 24 Sep 2026 ✅
+
+The client's report: *"i have send message as shahadat to yaseen .. but without reload yaseen
+didnot seeen any message."* Built out of turn, because it is the one they actually feel.
+
+**What was actually wrong.** `MessageService::post()` fired `MessagePosted` and the only
+subscriber was `NotificationDispatcher`. The `conversation.{id}` channel and its policy-backed
+auth callback had existed since Phase 6 and **nothing ever broadcast on them**; `MessageThread`
+exposed `refresh()` precisely so a socket could call it and **nothing called it**. The seam was
+real. The thing that hangs off it was never built — and "the seam is in place" was reported in a
+way the client reasonably read as "it works".
+
+**Server:** `App\Events\ConversationActivity` — `ShouldBroadcast` + `ShouldDispatchAfterCommit`,
+on `PrivateChannel('conversation.'.$id)`, `broadcastAs` `conversation.message`, carrying
+`{conversation_id, message_id}` **and nothing else** (M-25). Dispatched by
+`App\Listeners\ConversationBroadcaster` off `MessagePosted`, so all five conversation types ring
+by construction. 17 tests.
+
+**Client:** `resources/js/Components/Messages/live.ts` — one composable, four states. Socket
+connected → subscribe, **no timer at all**. Polling build, socket dropped, or no channel → poll.
+Tab hidden → nothing at all, including the socket handler (M-30), because a refresh marks the
+thread read and a hidden tab must not clear an unread count nobody looked at. Wired into
+`MessageThread` (10 s) and the rail's partial reload (15 s).
+
+**Measured, reproducing the client's own test** — Yaseen with the DM open, Shahadat posting from
+outside that browser:
+
+| Build | Thread | Rail |
+| --- | --- | --- |
+| **Polling — what their machine runs today** | 7.9–9.4 s, worst case 10 s | 8.9–14.2 s, worst case 15 s |
+| Socket (Reverb + queue worker, built and tested) | **375 ms** doorbell→paint | still up to 15 s |
+
+No reload, no navigation, no flash. Scroll position holds (scrolled to the top: `scrollTop 0 → 0`
+while `scrollHeight` grew); a half-typed draft, a picked file and the focus all survive; hidden
+for 25 s → **0 requests**, so nothing was marked read. Works on all three `MessageThread` mounts,
+so a task comment appears in the Discussion panel too.
+
+**Still needs a reload:** the Messages nav row's unread indicator anywhere else in the app; the
+announcement banner outside the Messages page (6-18); the task board, the dashboards and
+attendance (POLISH-BACKLOG §A.3). And on a socket build the **rail** is still a 15-second poll,
+because there is no per-user inbox channel — say that plainly rather than letting "live" imply
+the whole screen.
+
+**The launchers now turn the socket on** (M-37…M-40, same day, at the client's request).
+`start-hq.bat` and `dev-hq.bat` set `BROADCAST_CONNECTION=reverb`, `VITE_REALTIME=reverb`, the
+Reverb keys and `QUEUE_CONNECTION=database` in the process environment — not in `.env`, for the
+reason C-1a gives — and `start-hq.bat` opens two more windows: Reverb and a queue worker. The
+database queue was chosen over Redis because the `jobs` table is made by the `migrate` the
+launcher already runs, so it needs nothing installed on a Windows desktop.
+
+Verified end to end in the container with exactly those values: `event(ConversationActivity)` →
+a row in `jobs` → the worker → Reverb, **18.57 ms, no failure**, and Reverb starts and listens on
+127.0.0.1:8080.
+
+**Nothing there can stop the app starting.** If Reverb or the worker fails, the socket never
+reaches `connected`, the interval starts in the same tick and the header says "Reconnecting" —
+which is the behaviour of the day before. A listening 8080 means a pair is already up, so
+neither is started twice.
+
+**And a connected socket is not a working delivery chain** (M-39). A broadcast is a queued job,
+so somebody who closes the worker window has a socket that connects, subscribes, reports itself
+*live* and then never says anything again — silent, total, and worse than the poll it replaced.
+`LIVE_SAFETY_MS` is a 45-second read that runs even while the socket claims to be up, which
+turns that into a slow thread instead of a dead one. Four requests a minute on a visible screen,
+none behind a hidden tab.
+
+Decisions M-24…M-40. Suite **1631 passed**.
+
+## Deferred polish
+
+**`POLISH-BACKLOG.md`** (root) is the debt column, opened 24 Sep 2026 at the client's
+instruction — *"after all phases done then need to implement it perfectly on here"*. It holds
+three things: **live sync** (nothing broadcasts a message, nothing subscribes to
+`conversation.{id}`, and the client's machine is a polling build — so every screen but the bell
+needs a reload), **chat colour** (the redesign draws a DM the same way it draws a channel, which
+is wrong for a DM), and the full list of everything promised and not yet delivered. Read it
+before promising anything else.
+
 ## Next step
 
 **Phase 6's voice slice, then GATE D.** The Messages redesign (24 Sep) is in and synced;

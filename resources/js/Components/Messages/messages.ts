@@ -88,6 +88,26 @@ export interface ThreadPayload {
 
 export type ConversationTypeKey = 'team' | 'project' | 'task' | 'dm' | 'announcement';
 
+/**
+ * Which of the two chat treatments a conversation gets.
+ *
+ * - `sided` — a DM. Two people, so the SIDE says who spoke and the name is redundant; the
+ *   viewer's own messages sit right in a solid brand bubble and the other person's sit left.
+ * - `stacked` — every channel: team, announcements, a project channel, a task discussion. "Who
+ *   said this" is the fact worth carrying, so every message stays left with its avatar and its
+ *   author line, and the viewer's own gain a tint rather than a side.
+ *
+ * The 24 Sep redesign gave all five types `stacked`, which is right for four of them and wrong
+ * for the fifth (POLISH-BACKLOG §B). A `null` type — the project Discussion tab mounts through
+ * `emptyThread()` before its first fetch — is `stacked`, because a channel is what it turns out
+ * to be and a thread must not flip layout when the payload lands.
+ */
+export type ThreadLayout = 'sided' | 'stacked';
+
+export function threadLayout(type: ConversationTypeKey | null): ThreadLayout {
+    return type === 'dm' ? 'sided' : 'stacked';
+}
+
 /** One row of the Messages page's left rail. */
 export interface ConversationSummary {
     id: number;

@@ -15,6 +15,14 @@ import EmptyState from '@/Components/EmptyState.vue';
 import { FILE_ACCEPT, FILE_MAX_LABEL, rejectionFor } from '@/Components/Files/files';
 import MentionPicker from '@/Components/Messages/MentionPicker.vue';
 import MessageRow from '@/Components/Messages/MessageRow.vue';
+import {
+    THREAD_POLL_MS,
+    conversationChannel,
+    liveTransportIcon,
+    liveTransportLabel,
+    liveTransportWord,
+    useLiveRefresh,
+} from '@/Components/Messages/live';
 import type {
     MessagePerson,
     ThreadMessage,
@@ -25,6 +33,7 @@ import {
     MESSAGE_MAX_BODY,
     mutateMessage,
     renderThread,
+    threadLayout,
     useMentions,
 } from '@/Components/Messages/messages';
 import { Button } from '@/Components/ui/button';
@@ -56,6 +65,14 @@ import { cn } from '@/lib/utils';
  * of author, a longer gap, a change of day and the unread line each break the run. The decision
  * is made once for the whole list by `renderThread()` rather than per bubble.
  *
+ * ## Two layouts, one grouping rule
+ *
+ * `threadLayout(thread.type)` picks the treatment: a DM is `sided` — two columns of bubbles,
+ * no names, no avatars — and every channel is `stacked`, left-aligned with avatars and author
+ * lines. It changes only what a row DRAWS. The grouping, the day rules, the unread line, the
+ * live regions and `renderThread()` itself are identical in both, which is why a task
+ * discussion and a DM stay the same component.
+ *
  * ## Focus, which is the hard part of a chat screen
  *
  * **A new message never takes focus.** It is spoken by a polite live region and the list is
@@ -76,9 +93,20 @@ import { cn } from '@/lib/utils';
  *
  * `refresh()` re-reads the whole thread from the server and is the only way messages arrive.
  * A transport that learns a message was posted calls `refresh()`; it never paints a frame it
- * was handed, so what is on screen is always what the policy built. There is **no poll here**:
- * the only timer is the one that re-reads when the signed attachment links are about to lapse,
- * which is the Phase 2 behaviour and stops when the tab is hidden.
+ * was handed, so what is on screen is always what the policy built.
+ *
+ * Since POLISH-BACKLOG §A that transport exists and lives in `Messages/live.ts`: on a socket
+ * build it subscribes to `conversation.{id}` and calls `load()` on a ping, and on a polling
+ * build — which is what the client actually runs — it calls `load()` every ten seconds while
+ * the tab is visible. All three mounts get it, because the channel is derived from the
+ * payload's own `conversation_id` rather than passed in.
+ *
+ * **Nothing refreshes behind a hidden tab**, and that is a correctness rule rather than a
+ * saving: this component's `GET` is also what marks the thread read, so a hidden tab that kept
+ * reading would mark messages read that nobody has looked at.
+ *
+ * The other timer is older and unrelated: it re-reads when the signed attachment links are
+ * about to lapse, which is the Phase 2 behaviour and also stops when the tab is hidden.
  */
 
 const props = withDefaults(
@@ -106,6 +134,12 @@ const errorId = `${uid}-error`;
 const thread = ref<ThreadPayload>(props.thread);
 
 const loadError = ref<string | null>(null);
+/**
+ * The server has said this conversation is not available (404, which is how this backend says
+ * "not for you" everywhere). It is a permanent answer, so the live refresh stops asking —
+ * exactly as the bell removes itself on a 403 rather than polling a refusal every 15 seconds.
+ */
+const threadGone = ref(false);
 const refreshing = ref(false);
 /** Bumped per fetch so a slow answer for a thread that has moved on cannot land in it. */
 const token = ref(0);
@@ -253,6 +287,12 @@ const firstUnreadId = computed(() => thread.value.messages.find(isUnread)?.id ??
 /** Every message, with what it needs to know about its neighbours to be drawn. */
 const rendered = computed(() => renderThread(thread.value.messages, firstUnreadId.value));
 
+/**
+ * `sided` for a DM, `stacked` for every channel. Read from the payload's own `type`, so the
+ * three mounts of this component do not each have to know what they are showing.
+ */
+const layout = computed(() => threadLayout(thread.value.type));
+
 /* ------------------------------------------------------------------ announcing */
 
 /**
@@ -319,6 +359,36 @@ function keepAtBottom(wasAtBottom: boolean): void {
 
 /* ------------------------------------------------------------------ reading */
 
+/**
+ * A refresh must not throw away history the reader asked for.
+ *
+ * `GET` returns the newest window. Before this slice that was the only way a thread was ever
+ * re-read — by hand, by a post, or when the links lapsed — and replacing the list was harmless
+ * because the reader had just asked for it. Now it happens every ten seconds, and a reader who
+ * pressed "Load earlier messages" and is sitting up in yesterday would have the ground taken
+ * out from under them: the list would shrink back to the newest window and the scroll position
+ * would land somewhere else entirely.
+ *
+ * So anything already loaded that is older than the fresh window is kept in front of it, and
+ * `has_more` stays the answer that belongs to the OLDEST message on screen rather than the one
+ * the newest window came with.
+ */
+function keepLoadedHistory(current: ThreadPayload, payload: ThreadPayload): ThreadPayload {
+    const oldest = payload.messages[0]?.id ?? null;
+
+    if (oldest === null) {
+        return payload;
+    }
+
+    const earlier = current.messages.filter((message) => message.id < oldest);
+
+    if (earlier.length === 0) {
+        return payload;
+    }
+
+    return { ...payload, messages: [...earlier, ...payload.messages], has_more: current.has_more };
+}
+
 async function load(before: number | null = null): Promise<void> {
     const mine = ++token.value;
     const wasAtBottom = before === null && atBottom();
@@ -344,6 +414,10 @@ async function load(before: number | null = null): Promise<void> {
                 ? 'This conversation is not available.'
                 : 'The conversation could not be loaded.';
 
+            // A refusal is not a transient failure, so the live refresh stops asking. Anything
+            // else — a dropped connection, a 500 — is worth the next tick.
+            threadGone.value = response.status === 404;
+
             return;
         }
 
@@ -355,7 +429,7 @@ async function load(before: number | null = null): Promise<void> {
 
         if (before === null) {
             announce(payload.messages);
-            thread.value = payload;
+            thread.value = keepLoadedHistory(thread.value, payload);
             keepAtBottom(wasAtBottom);
         } else {
             // Older history, prepended. `seen` is untouched: nothing here is new.
@@ -374,6 +448,13 @@ async function load(before: number | null = null): Promise<void> {
     } finally {
         if (mine === token.value) {
             refreshing.value = false;
+
+            if (before === null) {
+                // This thread has just re-read on its own account — on mount, by hand, or
+                // because a post landed. The interval restarts from now, so a post is never
+                // followed a second later by a poll asking the same question.
+                live.markFresh();
+            }
         }
     }
 }
@@ -388,6 +469,35 @@ function loadEarlier(): void {
 
 /** What a realtime transport calls. It never paints a frame it was handed. */
 defineExpose({ refresh: () => load() });
+
+/* ------------------------------------------------------------------ keeping current */
+
+/**
+ * The transport, for all three mounts at once.
+ *
+ * The channel is derived from the payload's own `conversation_id`, which this component has
+ * had since Phase 6 — so the Messages page, the project Discussion tab and the task panel all
+ * gain this without passing anything new, and a comment on a task appears in the panel exactly
+ * the way a DM appears on the Messages page. `defineExpose` is untouched: `refresh` is still
+ * the one method, and this is simply the first thing in the application that calls it.
+ *
+ * `canRefresh` keeps the automatic half out of two situations the manual half was never in: a
+ * post that is in flight (it re-reads by itself when it lands, and a second read racing it
+ * would only decide the winner by network timing), and a conversation the server has already
+ * refused.
+ */
+const live = useLiveRefresh(
+    () => conversationChannel(thread.value.conversation_id),
+    () => void load(),
+    {
+        intervalMs: THREAD_POLL_MS,
+        canRefresh: () => !posting.value && !threadGone.value,
+    },
+);
+
+const liveWord = computed(() => liveTransportWord(live.transport.value, THREAD_POLL_MS));
+const liveLabel = computed(() => liveTransportLabel(live.transport.value, THREAD_POLL_MS));
+const liveIcon = computed(() => liveTransportIcon(live.transport.value));
 
 watch(
     () => [props.thread.conversation_id, props.thread] as const,
@@ -552,21 +662,40 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     {{ description }}
                 </p>
             </div>
-            <!--
-                Not disabled while it works: disabling the control somebody just pressed drops
-                their focus to the body. `token` already makes a second click harmless.
-            -->
-            <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                class="shrink-0"
-                :aria-busy="refreshing || undefined"
-                aria-label="Refresh this conversation"
-                @click="load()"
-            >
-                <RefreshCw :class="refreshing && 'animate-spin'" aria-hidden="true" />
-            </Button>
+            <div class="flex shrink-0 items-center gap-1">
+                <!--
+                    How this thread is keeping itself current, said quietly and said honestly.
+                    The word is the fact — a screen reader always gets the whole sentence, and
+                    from `sm` the short form is on screen — so nothing here is carried by the
+                    icon or by colour alone (DESIGN.md §5.6). It is **never** "Live" on a
+                    polling build.
+                -->
+                <span
+                    class="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+                    :title="liveLabel"
+                >
+                    <component :is="liveIcon" class="size-3.5 shrink-0" aria-hidden="true" />
+                    <span aria-hidden="true" class="hidden sm:inline">{{ liveWord }}</span>
+                    <span class="sr-only">{{ liveLabel }}</span>
+                </span>
+
+                <!--
+                    Not disabled while it works: disabling the control somebody just pressed
+                    drops their focus to the body. `token` already makes a second click
+                    harmless.
+                -->
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    class="shrink-0"
+                    :aria-busy="refreshing || undefined"
+                    aria-label="Refresh this conversation"
+                    @click="load()"
+                >
+                    <RefreshCw :class="refreshing && 'animate-spin'" aria-hidden="true" />
+                </Button>
+            </div>
         </div>
 
         <!-- New messages are spoken here. Focus stays wherever the reader put it. -->
@@ -686,6 +815,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                                 :message="entry.message"
                                 :starts-run="entry.startsRun"
                                 :links-stale="linksStale"
+                                :layout="layout"
                                 @announce="actionStatus = $event"
                             />
                         </li>

@@ -58,6 +58,35 @@ REM     APP_NAME="goodERP"
 REM ...and then this line does nothing, which is fine.
 set "APP_NAME=goodERP"
 
+REM ---------- Realtime: Reverb ----------
+REM `composer run dev` starts Laravel, the queue worker, Vite and - because
+REM laravel/reverb is installed - the websocket server, all in one window. These
+REM keys are what makes the browser actually use it, and they are set here for
+REM the same reason APP_NAME above is: a real environment variable beats .env,
+REM which this tooling cannot write to because it holds your passwords.
+REM
+REM They must match start-hq.bat's block exactly, or a page built by one and
+REM served by the other cannot connect.
+REM
+REM If the socket does not come up, nothing breaks: every live screen falls back
+REM to re-reading on a timer.
+set "BROADCAST_CONNECTION=reverb"
+set "QUEUE_CONNECTION=database"
+set "REVERB_APP_ID=goodhqlocal"
+set "REVERB_APP_KEY=goodhqlocalkey"
+set "REVERB_APP_SECRET=goodhqlocalsecret"
+set "REVERB_HOST=127.0.0.1"
+set "REVERB_PORT=8080"
+set "REVERB_SCHEME=http"
+set "REVERB_SERVER_HOST=127.0.0.1"
+set "REVERB_SERVER_PORT=8080"
+set "REVERB_SCALING_ENABLED=false"
+set "VITE_REALTIME=reverb"
+set "VITE_REVERB_APP_KEY=goodhqlocalkey"
+set "VITE_REVERB_HOST=127.0.0.1"
+set "VITE_REVERB_PORT=8080"
+set "VITE_REVERB_SCHEME=http"
+
 for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_PASSWORD=" .env')          do set "SEED_PW=%%b"
 for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_TWO_FACTOR_SECRET=" .env') do set "SEED_2FA=%%b"
 

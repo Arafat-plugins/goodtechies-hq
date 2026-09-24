@@ -7,6 +7,10 @@ This repo is **GoodTechies HQ**, an internal agency operating system (Laravel + 
 ## The two files that run this project
 
 1. `PROGRESS.md` — what is built, what is in progress, which GATE we are waiting on, decisions taken, questions for the client. **Read it first, every session.**
+1b. `POLISH-BACKLOG.md` — work that is known, named and **deliberately deferred to after the
+   phases**: live sync across every screen, the chat's colour treatment, and everything promised
+   and not yet delivered. Read it before telling the client something is coming — it may already
+   be on there. Add to it on the day you find something; never build from it out of turn.
 2. `docs/master-prompt-v1.md` — the plan: Part 0 (session protocol + kick-off prompts), Part B (locked stack, VPS layout), Part C (privacy/security rules that never bend), Part D (domain spec), Part E (the 13 vertical phases with tests and gates), Part I (design references in `docs/design-refs/`), Part J (how to split a phase into `dispatch` briefs), Part H (what must NOT be built). Read Part 0, Part C, Part J and the current phase's section of Part E before writing code.
 
 If these two disagree with anything you assume, they win. If they are silent, pick the simplest option that satisfies the client spec and record it in `PROGRESS.md` → Decisions.

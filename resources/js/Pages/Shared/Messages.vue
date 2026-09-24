@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, Link, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     ArrowLeft,
     Hash,
@@ -17,6 +17,16 @@ import EmptyState from '@/Components/EmptyState.vue';
 import ConversationContextPanel from '@/Components/Messages/ConversationContextPanel.vue';
 import MessagesRail from '@/Components/Messages/MessagesRail.vue';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
+import {
+    RAIL_POLL_MS,
+    THREAD_POLL_MS,
+    conversationChannel,
+    liveTransportIcon,
+    liveTransportLabel,
+    liveTransportWord,
+    useLiveRefresh,
+    useLiveStatus,
+} from '@/Components/Messages/live';
 import type {
     AnnouncementBanner,
     ConversationSummary,
@@ -65,10 +75,15 @@ import type { SharedProps } from '@/types';
  * phone is on is therefore in the URL like everything else here, rather than in a piece of
  * component state that the next `Link` click would throw away.
  *
- * This page has **no poll and no realtime of its own**. It reads what the server rendered, and
- * `MessageThread` re-reads its own thread when told to; the transport that does the telling is
- * a separate slice and lands on that one method — which is also what the Refresh control in the
- * conversation header calls, through `defineExpose`.
+ * ## How it keeps itself current
+ *
+ * `MessageThread` keeps its own thread current through `Messages/live.ts` — a socket where
+ * there is one, a ten-second read where there is not — so this page is responsible only for
+ * what `MessageThread` cannot see: the rail's last-message lines, its unread pills and the
+ * announcement banner. Those are Inertia props, so they are refreshed with a **partial**
+ * reload of exactly those two props, every 15 seconds and again whenever the open thread
+ * pings. The Refresh control in the conversation header still reaches the thread through the
+ * one method it exposes, which is what that seam is for.
  */
 
 defineOptions({
@@ -168,6 +183,68 @@ const threadEl = ref<InstanceType<typeof MessageThread> | null>(null);
 function refresh(): void {
     threadEl.value?.refresh();
 }
+
+/* ------------------------------------------------------------------ keeping the rail current */
+
+/**
+ * The rail, the unread pills and the announcement banner are Inertia props, so they refresh the
+ * Inertia way: a **partial** reload of exactly the two props that can change without a
+ * navigation.
+ *
+ * `active` is deliberately NOT in the list. It is the open thread's payload, and reloading it
+ * would hand `MessageThread` a new object — resetting its unread line, re-announcing, and
+ * possibly moving the scroll — for a thread that is already keeping itself current through its
+ * own channel. `people` is the @mention and new-DM roster and does not move on a message.
+ * `preserveState` keeps this page's own component state (which thread is open, the details
+ * panel, the thread's composer) and `preserveScroll` keeps the rail where the reader left it.
+ */
+const railReloading = ref(false);
+
+function reloadRail(): void {
+    if (railReloading.value) {
+        return;
+    }
+
+    railReloading.value = true;
+
+    // `preserveState` and `preserveScroll` are not passed because `router.reload()` forces both
+    // to true itself (`doReload`), and Inertia's own types refuse them here to say so. They are
+    // the reason this is a `reload` and not a `visit`.
+    router.reload({
+        only: ['conversations', 'announcement'],
+        onFinish: () => {
+            railReloading.value = false;
+        },
+    });
+}
+
+/**
+ * **There is no per-user inbox channel**, so the rail is poll-only — `null` is that mode, said
+ * out loud. A message in a conversation this reader does not have open therefore takes up to
+ * `RAIL_POLL_MS` to reach the rail even on a socket build; giving it a socket needs a channel
+ * that does not exist yet and is out of this slice.
+ */
+useLiveRefresh(null, reloadRail, { intervalMs: RAIL_POLL_MS });
+
+const activeChannel = computed(() => conversationChannel(activeId.value));
+
+/**
+ * …and one refresh whenever the OPEN thread pings, so the row the reader is looking at is not
+ * the last thing on screen to know. `poll: false` because the 15-second poll above already
+ * covers this list: two timers for one rail would be two requests for one answer.
+ */
+useLiveRefresh(activeChannel, reloadRail, { poll: false });
+
+/**
+ * What the open thread is doing, for the little indicator in its header. This reads the
+ * transport; it subscribes to nothing and starts no timer of its own — the thread below owns
+ * the refreshing and this owns only the sentence about it.
+ */
+const threadTransport = useLiveStatus(activeChannel);
+
+const liveWord = computed(() => liveTransportWord(threadTransport.value, THREAD_POLL_MS));
+const liveLabel = computed(() => liveTransportLabel(threadTransport.value, THREAD_POLL_MS));
+const liveIcon = computed(() => liveTransportIcon(threadTransport.value));
 
 /* ------------------------------------------------------------------ presentation */
 
@@ -314,6 +391,23 @@ const activeLine = computed(() =>
                                     {{ activeLine }}
                                 </p>
                             </div>
+
+                            <!--
+                                How this thread is keeping itself current. A word and a mark,
+                                not a widget: a screen reader always hears the whole sentence
+                                and from `sm` the short form is on screen, so the fact is never
+                                carried by the icon or by colour alone. It says "Live" only
+                                when there is genuinely a socket behind it — on the client's
+                                own polling build it says how often it is checking instead.
+                            -->
+                            <span
+                                class="inline-flex min-w-0 shrink-0 items-center gap-1 text-xs text-muted-foreground"
+                                :title="liveLabel"
+                            >
+                                <component :is="liveIcon" class="size-3.5 shrink-0" aria-hidden="true" />
+                                <span aria-hidden="true" class="hidden sm:inline">{{ liveWord }}</span>
+                                <span class="sr-only">{{ liveLabel }}</span>
+                            </span>
 
                             <TooltipProvider :delay-duration="150">
                                 <Tooltip>

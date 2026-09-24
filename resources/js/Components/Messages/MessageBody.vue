@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { MessagePerson } from '@/Components/Messages/messages';
+import { cn } from '@/lib/utils';
 
 /**
  * What somebody actually wrote: their line breaks, their links as plain links, and the names
@@ -30,12 +31,54 @@ import type { MessagePerson } from '@/Components/Messages/messages';
  * `message_mentions`, which is the record of who was ADDRESSED. Typing "@nobody" marks nothing,
  * so the emphasis means what the notification means. The mark is `font-medium` plus an
  * `sr-only` "mentioned", never a tint alone (DESIGN.md §5.6).
+ *
+ * ## `onAccent` — why a body needs to know what it is sitting on
+ *
+ * A DM draws the viewer's own messages in a solid `bg-primary` bubble. A mention inside one is
+ * `text-primary`: **brand on brand, 1.00:1, invisible.** So on an accent surface both the
+ * mention and the link drop to `text-primary-foreground` (4.99:1 light / 7.31:1 dark, measured)
+ * and separate themselves by WEIGHT and UNDERLINE STYLE rather than by hue — a mention is
+ * semibold with a dotted underline, a link is a solid underline at normal weight.
+ *
+ * That is not a compromise forced by the bubble, it is the rule arriving early: §5.6 already
+ * says a mention may never be carried by colour alone, and the `sr-only` "mentioned" is there
+ * in both cases. The accent variant just makes the sighted reading honest too.
  */
 
-const props = defineProps<{
-    body: string;
-    mentions: MessagePerson[];
-}>();
+const props = withDefaults(
+    defineProps<{
+        body: string;
+        mentions: MessagePerson[];
+        /** This body sits on a `--primary` fill: hue is unavailable, so weight carries. */
+        onAccent?: boolean;
+    }>(),
+    { onAccent: false },
+);
+
+/**
+ * A link is an underline in both variants; only its colour and weight move.
+ *
+ * The focus ring has to move too. `ring-ring/50` is `--brand` at 50 %, which over `--primary`
+ * composites to 1.19:1 — a ring nobody can see. On accent it becomes an opaque
+ * `--primary-foreground` ring, 4.99:1 / 7.31:1. Everywhere else it is untouched.
+ */
+const linkClass = computed(() =>
+    cn(
+        'rounded-sm break-all underline underline-offset-2 focus-visible:ring-3 focus-visible:outline-none',
+        props.onAccent
+            ? 'text-primary-foreground decoration-primary-foreground focus-visible:ring-primary-foreground'
+            : 'focus-visible:ring-ring/50',
+    ),
+);
+
+const mentionClass = computed(() =>
+    cn(
+        'break-words',
+        props.onAccent
+            ? 'font-semibold text-primary-foreground underline decoration-dotted underline-offset-2'
+            : 'font-medium text-primary',
+    ),
+);
 
 type Segment =
     | { kind: 'text'; value: string }
@@ -115,12 +158,12 @@ function split(value: string, pattern: RegExp, kind: 'link' | 'mention'): Segmen
                 :href="segment.value"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="rounded-sm break-all underline underline-offset-2 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                :class="linkClass"
             >{{ segment.value }}<span class="sr-only"> (opens in a new tab)</span></a>
 
             <strong
                 v-else-if="segment.kind === 'mention'"
-                class="font-medium break-words text-primary"
+                :class="mentionClass"
             >{{ segment.value }}<span class="sr-only"> (mentioned)</span></strong>
 
             <template v-else>{{ segment.value }}</template>

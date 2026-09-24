@@ -40,6 +40,42 @@ REM Nobody is un-enrolled either - every secret and recovery code stays in
 REM the database, so deleting this line brings the prompt straight back.
 set "AUTH_TWO_FACTOR_ENFORCED=false"
 
+REM ---------- Realtime: Reverb + a queue worker ----------
+REM Messages, the notification bell and task status all arrive over a websocket
+REM when one is running, and fall back to a slow re-read when it is not. These
+REM lines turn the socket ON for this machine.
+REM
+REM They are set HERE and not in .env for the same reason APP_NAME below is: a
+REM real environment variable beats the file, and this tooling cannot write to
+REM .env because that file holds your database and seed passwords. Child windows
+REM inherit these, so the Reverb server and the queue worker started further
+REM down get the same keys the app was built with.
+REM
+REM VITE_ keys are read by the BUILD, not by the server - which is why they are
+REM set before step 4 and why changing them means building again. The launcher
+REM builds every start, so that happens by itself.
+REM
+REM These credentials are local-only. Reverb listens on 127.0.0.1, nothing off
+REM this machine can reach it, and the VPS uses its own keys from its own .env.
+set "BROADCAST_CONNECTION=reverb"
+REM The database queue, not Redis: it needs nothing installed, and `migrate`
+REM above has already made the jobs table.
+set "QUEUE_CONNECTION=database"
+set "REVERB_APP_ID=goodhqlocal"
+set "REVERB_APP_KEY=goodhqlocalkey"
+set "REVERB_APP_SECRET=goodhqlocalsecret"
+set "REVERB_HOST=127.0.0.1"
+set "REVERB_PORT=8080"
+set "REVERB_SCHEME=http"
+set "REVERB_SERVER_HOST=127.0.0.1"
+set "REVERB_SERVER_PORT=8080"
+set "REVERB_SCALING_ENABLED=false"
+set "VITE_REALTIME=reverb"
+set "VITE_REVERB_APP_KEY=goodhqlocalkey"
+set "VITE_REVERB_HOST=127.0.0.1"
+set "VITE_REVERB_PORT=8080"
+set "VITE_REVERB_SCHEME=http"
+
 REM ---------- Product name ----------
 REM The app reads its name from APP_NAME. Setting it here means it takes effect
 REM without editing .env - which this tooling cannot write to anyway, because
@@ -191,6 +227,35 @@ if exist "public\hot" (
 )
 echo.
 
+REM ---------- 3c. Realtime: the two windows the socket needs ----------
+REM Two processes, and the app is only instant when both are up:
+REM
+REM   - the QUEUE WORKER, which actually sends a broadcast. A broadcast here is
+REM     a queued job on purpose, so a stopped Reverb costs a retried job instead
+REM     of a 500 on a message that was already written. No worker, no delivery.
+REM   - REVERB, the websocket server the browser connects to.
+REM
+REM Nothing breaks if either fails to start. The browser falls back to
+REM re-reading on a timer, which is how this worked before the socket existed -
+REM slower, never wrong. So this step never blocks the app from starting.
+REM
+REM A listening port 8080 means a pair is already up from an earlier window, so
+REM neither is started twice.
+echo === realtime === >> "%LOG%"
+set "REALTIME_UP="
+netstat -ano -p tcp 2>nul | findstr /c:"127.0.0.1:8080" | findstr /i "LISTENING" >nul 2>&1 && set "REALTIME_UP=1"
+
+if defined REALTIME_UP (
+    echo    [ok] realtime is already running in another window.
+    echo realtime already listening on 8080 >> "%LOG%"
+) else (
+    start "goodERP queue worker - leave this open" cmd /k php artisan queue:work --tries=1 --sleep=1 --timeout=60
+    start "goodERP realtime ^(Reverb^) - leave this open" cmd /k php artisan reverb:start --host=127.0.0.1 --port=8080
+    echo    [ok] started the realtime server and the queue worker in two new windows.
+    echo started reverb + queue:work >> "%LOG%"
+)
+echo.
+
 REM ---------- 4. Serve ----------
 for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_PASSWORD=" .env')          do set "SEED_PW=%%b"
 for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_TWO_FACTOR_SECRET=" .env') do set "SEED_2FA=%%b"
@@ -216,6 +281,11 @@ echo   authenticator app needed:
 echo     php artisan hq:two-factor-code shahadat@goodtechies.test
 echo.
 echo   LEAVE THIS WINDOW OPEN. The app only works while it runs.
+echo.
+echo   Two other windows opened beside this one - the realtime server and
+echo   the queue worker. Leave those open too: they are what makes a new
+echo   message appear without a reload. Close them and the app still
+echo   works, it just re-reads on a timer instead.
 echo ============================================================
 echo.
 echo === php artisan serve === >> "%LOG%"

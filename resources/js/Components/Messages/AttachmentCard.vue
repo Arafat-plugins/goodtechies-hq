@@ -20,6 +20,19 @@ import { cn } from '@/lib/utils';
  * fetch. When the thread above knows its signatures have lapsed it passes `stale`, and the card
  * stops offering a link it knows is dead — the name stays, as text, because "this file exists
  * and its link needs refreshing" is a truer thing to show than a button that 404s.
+ *
+ * ## The card owns its foreground, and that is a bug fix
+ *
+ * The file name was `text-xs font-medium` with no colour, so it INHERITED. Inside a DM's own
+ * bubble the inherited colour is `--primary-foreground` — `#FCFCFC` on this card's `#FFFFFF`,
+ * a file name at 1.01:1. A card that declares its own surface has to declare its own foreground
+ * with it, so `text-card-foreground` is now on the root and nothing in here inherits from
+ * whatever the card was dropped into. Every pair inside is then measured against `--card`:
+ * 13.63:1 / 16.25:1 for the name, 5.51:1 / 6.63:1 for the meta line.
+ *
+ * `onAccent` only drops the hairline. `--border` on a `--primary` fill is a grey line on coral
+ * that measures 1.31:1 and reads as grime; the card's own fill against the bubble is the edge
+ * (5.13:1 light / 6.66:1 dark), which is a stronger boundary than the border ever was.
  */
 
 const props = withDefaults(
@@ -29,8 +42,10 @@ const props = withDefaults(
         stale?: boolean;
         /** Render an image or a voice note in place, above the card's own line. */
         inline?: boolean;
+        /** This card sits inside a `--primary` bubble: drop the hairline, keep the surface. */
+        onAccent?: boolean;
     }>(),
-    { stale: false, inline: false },
+    { stale: false, inline: false, onAccent: false },
 );
 
 const rendersImage = computed(() => props.inline && !props.stale && props.file.kind === 'image');
@@ -53,7 +68,14 @@ const meta = computed(() => {
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-2 rounded-md border bg-card p-2 shadow-flat">
+    <div
+        :class="
+            cn(
+                'flex min-w-0 flex-col gap-2 rounded-md border bg-card p-2 text-card-foreground shadow-flat',
+                onAccent && 'border-transparent',
+            )
+        "
+    >
         <a
             v-if="rendersImage"
             :href="file.url"
