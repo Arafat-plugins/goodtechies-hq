@@ -7,6 +7,7 @@ import TaskViewSwitcher from '@/Components/Tasks/TaskViewSwitcher.vue';
 import type { BoardPayload, TransitionMap } from '@/Components/Tasks/taskBoard';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
+import { usePagePoll } from '@/lib/pagePoll';
 
 defineOptions({ layout: EmployeeLayout });
 
@@ -31,6 +32,9 @@ defineProps<{
     /** `TagPolicy::create`, answered by the controller — whether the tag manager is offered. */
     canManageTags: boolean;
 }>();
+
+/** Part 0.5 refresh rule: somebody else moves a card. */
+usePagePoll(['board']);
 
 /** Refusals come back 200 with a flashed sentence. The toaster says it once (§5.19). */
 useFlashAsToast();

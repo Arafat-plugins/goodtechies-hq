@@ -79,8 +79,14 @@ export const adminNav: NavGroup[] = [
             // longer claim, so the Calendar lights the Calendar and nothing else.
             { label: 'Calendar', href: '/admin/tasks/calendar', icon: CalendarDays },
             { label: 'Meetings', icon: Video, phase: 7 },
-            { label: 'Team', icon: UsersRound, phase: 6 },
-            { label: 'Messages', icon: MessagesSquare, phase: 6 },
+            // Phase 6. The shared Team directory — who works here is a fact about the agency
+            // and not about the shell, so this points at `/team` and the page picks
+            // `AdminLayout` from the viewer's surface, exactly as My Leave does. Part D §2 puts
+            // it in WORK, next to Messages, which is the only thing it does.
+            { label: 'Team', href: '/team', icon: UsersRound },
+            // Phase 6. Shared with the Employee surface — one route, one page, the layout
+            // picked from the viewer's own surface.
+            { label: 'Messages', href: '/messages', icon: MessagesSquare },
         ],
     },
     {

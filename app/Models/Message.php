@@ -62,6 +62,23 @@ class Message extends Model
     }
 
     /**
+     * The people this message named (Phase 6).
+     *
+     * A mention is a record that somebody was ADDRESSED, not a permission: nothing in
+     * ConversationPolicy reads this relation, and MessageService refuses to write a row for
+     * anybody who cannot already see the conversation — so a mention can never widen an
+     * audience. The same rule `members()` lives under, stated on a second table.
+     *
+     * @return BelongsToMany<User, $this>
+     */
+    public function mentions(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'message_mentions', 'message_id', 'user_id')
+            ->withTimestamps()
+            ->orderBy('users.id');
+    }
+
+    /**
      * The attachments as the bubble draws them: the file, plus how it rides on the message.
      *
      * Through `message_attachments`, so `kind` and `duration_seconds` arrive on the pivot. File

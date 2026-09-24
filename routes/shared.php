@@ -3,12 +3,15 @@
 use App\Http\Controllers\Shared\AttendanceController;
 use App\Http\Controllers\Shared\FileDownloadController;
 use App\Http\Controllers\Shared\LeaveController;
+use App\Http\Controllers\Shared\MessageController;
 use App\Http\Controllers\Shared\NotificationController;
 use App\Http\Controllers\Shared\ProfileController;
 use App\Http\Controllers\Shared\ProfilePasswordController;
 use App\Http\Controllers\Shared\ProfileSessionController;
 use App\Http\Controllers\Shared\ProfileTwoFactorController;
+use App\Http\Controllers\Shared\TeamController;
 use App\Models\Notification;
+use App\Support\Permission;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
@@ -52,6 +55,66 @@ Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
             Route::post('/read-all', [NotificationController::class, 'readAll'])->name('read-all');
             Route::post('/{notification}/read', [NotificationController::class, 'read'])->name('read');
         });
+
+    // Messages (master prompt Part D §10, Phase 6): the team channel, the project channels,
+    // the announcements channel and this person's DMs. Shared rather than one set per surface
+    // for the reason the notification routes above are: whose mail a thread is belongs to the
+    // PERSON, not to the shell they are in, and three copies of these five routes would be
+    // three places for "may this person read this conversation" to be answered differently.
+    // `Pages/Shared/Messages.vue` picks its layout from `auth.user.surface`, as Profile,
+    // Attendance and Leave do.
+    //
+    // **`can:messages.use` on the group is "the Accountant has no messaging routes".** The
+    // spec's sentence is a rule about a capability, not about a person, so it is spelled as a
+    // permission and the Accountant is refused by holding none of it — the same shape
+    // `can:viewAny` on the notification group has, and the same reason no policy in this
+    // codebase names a role. Every one of these five routes answers 403 for them, the Messages
+    // nav row is absent from `navigation/accountant.ts`, and nothing anywhere says "Accountant".
+    //
+    // The task discussion is NOT here. It is read inside its task, on the task's own surface,
+    // where it has been since Phase 2.
+    //
+    // `{conversation}` is `whereNumber`ed so `messages/direct/{user}` cannot be read as a
+    // conversation called "direct". A conversation this person may not open is **404** from the
+    // controller, never 403: they do not learn whether the id exists (Part C).
+    Route::prefix('messages')
+        ->name('messages.')
+        ->middleware('can:'.Permission::MessagesUse->value)
+        ->group(function () {
+            Route::get('/', [MessageController::class, 'index'])->name('index');
+
+            // Declared before `{conversation}` for readability; they cannot collide, because
+            // this one is two segments deep and that one is numeric.
+            Route::post('/direct/{user}', [MessageController::class, 'direct'])
+                ->whereNumber('user')
+                ->name('direct');
+
+            Route::get('/{conversation}', [MessageController::class, 'show'])
+                ->whereNumber('conversation')
+                ->name('show');
+            Route::post('/{conversation}', [MessageController::class, 'store'])
+                ->whereNumber('conversation')
+                ->name('store');
+            Route::post('/{conversation}/read', [MessageController::class, 'read'])
+                ->whereNumber('conversation')
+                ->name('read');
+        });
+
+    // The Team directory (Part D §2: Admin WORK → Team, Employee Messages → Team, Phase 6).
+    //
+    // Shared, and outside the `messages` prefix but behind the SAME key, for the two reasons
+    // above: who works here is a fact about the agency rather than about a shell, and the
+    // plan's *"Accountant has no messaging routes"* is a rule about a capability. A directory
+    // whose only action is "send this person a message" is a messaging route, so it takes
+    // `messages.use` and the Accountant gets 403 from the same key as the five above — while
+    // still appearing IN the directory, because they work here. See TeamController.
+    //
+    // One route and one verb. There is no `/team/{employee}`: a person's page is their
+    // attendance month or their profile, both of which already exist and are both scoped by
+    // something this screen deliberately is not.
+    Route::get('/team', [TeamController::class, 'index'])
+        ->middleware('can:'.Permission::MessagesUse->value)
+        ->name('team.index');
 
     // Somebody's attendance, and the clock (master prompt Part D §8, Phase 4). Shared rather
     // than one set per surface for the reason the notification routes above are: BOTH Admins

@@ -18,10 +18,18 @@ DB_MIGRATOR_PASSWORD="${DB_MIGRATOR_PASSWORD:-}"
 DB_APP_PASSWORD="${DB_APP_PASSWORD:-}"
 DB_RO_PASSWORD="${DB_RO_PASSWORD:-}"
 SEED_PASSWORD="${SEED_PASSWORD:-}"
+# Realtime (Phase 6). REALTIME=reverb installs with the websocket on; anything else installs
+# the polling mode, which is what a first install gets and what Part B calls acceptable.
+REALTIME="${REALTIME:-polling}"
+REVERB_APP_ID="${REVERB_APP_ID:-}"
+REVERB_APP_KEY="${REVERB_APP_KEY:-}"
+REVERB_APP_SECRET="${REVERB_APP_SECRET:-}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
 SKIP_CERTBOT="${SKIP_CERTBOT:-0}"
 SKIP_FIREWALL="${SKIP_FIREWALL:-0}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
+# The port the Reverb process listens on, behind Nginx. Loopback only; see deploy/nginx.conf.
+REVERB_PORT="${REVERB_PORT:-8080}"
 
 APP_USER="www-data"
 PHP_VERSION="8.3"
@@ -268,7 +276,17 @@ if [ -z "$SEED_PASSWORD" ]; then
     SEED_PASSWORD="$(gen_secret)"
     GENERATED_SEED_PASSWORD="$SEED_PASSWORD"
 fi
-echo "database and seed passwords resolved (not printed)"
+# Reverb's application credentials (Phase 6). Generated when blank and kept when not, like
+# every other secret here — re-running install.sh must not invalidate the key that is already
+# compiled into the built assets. They are generated even on a polling install, so that
+# turning realtime on later is one .env line and a release rather than a hunt for a generator.
+[ -n "$REVERB_APP_ID" ] || REVERB_APP_ID="$(env_get REVERB_APP_ID)"
+[ -n "$REVERB_APP_ID" ] || REVERB_APP_ID="$(gen_secret)"
+[ -n "$REVERB_APP_KEY" ] || REVERB_APP_KEY="$(env_get REVERB_APP_KEY)"
+[ -n "$REVERB_APP_KEY" ] || REVERB_APP_KEY="$(gen_secret)"
+[ -n "$REVERB_APP_SECRET" ] || REVERB_APP_SECRET="$(env_get REVERB_APP_SECRET)"
+[ -n "$REVERB_APP_SECRET" ] || REVERB_APP_SECRET="$(gen_secret)"
+echo "database, seed and Reverb secrets resolved (not printed)"
 
 step "database $DB_NAME"
 if [ "$(psql_value postgres "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'")" = "1" ]; then
@@ -301,6 +319,28 @@ env_set DB_PASSWORD "$DB_APP_PASSWORD"
 env_set DB_MIGRATOR_PASSWORD "$DB_MIGRATOR_PASSWORD"
 env_set DB_RO_PASSWORD "$DB_RO_PASSWORD"
 env_set SEED_PASSWORD "$SEED_PASSWORD"
+
+# Realtime. The credentials always; the MODE only when this run was asked for one, so that a
+# re-run of install.sh never quietly turns somebody's socket off (or on).
+env_set REVERB_APP_ID "$REVERB_APP_ID"
+env_set REVERB_APP_KEY "$REVERB_APP_KEY"
+env_set REVERB_APP_SECRET "$REVERB_APP_SECRET"
+env_set REVERB_SERVER_HOST "127.0.0.1"
+env_set REVERB_SERVER_PORT "$REVERB_PORT"
+if [ "$REALTIME" = "reverb" ]; then
+    # Both halves together. BROADCAST_CONNECTION is how the server sends and VITE_REALTIME is
+    # whether the browser listens; setting one without the other is the failure this script
+    # exists to make impossible. VITE_* is compiled into the assets, so deploy.sh's npm build
+    # below is what actually applies it.
+    env_set BROADCAST_CONNECTION "reverb"
+    env_set VITE_REALTIME "reverb"
+    env_set REVERB_HOST "$DOMAIN"
+    env_set REVERB_PORT "443"
+    env_set REVERB_SCHEME "https"
+elif [ -z "$(env_get BROADCAST_CONNECTION)" ]; then
+    env_set BROADCAST_CONNECTION "log"
+    env_set VITE_REALTIME "polling"
+fi
 for key in "${SEED_EMAIL_KEYS[@]}"; do
     if [ -n "${!key:-}" ]; then
         env_set "$key" "${!key}"
@@ -357,6 +397,26 @@ queue_status="$(supervisorctl status hq-queue || true)"
 if ! grep -qE 'RUNNING|STARTING' <<<"$queue_status"; then
     supervisorctl start hq-queue
 fi
+
+# Reverb follows .env and nothing else. `autostart=false` in the Supervisor template is the
+# polling mode, not an unfinished step — see deploy/supervisor/hq-reverb.conf.
+if [ "$(env_get BROADCAST_CONNECTION)" = "reverb" ]; then
+    reverb_status="$(supervisorctl status hq-reverb || true)"
+    if ! grep -qE 'RUNNING|STARTING' <<<"$reverb_status"; then
+        supervisorctl start hq-reverb
+    fi
+    # The same assertion PostgreSQL and Redis get: nothing this box runs may listen beyond the
+    # loopback except Nginx. Supervisor needs a moment to get the process up first.
+    for _ in $(seq 1 15); do
+        ss -Hltn "sport = :$REVERB_PORT" | grep -q . && break
+        sleep 1
+    done
+    assert_local_only "$REVERB_PORT" Reverb
+else
+    echo "BROADCAST_CONNECTION is not 'reverb', so the bell polls and hq-reverb stays stopped"
+    supervisorctl stop hq-reverb > /dev/null 2>&1 || true
+fi
+
 supervisorctl status || true
 
 step "seed the team (once)"
@@ -387,7 +447,8 @@ GoodTechies HQ is installed.
   URL:        https://$DOMAIN  (http until the certificate exists)
   Code:       $APP_DIR ($(git -C "$APP_DIR" rev-parse --short HEAD 2> /dev/null || echo 'unknown'))
   Secrets:    $APP_DIR/.env (www-data, mode 600): APP_KEY, DB_* passwords, SEED_PASSWORD
-  Workers:    supervisorctl status   (hq-reverb stays stopped until Phase 6)
+  Workers:    supervisorctl status   (hq-reverb runs only when BROADCAST_CONNECTION=reverb)
+  Realtime:   $(env_get BROADCAST_CONNECTION) / VITE_REALTIME=$(env_get VITE_REALTIME)  — docs/runbooks/realtime.md
   Releases:   cd $APP_DIR && deploy/deploy.sh
 
 Next steps (docs/runbooks/install.md):

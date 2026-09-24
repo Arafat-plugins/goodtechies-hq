@@ -48,9 +48,14 @@ class NotificationController extends Controller
     /**
      * The bell: the badge and the newest few.
      *
-     * This is the endpoint that is polled every 15 seconds by every signed-in user until Phase
-     * 6 replaces the poll with Reverb, so it is deliberately two queries and no joins — a
-     * count off the partial index over unread rows, and ten rows off `(user_id, created_at)`.
+     * **Phase 6 did not replace this endpoint; it added a second way to be told the same
+     * thing.** `NotificationService::feed()` builds the payload, and `NotificationFeedChanged`
+     * broadcasts that same array on `private-notifications.{user}` — so this route is still
+     * the contract, still what the bell reads on mount, and still the whole of the bell on a
+     * VPS running with `BROADCAST_CONNECTION=log` (a supported mode, Part B). Every other
+     * request to it disappeared, which is why it stays two queries and no joins: a count off
+     * the partial index over unread rows, and ten rows off `(user_id, created_at)`.
+     *
      * The payload carries everything the dropdown draws, so there is no second request per row
      * and no eager loading to get wrong.
      */
@@ -59,12 +64,7 @@ class NotificationController extends Controller
         /** @var User $user */
         $user = $request->user();
 
-        return response()->json([
-            'unread_count' => $this->notifications->unreadCount($user),
-            'notifications' => NotificationResource::collection(
-                $this->notifications->recent($user),
-            )->resolve($request),
-        ]);
+        return response()->json($this->notifications->feed($user, $request));
     }
 
     /**

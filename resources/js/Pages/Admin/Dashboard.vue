@@ -30,6 +30,7 @@ import StatCard from '@/Components/StatCard.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { usePagePoll } from '@/lib/pagePoll';
 
 defineOptions({ layout: AdminLayout });
 
@@ -141,6 +142,9 @@ const props = defineProps<{
      */
     upcomingHolidays: Holiday[];
 }>();
+
+/** Part 0.5 refresh rule: who is in, and what is waiting on the Admin. */
+usePagePoll(['stats', 'attendance', 'attention']);
 
 /**
  * The icon each of the five wears. Icons are components, so they cannot come from PHP; the

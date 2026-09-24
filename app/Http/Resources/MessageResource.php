@@ -45,7 +45,44 @@ class MessageResource extends JsonResource
                 && (int) $this->author_id === (int) $user->getKey(),
             'created_at' => $this->created_at?->toIso8601String(),
             'attachments' => $this->attachments($request),
+
+            // Who this message named. The thread highlights them, and `mentions_me` is
+            // resolved here for the same reason `is_mine` is: it is presentation, it depends on
+            // who is asking, and a screen comparing ids to decide whether a line is addressed
+            // to it would be a second copy of a fact the server already knows.
+            //
+            // A mention is NOT a permission — `ConversationPolicy` never reads
+            // `message_mentions` — so this list is safe to send to everybody who can read the
+            // thread: it names people they can already see named in the body above it.
+            'mentions' => $this->mentions(),
+            'mentions_me' => $user !== null && in_array((int) $user->getKey(), $this->mentionIds(), true),
         ];
+    }
+
+    /**
+     * @return list<array{id: int, name: string|null}>
+     */
+    private function mentions(): array
+    {
+        if (! $this->resource->relationLoaded('mentions')) {
+            return [];
+        }
+
+        return $this->resource->mentions
+            ->map(fn (User $user): array => ['id' => (int) $user->getKey(), 'name' => $user->name])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function mentionIds(): array
+    {
+        return array_map(
+            static fn (array $person): int => $person['id'],
+            $this->mentions(),
+        );
     }
 
     /**

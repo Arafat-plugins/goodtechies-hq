@@ -23,7 +23,7 @@
 | 3 | Recurring task engine + fixed automation rules | — | ✅ complete |
 | 4 | Remote timer + Timesheet + office attendance + schedules + workload | **GATE C** | ✅ complete — **GATE C passed 25 Sep** |
 | 5 | Leave management + holidays | — | ✅ complete |
-| 6 | Team communication (team/project chat, DMs, announcements, voice, Team directory) + realtime | **GATE D** | ⬜ |
+| 6 | Team communication (team/project chat, DMs, announcements, voice, Team directory) + realtime | **GATE D** | 🔄 core built — voice remains, then GATE D |
 | 7 | Meetings + Google Meet (one-way) + action items → tasks | — | ⬜ |
 | 8 | Finance module + Accountant surface | — | ⬜ |
 | 9 | Payroll state machine + payslips | **GATE E** | ⬜ |
@@ -506,6 +506,62 @@ error, so nothing stopped it (5-16).
 **Tests: 1455 passing, 7903 assertions.** The suite now takes about 12 minutes, past a
 ten-minute tool timeout; `AGENTS.md` records the two halves to run it in.
 
+## Phase 6 — Communication & realtime 🔄 (core built, voice remains)
+
+Built as two independent halves in parallel: the conversations and the transport.
+
+**Conversations.** Phase 2's tables now carry all five types — `task`, `project`, `team`, `dm`,
+`announcement` — and decision **2-24 generalised rather than bent**: nothing anywhere reads
+`conversation_members` to decide who may do anything (6-1). The DM was the case that would have
+broken it, and a schema choice stopped it: the pair lives in two ordered columns on
+`conversations`, so a DM cannot grow a third person, "the DM between A and B" is a unique index,
+and a stale member row on one still gets 404 (6-2).
+
+`messages.use` is a new permission key. "The Accountant has no messaging" is now a rule about a
+capability, not about a person — no policy, controller, route or Vue file contains the word
+*Accountant*, and a test grants them the key by SQL and watches the page work (6-3).
+
+**An ordinary channel message notifies nobody**; DMs, @mentions and announcements do. Fifteen
+people with Messages open all day would stop reading a bell that fired per line, and that
+silence is what makes an @mention worth typing (6-4). A mention suppresses the comment
+notification for that same person, so one sentence is never two rows in one bell (6-5).
+
+**Realtime.** Reverb and Echo, three private channels, each auth callback asking a policy that
+already exists — a socket is a second door into the same rooms (6-7). A non-member gets 403 at
+broadcast auth, proved on every channel. The bell is live and **keeps its poll** (2-39), because
+the poll is now two things: the whole bell on a polling build, and the fallback while the socket
+is down. A drop brings it back and the popover says so in words (6-9).
+
+The polling fallback is a supported mode with the *same* payload assembly, and comparing the two
+with `toBe()` caught a real bug: a broadcast has no request, so every deep link in the socket's
+payload was silently null (6-8).
+
+**Team directory** with today's availability from `AttendanceService::dayFor()` — no second
+definition — ten keys, no salary, no tracking field, ordered alphabetically because an order is a
+ranking the moment it is by anything a person could do better or worse (6-10).
+
+**Deploy:** Reverb under Supervisor behind Nginx, bound to loopback, with a new
+`deploy/test/run-reverb-test.sh` that opens a real websocket and publishes a real broadcast
+through it — 22 checks, no Docker needed. It found a live bug on the way: Nginx's
+`proxy_read_timeout` was 60s against Reverb's 60s ping, so every idle tab dropped about once a
+minute with nothing logging an error.
+
+**Also closed here: decision 5-18.** `daily_work_summary` now unions all four sources Part D §20
+names. Leave had to be a FULL OUTER join, not a LEFT one — a remote employee's leave day has
+neither an attendance row nor a time entry (5-9), so it would simply not have been in the view,
+and Phase 9's payroll reads this view (6-14).
+
+**Tests: 1585 passing.**
+
+### Still to build before GATE D
+
+- **Voice messages** — hold-to-record with waveform and timer, preview, inline playback at
+  1×/1.5×/2×. The seams are in: `MessageService::post()` already takes a kind and a duration,
+  `MessageResource` prints it, and `MessageThread` already renders an `<audio>` for
+  `kind === 'voice'`. It needs a recorder in the composer and two arguments at one call site.
+- The **announcement banner app-wide** rather than on the Messages page only (6-18).
+- Then **GATE D**: you check chat and voice on phone and desktop.
+
 ## Deployment log
 
 | Date | Commit | Server | Result |
@@ -516,26 +572,26 @@ ten-minute tool timeout; `AGENTS.md` records the two halves to run it in.
 
 ## Next step
 
-**Phase 6 — team communication and realtime.** It ends at **GATE D**, the next stop.
+**Phase 6's voice slice, then GATE D.**
 
-The plan's shape: the Phase 2 communication tables extended to every conversation type
-(`team`, `project`, `dm`, `announcement`), `message_mentions`, `MessageService`, a
-`ConversationPolicy` covering all of them, a `project` conversation created with each project
-and backfilled for existing ones, the Team directory, **voice messages** through the same files
-pipeline, and **Laravel Reverb + Echo** with channels `conversation.{id}`,
-`notifications.{user_id}` and `task.{id}` — which is when the bell stops polling (2-39).
+1. **Voice messages**: hold-to-record in the composer with a live waveform and timer, preview
+   (play / re-record / send), upload through the same `FileService` pipeline as every other
+   attachment, `message_attachments.kind = voice` with `duration_seconds`, and inline playback at
+   1×/1.5×/2×. No transcription (Part H).
+2. The **announcement banner app-wide** (6-18), which means one prop in `HandleInertiaRequests`
+   and the prop-shape tests that come with it.
+3. Then **GATE D** — you check chat and voice on a phone and on a desktop.
 
-**Two things Phase 6 should clear on the way past**, both recorded and both getting closer to
-mattering:
-
-- **5-18** — `daily_work_summary` does not know about leave or holidays, and **Phase 9 payroll
-  reads it**. One migration covers both halves.
-- **5-17** — a leave day that is also a holiday still burns a day of Annual leave. Needs a client
-  decision, not a quiet fix.
+After that: **Phase 7 — Meetings + Google Meet (one-way) + action items → tasks.**
 
 **Still open:** the rest of GATE A (real email addresses, VPS and backup bucket, Google
 Workspace, spec §46, the ClickUp export) and GATE B (contacts per client, employee priority
-visibility, the unarchive target status, the "Internal" label).
+visibility, the unarchive target status, the "Internal" label). **Phase 7 will need the Google
+Workspace answer** — it decides whether the Meet link is pasted by hand or pushed through the
+Calendar API.
+
+**A client decision still waiting:** 5-17 — a leave day that is also a company holiday still
+burns a day of Annual leave.
 
 **Polish the user flagged at GATE C** — accepted as-is, to be revisited rather than fixed now.
 

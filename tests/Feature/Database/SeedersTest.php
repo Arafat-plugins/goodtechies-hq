@@ -51,8 +51,8 @@ beforeEach(function () {
 
 it('seeds the five roles and every permission key', function () {
     expect(Role::count())->toBe(5)
-        ->and(Permission::count())->toBe(23)
-        ->and(count(PermissionKey::cases()))->toBe(23)
+        ->and(Permission::count())->toBe(24)
+        ->and(count(PermissionKey::cases()))->toBe(24)
         ->and(array_keys(RolePermissionSeeder::MATRIX))
         ->toEqualCanonicalizing(array_map(fn (RoleName $r) => $r->value, RoleName::cases()));
 })->group('phase0');
@@ -143,8 +143,11 @@ it('keeps counts stable when seeding twice', function () {
             'employees' => 5,
             'schedules' => 4,
             'roles' => 5,
-            'permissions' => 23,
-            'role_permissions' => 52,
+            // 24 since Phase 6 added `messages.use`, and 56 because four of the five roles
+            // hold it — every one but the ACCOUNTANT, which is how "the Accountant has no
+            // messaging routes" is spelled without naming them anywhere in the code.
+            'permissions' => 24,
+            'role_permissions' => 56,
             'settings' => 11,
         ]);
 })->group('phase0');

@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Client;
+use App\Models\Conversation;
 use App\Models\Employee;
 use App\Models\File;
 use App\Models\Holiday;
@@ -138,6 +139,17 @@ function matrixParameters(): array
         // `{leaveRequest}` has no default: every row that uses one overrides it with its own,
         // because two of the three verbs would otherwise decide the row the third is aimed at.
         '{leaveType}' => (string) LeaveType::where('name', 'Annual')->firstOrFail()->id,
+
+        // Messages (Phase 6). The TEAM channel, which is the one conversation every role that
+        // can use messaging can read — so the rows read as the capability rule and nothing
+        // else, and "somebody else's conversation is 404" is asserted where it belongs, in
+        // tests/Feature/Privacy/MessagePrivacyTest.php.
+        '{conversation}' => matrixTeamConversationId(),
+
+        // Tapu's USER (not his employee record, which is `{employee}`), so the direct-message
+        // row states two rules in one line: anybody who may use messaging can open a DM with
+        // him, and Tapu himself gets 404 — a DM with yourself is not a conversation.
+        '{user}' => (string) User::where('email', 'tapu@goodtechies.test')->firstOrFail()->id,
     ];
 }
 
@@ -222,6 +234,14 @@ function matrixFileId(string $key): string
  * would be notified about — so this makes one, addressed to Tapu. The existence check keeps
  * the memo honest across a rolled-back database, exactly as matrixFileId's does.
  */
+/**
+ * The team channel, created by the Phase 6 backfill migration and therefore always there.
+ */
+function matrixTeamConversationId(): string
+{
+    return (string) Conversation::query()->where('type', 'team')->firstOrFail()->id;
+}
+
 function matrixNotificationId(): string
 {
     static $id = null;
@@ -355,6 +375,14 @@ function permissionMatrix(): array
     // `tasks.view` and they still hold none. Decision 2-42's follow-up — "the Accountant costs
     // one 403 /notifications/recent per page load" — closes by itself here.
     $notifications = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => $status];
+
+    // Everybody who may use messaging, which is everybody but the ACCOUNTANT — and not
+    // because anybody named them. `messages.use` is Phase 6's one new permission key
+    // (Part C §1 has no messaging row at all; Phase 6's security paragraph says only that the
+    // Accountant has no messaging access by default), the route group is gated on it, and the
+    // matrix seed gives it to the other four roles. A future role that should have team chat
+    // gets these cells by holding the key, with no edit here.
+    $messaging = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => 403];
 
     // A DELETE row destroys the record it points at, and route-model binding runs before the
     // surface middleware — so every cell after the one that is allowed sees 404 where it would
@@ -837,6 +865,30 @@ function permissionMatrix(): array
         // Accountants. `can:viewAny` asks whether this person could receive any kind of
         // notification at all, and every Phase 2 notification type requires `tasks.view`;
         // they hold no tasks.* key, exactly as they hold none in the task rows above.
+        // Messages (Phase 6, master prompt Part D §10). One row per messaging route, and every
+        // one of them says the same thing about the Accountant: **403, on every route, because
+        // they hold no `messages.use`.** That is the spec's "Accountant has no messaging
+        // routes" — a permission on the route group, never a role named anywhere. It is the
+        // same shape `can:viewAny` gave the notification rows in Phases 2–4.
+        //
+        // `{conversation}` is the team channel, which everybody else can read, so these rows
+        // are about the capability. Who can read a PROJECT channel or somebody else's DM is a
+        // 404-shaped question and is asserted in tests/Feature/Privacy/MessagePrivacyTest.php.
+        ['GET', 'messages', $messaging(200)],
+        ['GET', 'messages/{conversation}', $messaging(200)],
+        // Body-less, so it stops at the validation redirect — which is proof it got past every
+        // gate. Whether an ordinary member may post in the ANNOUNCEMENTS channel is a policy
+        // question, not a route one, and MessageEndpointsTest asserts it directly.
+        ['POST', 'messages/{conversation}', $messaging(302)],
+        ['POST', 'messages/{conversation}/read', $messaging(302)],
+        // Opening a DM with Tapu. Everybody who may use messaging gets one — and Tapu gets
+        // **404**, because a DM with yourself is not a conversation and the endpoint says so
+        // the way this application says no to a record: by failing to find it.
+        ['POST', 'messages/direct/{user}', [
+            'guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302,
+            'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 403,
+        ]],
+
         ['GET', 'notifications', $notifications(200)],
         ['GET', 'notifications/recent', $notifications(200)],
         ['POST', 'notifications/read-all', $notifications(302)],
@@ -853,6 +905,31 @@ function permissionMatrix(): array
         //                                     nothing about whether the id exists, which is
         //                                     exactly what the three cells above it say.
         ['POST', 'notifications/{notification}/read', ['guest' => '302 /login', 'ADMIN' => 404, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 404]],
+
+        // The Team directory (Phase 6). Shared, like the Messages page it sits next to, and
+        // gated by the same `messages.use` — so "the Accountant has no messaging routes" is one
+        // key refusing them here exactly as it refuses them there, with no role named. The
+        // MANAGER cell is 200 and not 403: they hold the key, and the row would otherwise be a
+        // role test wearing a permission's clothes.
+        ['GET', 'team', ['guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 200, 'EMPLOYEE' => 200, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
+
+        // Broadcast authorisation (Phase 6). Laravel's own route, registered by
+        // `withBroadcasting()` in bootstrap/app.php with this application's full signed-in
+        // middleware stack — `web`, `auth`, `active`, `two-factor` — because a socket is a
+        // second door into the same rooms.
+        //
+        // **These cells do not test channel authorisation, and cannot.** `phpunit.xml` pins
+        // `BROADCAST_CONNECTION=null`, and Laravel's `null` and `log` broadcasters both
+        // override `auth()` with an empty body: they authorise nothing and answer an empty 200
+        // to anybody signed in, whatever channel is named. The rows record that truthfully.
+        // The real answers — 403 for a non-member on each of the three channels — are asserted
+        // in tests/Feature/Realtime/BroadcastAuthTest.php, which configures the `reverb`
+        // connection first and says why in its header.
+        //
+        // What these rows DO assert is the door: a guest is sent to the login page and never
+        // reaches the controller, which is the thing that would be a hole.
+        ['GET', 'broadcasting/auth', $everyone(200)],
+        ['POST', 'broadcasting/auth', $everyone(200)],
 
         // Downloading a file: one route, no surface, its own file so that no earlier row has
         // consumed it. The matrix sends no signature, and that is what this row asserts — every

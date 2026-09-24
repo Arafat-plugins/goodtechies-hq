@@ -21,6 +21,7 @@ import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import type { SharedProps } from '@/types';
+import { usePagePoll } from '@/lib/pagePoll';
 
 /**
  * Somebody's attendance: today's clock, and the month.
@@ -63,6 +64,9 @@ const props = defineProps<{
     statuses: AttendanceStatusOption[];
     permissions: { can_clock: boolean; can_edit: boolean };
 }>();
+
+/** Part 0.5 refresh rule: a second tab, and an Admin's edit to one of these days. */
+usePagePoll(['days', 'summary', 'today']);
 
 const editing = ref<AttendanceDay | null>(null);
 const editOpen = ref(false);

@@ -57,6 +57,7 @@ class ProjectService
         private readonly ProjectFinanceService $finance,
         private readonly AuditLogger $audit,
         private readonly ActivityLogger $activity,
+        private readonly ConversationService $conversations,
     ) {}
 
     /**
@@ -106,6 +107,18 @@ class ProjectService
                 // Throws if the actor may not write money; the whole creation rolls back.
                 $this->finance->upsert($actor, $project, $finance);
             }
+
+            // The project's channel, born with the project (Phase 6). Inside the same
+            // transaction as the project itself, so there is no moment at which a project
+            // exists without somewhere to talk about it — the same promise TaskService makes
+            // for a task's discussion, and the reason the Phase 6 backfill only ever has to
+            // deal with projects that predate this line.
+            //
+            // Who may read it is not decided here and nothing is synced: ConversationPolicy
+            // asks ProjectPolicy::view about this project on every request, so adding or
+            // removing a member changes the channel's audience by changing the project's, with
+            // no second list to keep in step (decision 2-24, generalised in Phase 6).
+            $this->conversations->forProject($project);
 
             $this->audit->record(
                 AuditEvent::ProjectCreated,

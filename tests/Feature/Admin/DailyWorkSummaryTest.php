@@ -2,12 +2,18 @@
 
 use App\Models\DailyWorkSummary;
 use App\Models\Employee;
+use App\Models\Holiday;
+use App\Models\LeaveBalance;
+use App\Models\LeaveRequest;
+use App\Models\LeaveType;
 use App\Models\Task;
 use App\Models\TimeEntry;
 use App\Models\User;
 use App\Services\AttendanceService;
 use App\Services\AttendanceService as Attendance;
+use App\Services\LeaveService;
 use App\Support\AttendanceStatus;
+use App\Support\LeaveStatus;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -208,3 +214,124 @@ it('gives a person with neither an attendance row nor an entry no row at all', f
     expect(summaryFor($this->tapu, '2026-09-24'))->toBeNull()
         ->and(summaryFor($this->yaseen, '2026-09-24'))->toBeNull();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Leave and holidays — decision 5-18, closed
+|--------------------------------------------------------------------------
+|
+| Part D §20 says the view unions four sources. Phase 4 built two, because the
+| other two did not exist yet. Phase 9's payroll reads this view, so the gap
+| was a payroll bug waiting for a payroll.
+|
+*/
+
+it('keeps a remote employee\'s leave day, which has neither other half', function () {
+    // This is the case the third FULL OUTER join exists for, and the reason a LEFT join would
+    // not have done. Decision 5-9: approving leave for a remote-timer employee writes NO
+    // attendance row, deliberately, so "Tapu is never Absent" stays structural. He files no
+    // time entry on a day he is away either. Under a LEFT join his leave day would simply not
+    // be in the view, and a payroll run would read the month with it silently missing.
+    $annual = LeaveType::where('name', 'Annual')->firstOrFail();
+
+    LeaveBalance::updateOrCreate(
+        ['employee_id' => $this->tapu->id, 'leave_type_id' => $annual->id],
+        ['balance_days' => 10],
+    );
+
+    $request = LeaveRequest::factory()->create([
+        'employee_id' => $this->tapu->id,
+        'leave_type_id' => $annual->id,
+        'start_date' => '2026-10-05',
+        'end_date' => '2026-10-06',
+        'status' => LeaveStatus::Pending,
+    ]);
+
+    app(LeaveService::class)->approve(
+        User::where('email', 'shahadat@goodtechies.test')->firstOrFail(),
+        $request,
+    );
+
+    // No attendance row was written — that is 5-9, asserted here so this test fails loudly if
+    // that rule is ever quietly reversed and the join stops being load-bearing.
+    expect(DB::table('attendance_records')->where('employee_id', $this->tapu->id)->count())->toBe(0);
+
+    $rows = DailyWorkSummary::where('employee_id', $this->tapu->id)
+        ->whereBetween('work_date', ['2026-10-05', '2026-10-06'])
+        ->orderBy('work_date')
+        ->get();
+
+    expect($rows)->toHaveCount(2)
+        ->and($rows[0]->source)->toBe('leave')
+        ->and($rows[0]->on_leave)->toBeTrue()
+        ->and($rows[0]->leave_type)->toBe('Annual')
+        ->and($rows[0]->leave_is_unpaid)->toBeFalse()
+        // Nothing was worked, and the view says so with nulls rather than zeroes: zero worked
+        // minutes is a claim about a day somebody was here.
+        ->and($rows[0]->worked_minutes)->toBeNull()
+        ->and($rows[0]->tracked_minutes)->toBeNull();
+})->group('phase5');
+
+it('marks the unpaid half of leave, which is what payroll will read', function () {
+    $unpaid = LeaveType::where('is_unpaid', true)->firstOrFail();
+
+    $request = LeaveRequest::factory()->create([
+        'employee_id' => $this->yaseen->id,
+        'leave_type_id' => $unpaid->id,
+        'start_date' => '2026-10-05',
+        'end_date' => '2026-10-05',
+        'status' => LeaveStatus::Pending,
+    ]);
+
+    app(LeaveService::class)->approve(
+        User::where('email', 'shahadat@goodtechies.test')->firstOrFail(),
+        $request,
+    );
+
+    $row = DailyWorkSummary::where('employee_id', $this->yaseen->id)
+        ->where('work_date', '2026-10-05')
+        ->sole();
+
+    expect($row->on_leave)->toBeTrue()
+        ->and($row->leave_is_unpaid)->toBeTrue();
+})->group('phase5');
+
+it('names the holiday on a day somebody still has a row for', function () {
+    Holiday::create(['date' => '2026-10-07', 'name' => 'Agency Day']);
+
+    app(AttendanceService::class)->clockIn($this->yaseen, Carbon::parse('2026-10-07 09:00'));
+
+    $row = DailyWorkSummary::where('employee_id', $this->yaseen->id)
+        ->where('work_date', '2026-10-07')
+        ->sole();
+
+    expect($row->is_holiday)->toBeTrue()
+        ->and($row->holiday_name)->toBe('Agency Day');
+})->group('phase5');
+
+it('does not double a day when two holidays share its date', function () {
+    // Decision 5-3: the seeded year really has two holidays on 1 May, which is why `holidays`
+    // is unique on (date, name) and not on date. Joined naively, one such date would double
+    // every employee-day it touched — and a doubled row here is doubled pay.
+    Holiday::create(['date' => '2026-10-08', 'name' => 'May Day']);
+    Holiday::create(['date' => '2026-10-08', 'name' => 'Buddha Purnima']);
+
+    app(AttendanceService::class)->clockIn($this->yaseen, Carbon::parse('2026-10-08 09:00'));
+
+    $rows = DailyWorkSummary::where('employee_id', $this->yaseen->id)
+        ->where('work_date', '2026-10-08')
+        ->get();
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows[0]->is_holiday)->toBeTrue()
+        // Both names, one row, alphabetical so the string is stable to read and to test.
+        ->and($rows[0]->holiday_name)->toBe('Buddha Purnima, May Day');
+})->group('phase5');
+
+it('says nothing about a holiday nobody has a row for', function () {
+    // A bare holiday makes no rows, and should not: this view is one row per EMPLOYEE per day,
+    // and there is no employee in a date to make a row for. Payroll walks employees itself.
+    Holiday::create(['date' => '2026-11-11', 'name' => 'A day nobody worked']);
+
+    expect(DailyWorkSummary::where('work_date', '2026-11-11')->count())->toBe(0);
+})->group('phase5');

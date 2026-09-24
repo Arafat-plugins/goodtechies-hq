@@ -14,6 +14,7 @@ import {
     MessagesSquare,
     Timer,
     UserRound,
+    UsersRound,
     Video,
 } from '@lucide/vue';
 import type { TrackingMode } from '@/types';
@@ -65,7 +66,15 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
                 // Shipped in slice 3. The longer claim wins the row — see `activeItem()`.
                 { label: 'Calendar', href: '/employee/tasks/calendar', icon: CalendarDays },
                 { label: 'Meetings', icon: Video, phase: 7 },
-                { label: 'Messages', icon: MessagesSquare, phase: 6 },
+                // Phase 6. The shared Messages page — whose mail a thread is belongs to the
+                // person and not to the shell, so this points at `/messages` and the page picks
+                // `EmployeeLayout` from the viewer's surface, exactly as My Leave does.
+                { label: 'Messages', href: '/messages', icon: MessagesSquare },
+                // Phase 6. Part D §2 words the employee's entry point as "Messages → Team",
+                // and the Messages page has no sub-navigation to hang it off — so the row sits
+                // directly under Messages, which is the same neighbourhood and one fewer click.
+                // The alternative was a page nobody on this surface could reach.
+                { label: 'Team', href: '/team', icon: UsersRound },
                 { label: 'Notifications', icon: Bell, phase: 2 },
                 tracking,
                 ...timesheet,

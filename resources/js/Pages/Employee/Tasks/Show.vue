@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
 import PageShell from '@/Components/PageShell.vue';
+import LiveTaskStatus from '@/Components/Realtime/LiveTaskStatus.vue';
 import type { TaskTag } from '@/Components/Tasks/TaskList.vue';
 import TaskDetailBody from '@/Components/Tasks/TaskDetailBody.vue';
 import type { TaskActivityEntry, TaskDetail, TaskDiscussion } from '@/Components/Tasks/taskDetail';
@@ -61,5 +62,10 @@ useFlashAsToast();
             variant="page"
             @removed="router.visit('/employee/tasks')"
         />
+
+        <!-- The live half of this page: `task.{id}`, whose callback is the same
+             TaskPolicy::view that rendered it. It offers a reload and never performs
+             one — see the component. -->
+        <LiveTaskStatus :task-id="task.id" :status="task.status" />
     </PageShell>
 </template>

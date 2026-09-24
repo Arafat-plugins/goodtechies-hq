@@ -12,6 +12,11 @@
 #
 # The container clones the committed HEAD of this checkout from /src; the working-copy
 # deploy/ directory is then copied over the clone so uncommitted deploy changes are tested.
+#
+# From Phase 6 it also proves the realtime kit on the real layout: the polling default, then
+# the .env switch to Reverb and a release, then Supervisor, the loopback bind and Nginx's
+# websocket proxy, then back to polling. deploy/test/run-reverb-test.sh proves the transport
+# itself (a real websocket, a real broadcast) in seconds and without Docker — run that first.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -150,8 +155,77 @@ about="$(in_container "cd '$APP_DIR' && php artisan about --only=environment")"
 echo "$about"
 check "artisan about shows production" production \
     "$(grep -oE 'Environment \.+ [a-z]+' <<<"$about" | awk '{print $NF}' | head -n 1)"
+# ---------------------------------------------------------------------------
+# Realtime (Phase 6). The install defaults to POLLING, so the first two checks are that the
+# kit is present and correctly switched off; the rest turn the socket on the way a person
+# would — two lines in .env and a release — and prove it end to end through Nginx.
+#
+# deploy/test/run-reverb-test.sh proves the same transport without Docker and in seconds; this
+# is the half that can only be proved on the real layout: Supervisor starting the process,
+# Nginx proxying the upgrade, and the .env switch surviving a release.
+# ---------------------------------------------------------------------------
+
+step "realtime: the polling default"
+check "hq-reverb is stopped on a polling install" 1 \
+    "$(in_container 'supervisorctl status hq-reverb | grep -cE "STOPPED|not started" || true')"
+check "install.sh generated the Reverb credentials" 1 \
+    "$(in_container "grep -cE '^REVERB_APP_SECRET=.+' $APP_DIR/.env || true")"
+# 502 is exactly right here: Nginx is proxying, and there is nothing behind it because the
+# deployment is in polling mode.
+check "nginx proxies the websocket location" 502 \
+    "$(in_container "curl -s -o /dev/null -w '%{http_code}' -H 'Host: $DOMAIN' http://127.0.0.1/app/anything")"
+# And the polling build ships no socket client: the dynamic import is eliminated as dead code,
+# so ~90 KB of laravel-echo and pusher-js is simply not in the bundle. See resources/js/echo.ts.
+check "the polling build ships no socket client" 0 \
+    "$(in_container "ls $APP_DIR/public/build/assets/pusher-*.js > /dev/null 2>&1 && echo 1 || echo 0")"
+
+step "realtime: turn the socket on the way a person would"
+in_container "cd '$APP_DIR' \
+    && sed -i 's/^BROADCAST_CONNECTION=.*/BROADCAST_CONNECTION=reverb/' .env \
+    && sed -i 's/^VITE_REALTIME=.*/VITE_REALTIME=reverb/' .env \
+    && sed -i 's/^REVERB_HOST=.*/REVERB_HOST=$DOMAIN/' .env \
+    && SKIP_PULL=1 deploy/deploy.sh"
+
+for _ in $(seq 1 20); do
+    reverb_status="$(in_container 'supervisorctl status hq-reverb' || true)"
+    grep -q RUNNING <<<"$reverb_status" && break
+    sleep 1
+done
+echo "$reverb_status"
+check "hq-reverb RUNNING after the switch" RUNNING "$(awk '{print $2}' <<<"$reverb_status")"
+
+reverb_listen="$(in_container "ss -Hltn 'sport = :8080' | awk '{print \$4}' | tr '\n' ' '")"
+echo "reverb listens on: $reverb_listen"
+check "Reverb listens on the loopback only" 0 \
+    "$(grep -Ecv '^(127\.0\.0\.1|\[::1\]):' <<<"$(tr ' ' '\n' <<<"$reverb_listen" | grep -v '^$')" || true)"
+
+# Through Nginx this time, not straight at the port. Anything other than 502 or 000 means the
+# proxy reached Reverb; the exact code is Reverb refusing a request that is not an upgrade.
+reverb_key="$(in_container "sed -n 's/^REVERB_APP_KEY=//p' $APP_DIR/.env | tr -d '\"'")"
+proxied="$(in_container "curl -s -o /dev/null -w '%{http_code}' -H 'Host: $DOMAIN' http://127.0.0.1/app/$reverb_key")"
+check "nginx reaches Reverb after the switch" 1 \
+    "$([ "$proxied" != "000" ] && [ "$proxied" != "502" ] && echo 1 || echo 0)"
+echo "  (status $proxied through the proxy)"
+
+# The sharpest proof that VITE_REALTIME is a BUILD-time switch and not a runtime one: the
+# socket client is dynamically imported, so a polling build eliminates the import as dead code
+# and emits no `pusher-*.js` chunk at all. A reverb build emits one.
+check "the reverb build emits the socket client chunk" 1 \
+    "$(in_container "ls $APP_DIR/public/build/assets/pusher-*.js > /dev/null 2>&1 && echo 1 || echo 0")"
+
+step "realtime: back to polling, and Reverb is stopped again"
+in_container "cd '$APP_DIR' \
+    && sed -i 's/^BROADCAST_CONNECTION=.*/BROADCAST_CONNECTION=log/' .env \
+    && sed -i 's/^VITE_REALTIME=.*/VITE_REALTIME=polling/' .env \
+    && SKIP_PULL=1 deploy/deploy.sh"
+check "hq-reverb stopped again" 1 \
+    "$(in_container 'supervisorctl status hq-reverb | grep -cE "STOPPED|not started" || true')"
+check "the polling build ships no socket client again" 0 \
+    "$(in_container "ls $APP_DIR/public/build/assets/pusher-*.js > /dev/null 2>&1 && echo 1 || echo 0")"
+
+step "shellcheck"
 in_container "apt-get install -y -qq --no-install-recommends shellcheck > /dev/null"
-if shellcheck_out="$(in_container "shellcheck /src/deploy/install.sh /src/deploy/deploy.sh /src/deploy/test/run-install-test.sh" 2>&1)"; then
+if shellcheck_out="$(in_container "shellcheck /src/deploy/install.sh /src/deploy/deploy.sh /src/deploy/test/run-install-test.sh /src/deploy/test/run-reverb-test.sh" 2>&1)"; then
     shellcheck_out="${shellcheck_out}clean"
 fi
 echo "$shellcheck_out"

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Conversation\StoreMessageRequest;
 use App\Models\Task;
 use App\Services\ConversationService;
+use App\Services\MessageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,7 +25,10 @@ class TaskDiscussionController extends Controller
 {
     use ManagesDiscussion;
 
-    public function __construct(private readonly ConversationService $conversations) {}
+    public function __construct(
+        private readonly ConversationService $conversations,
+        private readonly MessageService $messages,
+    ) {}
 
     public function index(Request $request, Task $task): JsonResponse
     {

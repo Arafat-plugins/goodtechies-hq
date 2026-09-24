@@ -5,7 +5,7 @@ use App\Models\File;
 use App\Models\Message;
 use App\Models\Project;
 use App\Models\Task;
-use App\Support\ConversationType;
+use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -56,26 +56,102 @@ it('does not create task_comments', function () {
 |--------------------------------------------------------------------------
 */
 
-it('already accepts every conversation type Phase 6 will add', function (ConversationType $type) {
-    // The point of this test is that Phase 6 inserts a row rather than altering a column. If
-    // `type` had been a three-value enum or a narrower CHECK, this would fail — which is the
-    // failure that would have cost that phase a migration.
-    $id = DB::table('conversations')->insertGetId([
-        'type' => $type->value,
-        'linked_project_id' => $type === ConversationType::Project ? Project::query()->value('id') : null,
+it('starts with exactly one team channel, one announcements channel and one per project', function () {
+    // The Phase 6 backfill's result, and the shape the four partial unique indexes below
+    // protect: one company-wide channel of each kind, and one per project including the ones
+    // that predate the feature.
+    expect(DB::table('conversations')->where('type', 'team')->count())->toBe(1)
+        ->and(DB::table('conversations')->where('type', 'announcement')->count())->toBe(1)
+        ->and(DB::table('conversations')->where('type', 'project')->count())
+        ->toBe(Project::query()->count());
+})->group('phase6');
+
+it('refuses a second channel where only one can exist', function (string $type) {
+    // Phase 2 promised Phase 6 would INSERT a row rather than alter a column, and it kept that
+    // promise: `type` already knew all five values. What Phase 6 added is the uniqueness each
+    // kind of channel needs — which is what makes every `firstOrCreate` in ConversationService
+    // mean "the" literally, however many callers race for it.
+    DB::table('conversations')->insert([
+        'type' => $type,
+        'linked_project_id' => $type === 'project' ? Project::query()->value('id') : null,
         'linked_task_id' => null,
-        'title' => 'Probe',
+        'title' => 'A second one',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+})->with([
+    'team' => ['team'],
+    'announcement' => ['announcement'],
+    'project' => ['project'],
+])->throws(QueryException::class)->group('phase6');
+
+it('stores a DM as an ordered pair of columns on the conversation row', function () {
+    // The Phase 6 membership decision, in the schema. A DM's two people are COLUMNS, not
+    // `conversation_members` rows — which is what keeps "membership is computed, and the
+    // membership table grants nothing" true of all five types with no exception.
+    $ids = User::query()->orderBy('id')->limit(2)->pluck('id')->all();
+
+    $id = DB::table('conversations')->insertGetId([
+        'type' => 'dm',
+        'linked_project_id' => null,
+        'linked_task_id' => null,
+        'dm_one_id' => $ids[0],
+        'dm_two_id' => $ids[1],
         'created_at' => now(),
         'updated_at' => now(),
     ]);
 
     expect($id)->toBeGreaterThan(0);
+})->group('phase6');
+
+it('refuses a second DM for a pair, however the pair is written', function (bool $reversed) {
+    $ids = User::query()->orderBy('id')->limit(2)->pluck('id')->all();
+
+    $row = fn (int $one, int $two): array => [
+        'type' => 'dm',
+        'linked_project_id' => null,
+        'linked_task_id' => null,
+        'dm_one_id' => $one,
+        'dm_two_id' => $two,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ];
+
+    DB::table('conversations')->insert($row($ids[0], $ids[1]));
+
+    // Again as (A, B) is the unique index refusing it; again as (B, A) is the CHECK refusing
+    // it, because the pair is ORDERED — so two people can never end up with two threads
+    // between them by one of them clicking first.
+    DB::table('conversations')->insert($reversed ? $row($ids[1], $ids[0]) : $row($ids[0], $ids[1]));
 })->with([
-    'team' => [ConversationType::Team],
-    'project' => [ConversationType::Project],
-    'dm' => [ConversationType::Dm],
-    'announcement' => [ConversationType::Announcement],
-])->group('phase2');
+    'the same way round' => [false],
+    'the other way round' => [true],
+])->throws(QueryException::class)->group('phase6');
+
+it('refuses a DM that does not name two different people', function (string $shape) {
+    $id = (int) User::query()->value('id');
+
+    $pair = match ($shape) {
+        'neither' => [null, null],
+        'only one' => [$id, null],
+        // A DM with yourself is not a conversation, and `dm_one_id < dm_two_id` says so.
+        'the same person twice' => [$id, $id],
+    };
+
+    DB::table('conversations')->insert([
+        'type' => 'dm',
+        'linked_project_id' => null,
+        'linked_task_id' => null,
+        'dm_one_id' => $pair[0],
+        'dm_two_id' => $pair[1],
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+})->with([
+    'neither' => ['neither'],
+    'only one' => ['only one'],
+    'the same person twice' => ['the same person twice'],
+])->throws(QueryException::class)->group('phase6');
 
 it('refuses a type nothing has ever defined', function () {
     DB::table('conversations')->insert([

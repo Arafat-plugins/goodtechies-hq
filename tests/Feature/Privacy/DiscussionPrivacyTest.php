@@ -8,6 +8,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\ConversationService;
 use App\Services\FileService;
+use App\Services\MessageService;
 use App\Services\TaskService;
 use App\Support\RoleName;
 use App\Support\UserStatus;
@@ -37,6 +38,7 @@ beforeEach(function () {
     Storage::fake(config('filesystems.default'));
 
     $this->conversations = app(ConversationService::class);
+    $this->messages = app(MessageService::class);
 
     $this->admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
     $this->tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
@@ -51,7 +53,7 @@ beforeEach(function () {
     // absolutely, so it starts from a known one.
     $this->conversation->messages()->delete();
 
-    $this->conversations->post($this->tapu, $this->conversation, 'Only the people on this task should read this.');
+    $this->messages->post($this->tapu, $this->conversation, 'Only the people on this task should read this.');
 });
 
 /*
@@ -171,7 +173,7 @@ it('shuts it for a deactivated user without touching the task', function () {
 it('hides an attachment on a discussion the requester cannot reach', function () {
     $files = app(FileService::class);
 
-    $message = $this->conversations->post(
+    $message = $this->messages->post(
         $this->tapu,
         $this->conversation,
         'The export.',
@@ -192,7 +194,7 @@ it('hides an attachment on a discussion the requester cannot reach', function ()
 })->group('phase2');
 
 it('never lets a message attachment be replaced, not even by its author', function () {
-    $message = $this->conversations->post(
+    $message = $this->messages->post(
         $this->tapu,
         $this->conversation,
         'Version one.',

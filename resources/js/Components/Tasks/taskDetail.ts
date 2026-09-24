@@ -1,6 +1,11 @@
 import { router } from '@inertiajs/vue3';
 import type { Errors, FormDataConvertible } from '@inertiajs/core';
-import type { FileSummary } from '@/Components/Files/files';
+import type {
+    ThreadAttachment,
+    ThreadMessage,
+    ThreadPayload,
+} from '@/Components/Messages/messages';
+import { MESSAGE_MAX_BODY } from '@/Components/Messages/messages';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 import type { Task, TaskPerson } from '@/Components/Tasks/TaskList.vue';
 import { flashSeq, lastFlash } from '@/lib/flashChannel';
@@ -119,62 +124,26 @@ export interface TaskSibling {
 /* ------------------------------------------------------------------ discussion */
 
 /**
- * A file on a message: `FileResource` unchanged, with the two `message_attachments` columns
- * that say how it rides on the bubble laid beside it.
+ * The task discussion's types are the messaging types, aliased rather than restated.
  *
- * It **extends** `FileSummary` rather than restating it because it is one — the same signed
- * expiring `url`, the same `url_expires_at`, the same `permissions` the attachments panel
- * reads. `kind` is the pivot's answer and not the file's: `image` renders in place, everything
- * else is a download, and `voice` is declared so that when Phase 6 records one the bubble has
- * somewhere to put it rather than falling through to a link.
+ * Phase 6 made a thread one shape for every conversation — the task discussion, a project
+ * channel, the team channel and a DM all arrive from `BuildsDiscussionPayload` identically —
+ * so the definitions live in `Components/Messages/messages.ts` and these three names stay
+ * pointed at them. Two descriptions of one payload is how one screen grows a field the other
+ * does not.
  */
-export interface TaskMessageAttachment extends FileSummary {
-    kind: 'file' | 'image' | 'voice' | null;
-    /** Only ever set on a voice note — an ordinary audio upload carries no duration. */
-    duration_seconds: number | null;
-}
-
 /**
- * One message.
+ * The task discussion's types are the messaging types, aliased rather than restated.
  *
- * `is_mine` is resolved by `MessageResource`, so the screen never compares ids to work out
- * whose bubble it is drawing. There is deliberately no `can_edit` and no `can_delete`: nobody
- * may change or remove a message, so there is no permission to report and no control to wire.
+ * Phase 6 made a thread ONE shape for every conversation — a task discussion, a project
+ * channel, the team channel and a DM all arrive from `BuildsDiscussionPayload` identically — so
+ * the definitions live in `Components/Messages/messages.ts` and these three names stay pointed
+ * at them. Two descriptions of one payload is how one screen grows a field the other does not,
+ * which is exactly what happened to the tag pickers.
  */
-export interface TaskMessage {
-    id: number;
-    body: string | null;
-    author: TaskPerson | null;
-    is_mine: boolean;
-    created_at: string | null;
-    attachments: TaskMessageAttachment[];
-}
-
-/**
- * The discussion, in the one shape `BuildsDiscussionPayload` sends it.
- *
- * Identical from the detail page's props and from `GET {surface}/tasks/{id}/discussion`, which
- * is what lets the panel paint from the first and refresh from the second without holding two
- * ideas of what a thread is.
- */
-export interface TaskDiscussion {
-    conversation_id: number;
-    /**
-     * Whether this requester may post — `ConversationPolicy::post`, which delegates to
-     * `TaskPolicy::view`. It is the ONLY thing that decides whether a composer exists. Not a
-     * role, not `is_mine`, and never a `conversation_members` row: membership is read state and
-     * grants nothing, so a row left behind on a reassigned task must buy its holder nothing.
-     */
-    can_post: boolean;
-    /**
-     * Read state, not authorisation. It positions the unread line and gates nothing at all —
-     * a reader who has read everything and a reader who has read none of it may do exactly the
-     * same things.
-     */
-    last_read_at: string | null;
-    unread_count: number;
-    messages: TaskMessage[];
-}
+export type TaskMessageAttachment = ThreadAttachment;
+export type TaskMessage = ThreadMessage;
+export type TaskDiscussion = ThreadPayload;
 
 /**
  * `StoreMessageRequest::MAX_BODY`, restated so the composer can count down to it.
@@ -183,7 +152,7 @@ export interface TaskDiscussion {
  * by it. The server owns the refusal and says it in its own words, the same way the file
  * limits in `Files/files.ts` are a courtesy in front of `FileService`.
  */
-export const TASK_MESSAGE_MAX_BODY = 4000;
+export const TASK_MESSAGE_MAX_BODY = MESSAGE_MAX_BODY;
 
 /** The status values the screen has to name by hand, because a rule hangs off each one. */
 export const STATUS_IN_REVIEW = 'in_review';

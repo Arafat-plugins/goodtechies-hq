@@ -59,6 +59,26 @@ const startId = useId();
 const endId = useId();
 const reasonId = useId();
 
+/**
+ * Put the caret in the first field.
+ *
+ * Exposed rather than done here, because the only caller is the page that decides this form is
+ * now answering a correction — it knows when, this does not. `preventScroll` because that caller
+ * scrolls, and a focus that scrolls too fights it: the browser jumps, then the smooth scroll
+ * starts from somewhere else.
+ *
+ * Found by `id` rather than a template ref: the id is already on the real `<select>` because
+ * `<Label for>` needs it there, so this cannot drift from what the label points at, and it does
+ * not depend on `NativeSelect` forwarding a ref it has never promised to forward.
+ */
+function focus(): void {
+    const field = typeof document === 'undefined' ? null : document.getElementById(typeId);
+
+    (field as HTMLElement | null)?.focus({ preventScroll: true });
+}
+
+defineExpose({ focus });
+
 const form = useForm({
     leave_type_id: props.editing?.type?.id ?? props.types[0]?.id ?? 0,
     start_date: props.editing?.start_date ?? '',

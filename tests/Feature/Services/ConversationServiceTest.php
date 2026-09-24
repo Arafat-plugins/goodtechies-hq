@@ -11,6 +11,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\ConversationService;
+use App\Services\MessageService;
 use App\Services\TaskService;
 use App\Support\ConversationType;
 use App\Support\RoleName;
@@ -42,6 +43,7 @@ beforeEach(function () {
     Storage::fake(config('filesystems.default'));
 
     $this->conversations = app(ConversationService::class);
+    $this->messages = app(MessageService::class);
     $this->tasks = app(TaskService::class);
 
     $this->admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
@@ -121,7 +123,7 @@ it('picks up a task that predates conversations', function () {
 it('posts a message', function () {
     $conversation = $this->conversations->forTask($this->tapusTask);
 
-    $message = $this->conversations->post($this->tapu, $conversation, '  Canonicals are half done.  ');
+    $message = $this->messages->post($this->tapu, $conversation, '  Canonicals are half done.  ');
 
     expect($message->body)->toBe('Canonicals are half done.')
         ->and($message->author_id)->toBe($this->tapu->id)
@@ -133,7 +135,7 @@ it('refuses a message with nothing in it', function () {
 
     // Whitespace is not a message. The rule cannot be a CHECK constraint, because half of its
     // answer lives in `message_attachments`, so it is stated at the only writer.
-    expect(fn () => $this->conversations->post($this->tapu, $conversation, "   \n  "))
+    expect(fn () => $this->messages->post($this->tapu, $conversation, "   \n  "))
         ->toThrow(ConversationStateException::class);
 
     expect($conversation->messages()->count())->toBe(0);
@@ -142,7 +144,7 @@ it('refuses a message with nothing in it', function () {
 it('refuses somebody who may not see the task', function () {
     $conversation = $this->conversations->forTask($this->tapusTask);
 
-    expect(fn () => $this->conversations->post($this->yaseen, $conversation, 'Let me in'))
+    expect(fn () => $this->messages->post($this->yaseen, $conversation, 'Let me in'))
         ->toThrow(AuthorizationException::class);
 
     expect($conversation->messages()->count())->toBe(0);
@@ -151,7 +153,7 @@ it('refuses somebody who may not see the task', function () {
 it('puts a line on the task timeline without quoting what was said', function () {
     $conversation = $this->conversations->forTask($this->tapusTask);
 
-    $this->conversations->post($this->tapu, $conversation, 'Something confidential about the client');
+    $this->messages->post($this->tapu, $conversation, 'Something confidential about the client');
 
     $timeline = app(ActivityLogger::class)->for($this->tapusTask)->pluck('description');
 
@@ -170,7 +172,7 @@ it('puts a line on the task timeline without quoting what was said', function ()
 it('stores an attachment through FileService and nowhere else', function () {
     $conversation = $this->conversations->forTask($this->tapusTask);
 
-    $message = $this->conversations->post(
+    $message = $this->messages->post(
         $this->tapu,
         $conversation,
         'The crawl export.',
@@ -198,7 +200,7 @@ it('stores an attachment through FileService and nowhere else', function () {
 it('marks an image attachment as one, from the file rather than from its name', function () {
     $conversation = $this->conversations->forTask($this->tapusTask);
 
-    $message = $this->conversations->post(
+    $message = $this->messages->post(
         $this->tapu,
         $conversation,
         null,
@@ -214,7 +216,7 @@ it('refuses an upload the application would not store, without writing a message
 
     // Checked BEFORE the message row, so a refused upload does not burn an id — and, more to
     // the point, so FileService never writes bytes inside a transaction that then disappears.
-    expect(fn () => $this->conversations->post(
+    expect(fn () => $this->messages->post(
         $this->tapu,
         $conversation,
         'Here you go',
@@ -234,8 +236,8 @@ it('refuses an upload the application would not store, without writing a message
 it('counts what somebody has not read, and never counts their own', function () {
     $conversation = $this->conversations->forTask($this->tapusTask);
 
-    $this->conversations->post($this->admin, $conversation, 'One');
-    $this->conversations->post($this->admin, $conversation, 'Two');
+    $this->messages->post($this->admin, $conversation, 'One');
+    $this->messages->post($this->admin, $conversation, 'Two');
 
     expect($this->conversations->readState($this->tapu, $conversation))
         ->toMatchArray(['last_read_at' => null, 'unread_count' => 2]);
@@ -246,7 +248,7 @@ it('counts what somebody has not read, and never counts their own', function () 
 
     // Posting is reading: a count that went up when you spoke would be measuring the wrong
     // thing.
-    $this->conversations->post($this->tapu, $conversation, 'Mine');
+    $this->messages->post($this->tapu, $conversation, 'Mine');
 
     expect($this->conversations->readState($this->tapu, $conversation)['unread_count'])->toBe(0);
 })->group('phase2');
@@ -268,25 +270,39 @@ it('writes a member row that is only a timestamp', function () {
 
 /*
 |--------------------------------------------------------------------------
-| The four types Phase 6 owns
+| The four types Phase 6 opened
 |--------------------------------------------------------------------------
+|
+| Phase 2 denied all four outright and recorded that Phase 6 would decide their
+| rules. It did, and it did it by GENERALISING decision 2-24 rather than bending
+| it: every type computes its audience from something that is not
+| `conversation_members`. The Phase 6 suites assert each rule; what this one
+| keeps is the sentence Phase 2 wrote about the table itself.
+|
 */
 
-it('lets nobody into a conversation type this phase has no rules for', function (ConversationType $type) {
-    // Deny by default. A conversation whose access rule has not been specified is one nobody
-    // may open — including an Admin, who passes the same checks as everybody else here.
+it('still grants nothing through a membership row, in any type', function (ConversationType $type) {
+    // The Phase 2 sentence, now asked of all five types: a `conversation_members` row is read
+    // state. Somebody who cannot see the conversation cannot see it any better for having one,
+    // and a task or project conversation is the same answer as a DM they are not in.
     $conversation = Conversation::factory()->ofType($type)->create();
 
-    expect($this->admin->can('view', $conversation))->toBeFalse()
-        ->and($this->admin->can('post', $conversation))->toBeFalse();
+    // A stale row, of exactly the shape a reassignment or a departure leaves behind.
+    $conversation->members()->attach($this->yaseen->getKey(), ['last_read_at' => now()]);
 
-    expect(fn () => $this->conversations->post($this->admin, $conversation, 'Hello?'))
+    expect($this->yaseen->can('view', $conversation))->toBeFalse()
+        ->and($this->yaseen->can('post', $conversation))->toBeFalse();
+
+    expect(fn () => $this->messages->post($this->yaseen, $conversation, 'Let me in'))
         ->toThrow(AuthorizationException::class);
 })->with([
-    'team' => [ConversationType::Team],
+    // A task Yaseen is not assigned to, a project he is not on, and a DM between two other
+    // people. The two company-wide channels are deliberately absent: he CAN read those, and
+    // that is the point — the rule is computed, not stored, so it says yes where it should.
+    'task' => [ConversationType::Task],
+    'project' => [ConversationType::Project],
     'dm' => [ConversationType::Dm],
-    'announcement' => [ConversationType::Announcement],
-])->group('phase2');
+])->group('phase6');
 
 it('keeps a manager reading a task discussion they are not assigned to', function () {
     // The other half of "membership follows task access": a Manager sees every task, so they

@@ -1,7 +1,8 @@
-import { router } from '@inertiajs/vue3';
+import { router, usePage } from '@inertiajs/vue3';
 import { ChevronDown, ChevronUp, Minus } from '@lucide/vue';
 import type { Component, Ref } from 'vue';
-import { onScopeDispose, ref } from 'vue';
+import { computed, onScopeDispose, ref, watch } from 'vue';
+import { listenPrivate, realtimeConnection, realtimeMode, realtimeReconnects } from '@/echo';
 
 /**
  * The notification payloads, the endpoints that serve them, and the one poll behind the bell.
@@ -117,7 +118,9 @@ export function centerHref(tab: NotificationTabKey = 'all'): string {
  * `NotificationType`'s own note that those tabs get their types in Phase 6, 7, 5 and 9.
  */
 export const TAB_PHASE: Partial<Record<NotificationTabKey, number>> = {
-    messages: 6,
+    // `messages` was here until Phase 6 filled it. A tab is "built" when the server says so
+    // (`NotificationTab::isBuilt()`, derived from the catalogue); this list only supplies the
+    // phase NUMBER for the ones that are not, so removing the entry is the whole change.
     meetings: 7,
     leave: 5,
     payroll: 9,
@@ -193,14 +196,35 @@ export function exactTime(iso: string | null): string | undefined {
     return Number.isNaN(date.getTime()) ? undefined : EXACT.format(date);
 }
 
-/* ------------------------------------------------------------------ the poll */
+/* ------------------------------------------------------------------ the poll, and the socket */
 
 /**
- * The bell's 15-second poll, and the whole of it.
+ * The bell's two transports: a subscription when there is one, and the 15-second poll when
+ * there is not.
  *
- * §11 is in-app only in Phase 2 — Reverb arrives in Phase 6 — so the badge is kept current by
- * asking. That is the one thing in this application that runs without anybody asking it to, so
- * the rules below are not tuning, they are the feature:
+ * ## Phase 6 did not delete the poll, and deleting it would have been the bug
+ *
+ * Decision 2-39 built the poll "until Phase 6". Phase 6 is here, and the poll stays — because
+ * it is now two things rather than one:
+ *
+ *   - **the whole bell on a polling build.** `VITE_REALTIME=polling` is a supported mode, not
+ *     dead code: Part B says a 10–15 s poll is acceptable in the MVP if Reverb is troublesome,
+ *     and a VPS may well run that way for a week. See `resources/js/echo.ts`.
+ *   - **the fallback while the socket is down on a socket build.** A websocket drops — a
+ *     laptop sleeps, a phone changes network, Nginx is reloaded during a deploy — and a bell
+ *     that silently stopped updating would look exactly like a bell with nothing to say. So
+ *     while `realtimeConnection` is anything but `connected`, the interval is running and the
+ *     popover says which of the two is happening.
+ *
+ * When the socket is up, the poll is **off**, not merely redundant: `bellTransport` is the one
+ * place that decides, and the badge is set straight from the broadcast payload, which is the
+ * same array `/notifications/recent` returns (`NotificationService::feed()`, asserted identical
+ * in tests/Feature/Realtime/PollingFallbackTest.php).
+ *
+ * **A reconnect re-reads.** A socket delivers changes, and a change that happened while it was
+ * down was delivered to nobody — so coming back is a reason to ask, not a reason to relax.
+ *
+ * The rules decision 2-39 established are unchanged and still not tuning:
  *
  * - **One interval, ever.** The state is module-scoped and reference-counted (the same shape
  *   `lib/flashChannel.ts` uses for its claims), so two mounted bells — or a bell that is
@@ -213,9 +237,19 @@ export function exactTime(iso: string | null): string | undefined {
  *
  * The count is the server's. Nothing here decrements it: a write re-reads (`refreshBell()`)
  * rather than guessing, because the guess is wrong the moment the same person has the app open
- * on their phone.
+ * on their phone. That is also why the broadcast carries the whole feed rather than one new
+ * row — see `App\Events\NotificationFeedChanged`.
  */
 const POLL_MS = 15_000;
+
+/**
+ * How long the live region stays quiet between announcements, in milliseconds.
+ *
+ * A burst of arrivals is one piece of news to somebody using a screen reader, not five. The
+ * badge and the popover carry the detail; this is the interruption budget, and it is deliberately
+ * longer than the poll so that the quietest transport cannot be the noisiest reader experience.
+ */
+const ANNOUNCE_QUIET_MS = 30_000;
 
 const unreadCount = ref(0);
 const recent = ref<NotificationRow[]>([]);
@@ -237,9 +271,78 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let listening = false;
 let inFlight = false;
 let watchers = 0;
+/** Undoes the channel subscription. Set while at least one bell is mounted on a socket build. */
+let unsubscribe: (() => void) | null = null;
+
+/**
+ * What the bell is currently doing, which is a different question from what it was BUILT to do.
+ *
+ * `live` only when the socket is actually connected. `reconnecting` is a socket build whose
+ * socket is down — the poll is covering for it and the reader is told so, because the
+ * alternative is a bell that has quietly stopped being right. `polling` is a polling build,
+ * working exactly as intended and with nothing to apologise for.
+ */
+export type BellTransport = 'live' | 'reconnecting' | 'polling';
+
+export const bellTransport = computed<BellTransport>(() => {
+    if (realtimeMode !== 'reverb') {
+        return 'polling';
+    }
+
+    return realtimeConnection.value === 'connected' ? 'live' : 'reconnecting';
+});
+
+/**
+ * The sentence a screen reader hears, and the last count it heard.
+ *
+ * Set at most once every `ANNOUNCE_QUIET_MS`, and only when the number went UP: a count
+ * falling because the same person marked things read on their phone is not news, and a burst
+ * of five comments inside a minute is one piece of news rather than five. The region it is
+ * rendered into is `aria-live="polite"`, so even this waits for a pause in whatever the reader
+ * is doing — a notification must never interrupt someone mid-sentence, and it must never move
+ * anything under their cursor.
+ */
+const announcement = ref('');
+
+let lastAnnouncedCount = 0;
+let lastAnnouncedAt = 0;
+
+function announce(count: number): void {
+    const now = Date.now();
+
+    if (count <= lastAnnouncedCount) {
+        // Remember the fall, so a later rise back to the same number is still news.
+        lastAnnouncedCount = count;
+
+        return;
+    }
+
+    if (now - lastAnnouncedAt < ANNOUNCE_QUIET_MS) {
+        return;
+    }
+
+    lastAnnouncedCount = count;
+    lastAnnouncedAt = now;
+    announcement.value = count === 1 ? '1 unread notification' : `${count} unread notifications`;
+}
 
 function pageVisible(): boolean {
     return typeof document === 'undefined' || document.visibilityState === 'visible';
+}
+
+/**
+ * Take a feed payload, whichever transport carried it.
+ *
+ * The two transports deliver the SAME array — `NotificationService::feed()` builds it for both
+ * — so there is one place that reads it and no branch on where it came from. A second reader
+ * for the socket's half would have been the drift the server was shaped to prevent.
+ */
+function apply(payload: NotificationRecent): void {
+    unreadCount.value = payload.unread_count;
+    recent.value = payload.notifications;
+    status.value = 'ready';
+
+    announce(payload.unread_count);
 }
 
 async function read(): Promise<void> {
@@ -264,6 +367,8 @@ async function read(): Promise<void> {
         if (response.status === 403) {
             status.value = 'denied';
             stopPolling();
+            unsubscribe?.();
+            unsubscribe = null;
 
             return;
         }
@@ -276,11 +381,7 @@ async function read(): Promise<void> {
             return;
         }
 
-        const payload = (await response.json()) as NotificationRecent;
-
-        unreadCount.value = payload.unread_count;
-        recent.value = payload.notifications;
-        status.value = 'ready';
+        apply((await response.json()) as NotificationRecent);
     } catch {
         // Offline, or a request cancelled by a navigation. The badge keeps the last number it
         // was told rather than dropping to zero, which would be a lie in the quietest possible
@@ -292,7 +393,9 @@ async function read(): Promise<void> {
 }
 
 function startPolling(): void {
-    if (timer !== null || !pageVisible() || status.value === 'denied') {
+    // Not while the socket is up. This is the one place that decides, so a bell cannot end up
+    // both subscribed and polling — which would not be wrong, only wasteful and invisible.
+    if (timer !== null || !pageVisible() || status.value === 'denied' || bellTransport.value === 'live') {
         return;
     }
 
@@ -319,21 +422,42 @@ function onVisibilityChange(): void {
 }
 
 /**
- * Mount the poll. Returns the bell's state, read-only — the count is the server's.
+ * Mount the bell. Returns its state, read-only — the count is the server's.
  *
- * The first caller starts it; the last one to unmount stops it and takes the listener with it.
+ * The first caller starts the transport; the last one to unmount stops it and takes the
+ * visibility listener and the channel subscription with it. The state is module-scoped and
+ * reference-counted, so two mounted bells — or a bell remounted by a layout change — cannot
+ * leave a second interval or a second subscription running behind them.
+ *
+ * **The first read is always an HTTP read, on both transports.** A socket delivers changes,
+ * and the bell arrives needing the current state; there is nothing to subscribe one's way to.
  */
 export function useNotificationBell(): {
     unreadCount: Readonly<Ref<number>>;
     recent: Readonly<Ref<NotificationRow[]>>;
     status: Readonly<Ref<BellStatus>>;
+    transport: Readonly<Ref<BellTransport>>;
+    announcement: Readonly<Ref<string>>;
 } {
     watchers += 1;
+
+    // The channel is this person's own: `private-notifications.{user}`, whose auth callback
+    // asks NotificationPolicy::viewAny and "is this you" (app/Broadcasting/NotificationChannel).
+    // The id comes from the shared Inertia props, which is where every other screen gets it;
+    // nothing here derives a permission from it, and a subscription somebody is not entitled to
+    // is refused with 403 at `/broadcasting/auth` rather than being prevented here.
+    const userId = usePage().props.auth.user?.id ?? null;
 
     if (watchers === 1) {
         if (typeof document !== 'undefined' && !listening) {
             document.addEventListener('visibilitychange', onVisibilityChange);
             listening = true;
+        }
+
+        if (userId !== null && realtimeMode === 'reverb') {
+            unsubscribe = listenPrivate(`notifications.${userId}`, {
+                'feed.changed': (payload: never) => apply(payload as NotificationRecent),
+            });
         }
 
         if (pageVisible()) {
@@ -342,7 +466,26 @@ export function useNotificationBell(): {
         }
     }
 
+    // The socket coming up puts the poll away; the socket going down brings it back, in the
+    // same tick the popover starts saying so. Neither is a reload and neither moves anything
+    // on the screen.
+    const stopTransportWatch = watch(bellTransport, (transport) => {
+        if (transport === 'live') {
+            stopPolling();
+
+            return;
+        }
+
+        startPolling();
+    });
+
+    // A reconnect means time passed with nobody listening. Ask.
+    const stopReconnectWatch = watch(realtimeReconnects, () => void read());
+
     onScopeDispose(() => {
+        stopTransportWatch();
+        stopReconnectWatch();
+
         watchers -= 1;
 
         if (watchers > 0) {
@@ -351,13 +494,16 @@ export function useNotificationBell(): {
 
         stopPolling();
 
+        unsubscribe?.();
+        unsubscribe = null;
+
         if (listening && typeof document !== 'undefined') {
             document.removeEventListener('visibilitychange', onVisibilityChange);
             listening = false;
         }
     });
 
-    return { unreadCount, recent, status };
+    return { unreadCount, recent, status, transport: bellTransport, announcement };
 }
 
 /** Re-read the bell now. Every write calls this; nothing adjusts the count by hand. */

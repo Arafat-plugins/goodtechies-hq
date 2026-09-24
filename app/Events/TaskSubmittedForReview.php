@@ -2,8 +2,10 @@
 
 namespace App\Events;
 
+use App\Events\Concerns\BroadcastsTaskStatus;
 use App\Models\Task;
 use App\Models\User;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 
 /**
  * A task was submitted for review (spec §19 "Task marked In Review → notify reviewer").
@@ -13,8 +15,10 @@ use App\Models\User;
  * which is TaskReviewers, which is the same answer TaskPolicy::review() gives. There is one
  * definition of "the reviewer" in this application and a notification does not get a second.
  */
-class TaskSubmittedForReview
+class TaskSubmittedForReview implements ShouldBroadcast
 {
+    use BroadcastsTaskStatus;
+
     public function __construct(
         public readonly Task $task,
         public readonly User $actor,

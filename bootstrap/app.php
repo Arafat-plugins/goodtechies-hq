@@ -16,6 +16,19 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // Realtime (Phase 6). `routes/channels.php` registers the three channels Part D §10 names;
+    // this registers the one route that authorises a subscription to them.
+    //
+    // The middleware stack is the same one every signed-in surface route carries, and it is
+    // spelled out rather than left at Laravel's default `['web']`: a socket is a second door
+    // into the same rooms, so a guest, a deactivated user and an Admin who has not enrolled
+    // 2FA have to be turned away at it exactly as they are at the first. `active` is also
+    // asserted inside every policy the channel callbacks ask, which is belt and braces on the
+    // one rule that must not have a gap.
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        ['middleware' => ['web', 'auth', 'active', 'two-factor']],
+    )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(append: [
             HandleInertiaRequests::class,

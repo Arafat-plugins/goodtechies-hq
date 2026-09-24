@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head } from '@inertiajs/vue3';
 import { CalendarOff, Inbox } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import ApplyLeaveForm from '@/Components/Leave/ApplyLeaveForm.vue';
 import LeaveRequestCard from '@/Components/Leave/LeaveRequestCard.vue';
@@ -13,6 +13,7 @@ import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import type { SharedProps } from '@/types';
+import { usePagePoll } from '@/lib/pagePoll';
 
 /**
  * My Leave: this person's balances, the apply form, and their own history.
@@ -56,6 +57,9 @@ const props = defineProps<{
     permissions: { can_apply: boolean };
 }>();
 
+/** Part 0.5 refresh rule: an approver's decision, and the balance it spends. */
+usePagePoll(['requests', 'balances']);
+
 /** The request being amended after a correction request, if any. */
 const amending = ref<LeaveRequestRow | null>(null);
 
@@ -69,8 +73,28 @@ const amending = ref<LeaveRequestRow | null>(null);
 const open = computed(() => props.requests.filter((request) => request.status !== 'approved' && request.status !== 'rejected'));
 const settled = computed(() => props.requests.filter((request) => request.status === 'approved' || request.status === 'rejected'));
 
-function amend(request: LeaveRequestRow): void {
+const applySection = ref<HTMLElement | null>(null);
+const applyForm = ref<InstanceType<typeof ApplyLeaveForm> | null>(null);
+
+/**
+ * Answer a correction request: seed the form, then take the reader to it.
+ *
+ * The button is in the Waiting list and the form is above the balances, so on anything shorter
+ * than a tall desktop the only effect of the click happened off screen and the page looked
+ * broken. Moving the reader is the whole fix — `nextTick` first because the form only renders
+ * its amend copy once `amending` is set, and focus last so a screen reader lands on the field
+ * rather than being told the page scrolled.
+ */
+async function amend(request: LeaveRequestRow): Promise<void> {
     amending.value = request;
+
+    await nextTick();
+
+    const reduced =
+        typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    applySection.value?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+    applyForm.value?.focus();
 }
 </script>
 
@@ -110,9 +134,15 @@ function amend(request: LeaveRequestRow): void {
                 </p>
             </section>
 
-            <section v-if="permissions.can_apply" aria-labelledby="apply-leave" class="flex min-w-0 flex-col gap-3">
+            <section
+                v-if="permissions.can_apply"
+                ref="applySection"
+                aria-labelledby="apply-leave"
+                class="flex min-w-0 flex-col gap-3 scroll-mt-20"
+            >
                 <h2 id="apply-leave" class="sr-only">Apply for leave</h2>
                 <ApplyLeaveForm
+                    ref="applyForm"
                     :types="types"
                     :balances="balances"
                     :editing="amending"

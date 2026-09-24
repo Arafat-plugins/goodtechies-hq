@@ -11,6 +11,7 @@ import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { usePagePoll } from '@/lib/pagePoll';
 import { cn } from '@/lib/utils';
 
 defineOptions({ layout: AdminLayout });
@@ -43,6 +44,9 @@ defineProps<{
     filters: { status: string | null };
     statuses: LeaveStatusOption[];
 }>();
+
+/** Part 0.5 refresh rule: the queue and the tab counts — an employee files a request while the Admin is looking at it. */
+usePagePoll(['requests', 'counts']);
 
 const deciding = ref<LeaveRequestRow | null>(null);
 const decision = ref<LeaveDecision>('approve');

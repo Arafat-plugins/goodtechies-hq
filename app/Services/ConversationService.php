@@ -2,24 +2,22 @@
 
 namespace App\Services;
 
-use App\Events\TaskCommented;
-use App\Exceptions\ConversationStateException;
-use App\Exceptions\FileStateException;
 use App\Models\Conversation;
 use App\Models\Message;
+use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
-use App\Support\AttachmentKind;
 use App\Support\ConversationType;
-use Illuminate\Auth\Access\AuthorizationException;
+use App\Support\Permission;
+use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
 /**
- * The task discussion: the conversation a task is born with, and the messages in it.
+ * The rooms: finding or creating each kind of conversation, listing the ones a person is in,
+ * and how far they have read. Writing a message is MessageService's, and only its.
  *
  * ## One store
  *
@@ -27,41 +25,52 @@ use Illuminate\Support\Facades\Gate;
  * is one store: every task gets a `conversations` row of type `task` when it is created, and
  * its comments are its `messages`. `task_comments` does not exist and must not be added.
  *
- * ## Membership follows task access, by being the same question
+ * ## Membership is computed, for every type
  *
- * Nothing in this class reads `conversation_members` to decide anything. Who may read or post
- * is ConversationPolicy, which asks TaskPolicy about the linked task — the same call the task
- * list makes — so a reassignment needs no sync here or anywhere else. `conversation_members` is
- * touched only by markRead(), and only to move a timestamp.
+ * Nothing in this class reads `conversation_members` to decide who may do anything. Who may
+ * read or post is ConversationPolicy, which asks the linked task's or project's own policy, the
+ * `messages.use` permission, or a DM's two columns — see ConversationType for the table of
+ * which is which. `conversation_members` is touched only by markRead(), and only to move a
+ * timestamp.
  *
- * ## Attachments go through FileService
+ * ## Every "the" conversation is a firstOrCreate behind a unique index
  *
- * There is one writer of bytes in this application and it is not this class. A message
- * attachment is a File owned by the Message, stored by FileService::store(), which brings the
- * size limit, the extension/MIME pairing, the ULID path, the checksum and the signed expiring
- * URL with it. This class adds the `message_attachments` row that says how the file rides on
- * the bubble, and nothing else.
- *
- * Validation is in the Form Request. Authorization is in ConversationPolicy and MessagePolicy;
- * this class asks the gate and turns a refusal into an exception, so a non-HTTP caller is
- * refused the same way.
+ * `forTask`, `forProject`, `team`, `announcements` and `dmBetween` all read the same way and
+ * all mean it literally: there is a partial unique index behind each one, so however many
+ * callers race for a room they get the same room. That is what makes it safe to call any of
+ * them from a controller, a seeder, a backfill or a job without any of them knowing whether
+ * somebody else got there first.
  */
 class ConversationService
 {
     /**
-     * The relations a discussion payload needs, so a panel is not a query per bubble.
+     * The relations a thread payload needs, so a panel is not a query per bubble.
      *
      * @var list<string>
      */
     public const MESSAGE_RELATIONS = [
         'author',
         'attachments.uploader',
+        'mentions',
     ];
 
-    public function __construct(
-        private readonly FileService $files,
-        private readonly ActivityLogger $activity,
-    ) {}
+    /**
+     * How many messages a thread sends at once.
+     *
+     * A channel that has been running for a year is not a payload. The newest N are what a chat
+     * screen opens on — the same window Telegram opens on — and older ones are read by asking
+     * for them (`?before=`), which is one parameter rather than a pagination component in a
+     * thread that is read upwards.
+     */
+    public const THREAD_WINDOW = 50;
+
+    public function __construct(private readonly ActivityLogger $activity) {}
+
+    /*
+    |--------------------------------------------------------------------------
+    | The rooms
+    |--------------------------------------------------------------------------
+    */
 
     /**
      * The task's discussion, creating it if this task predates conversations.
@@ -70,9 +79,7 @@ class ConversationService
      *
      *   - TASKS THAT PREDATE CONVERSATIONS. The conversations migration backfills one row per
      *     existing task, so a running database is complete the moment it migrates. This is the
-     *     belt to that migration's braces: a task restored from a backup taken before the
-     *     backfill, or created by something that bypassed TaskService, still gets its
-     *     discussion the first time anybody opens it, instead of 404ing forever.
+     *     belt to that migration's braces.
      *   - THE SEEDER AND THE FACTORY. `Task::factory()` and TaskSeeder's `firstOrCreate` do not
      *     go through TaskService::create(), so they would otherwise produce tasks with no
      *     conversation and tests that pass for the wrong reason.
@@ -95,106 +102,244 @@ class ConversationService
     }
 
     /**
-     * The messages, oldest first, with their authors and attachments.
+     * The project's channel.
      *
-     * NOT scoped by the requester, deliberately: the caller has already established that this
-     * person may see the conversation, and that is the whole of the rule — a message is exactly
-     * as visible as the discussion it is in, and no more. The same shape FileService::for()
-     * has, for the same reason.
-     *
-     * @return Collection<int, Message>
+     * Created with the project from Phase 6 on (ProjectService::create) and backfilled for every
+     * project that predates it, so in practice this always finds one. It is a `firstOrCreate`
+     * for the third case the backfill's own docblock names: a project created by the old code in
+     * the window while the migration ran belongs to neither half, and the first person to open
+     * its Discussion tab makes its channel rather than meeting a 404 forever.
      */
-    public function messages(Conversation $conversation): Collection
+    public function forProject(Project $project): Conversation
     {
-        return $conversation->messages()->with(self::MESSAGE_RELATIONS)->get();
+        return Conversation::query()->firstOrCreate(
+            [
+                'type' => ConversationType::Project,
+                'linked_project_id' => $project->getKey(),
+            ],
+            ['title' => null],
+        );
     }
 
     /**
-     * Post a message, optionally with a file on it.
-     *
-     * The order inside the transaction is forced by the schema and is the right order anyway:
-     * the message row has to exist before a file can be owned by it (`files.message_id` is a
-     * foreign key), and the attachment row has to come last because its composite foreign key
-     * checks that the file it names really is owned by that message.
-     *
-     * @throws AuthorizationException
-     * @throws ConversationStateException
-     * @throws FileStateException
+     * The one team channel.
      */
-    public function post(
-        User $actor,
-        Conversation $conversation,
-        ?string $body = null,
-        ?UploadedFile $upload = null,
-    ): Message {
-        if (! Gate::forUser($actor)->allows('post', $conversation)) {
-            throw new AuthorizationException('You are not allowed to post in this discussion.');
+    public function team(): Conversation
+    {
+        return $this->singleton(ConversationType::Team, 'Team');
+    }
+
+    /**
+     * The one announcements channel. Everybody with `messages.use` reads it; only a holder of
+     * `announcements.send` may post — ConversationPolicy, not this class.
+     */
+    public function announcements(): Conversation
+    {
+        return $this->singleton(ConversationType::Announcement, 'Announcements');
+    }
+
+    /**
+     * The DM between these two people, creating it the first time somebody opens it.
+     *
+     * The pair is stored ORDERED — `dm_one_id < dm_two_id`, which the table's CHECK insists on —
+     * so "the DM between A and B" and "the DM between B and A" are the same lookup and the same
+     * row, without either side of the application remembering to sort. Two people clicking
+     * *Message* on each other in the same second get one thread, because
+     * `conversations_one_per_dm_pair` says so.
+     *
+     * A DM with yourself is not a thing; the caller is expected to have refused it (the picker
+     * does not offer you) and this refuses it again, because a self-DM would break the ordered
+     * pair the CHECK requires.
+     */
+    public function dmBetween(User $one, User $two): ?Conversation
+    {
+        $ids = [(int) $one->getKey(), (int) $two->getKey()];
+
+        if ($ids[0] === $ids[1]) {
+            return null;
         }
 
-        $body = $this->clean($body);
+        sort($ids);
 
-        if ($body === null && $upload === null) {
-            throw ConversationStateException::emptyMessage();
+        return Conversation::query()->firstOrCreate(
+            [
+                'type' => ConversationType::Dm,
+                'dm_one_id' => $ids[0],
+                'dm_two_id' => $ids[1],
+            ],
+            ['title' => null],
+        );
+    }
+
+    private function singleton(ConversationType $type, string $title): Conversation
+    {
+        return Conversation::query()->firstOrCreate(['type' => $type], ['title' => $title]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The inbox
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Every conversation this person may open, newest activity first within its group.
+     *
+     * **Every row is policy-checked.** The queries below narrow by the cheap, list-shaped half
+     * of each rule — the projects they can see, the DMs they are named in — and then every
+     * candidate goes through `ConversationPolicy::view` one at a time. That is the same split
+     * NotificationDispatcher draws between a candidate list and a per-object gate, for the same
+     * reason: the list-shaped query is an optimisation and the policy is the rule, and if the
+     * two ever disagree the policy has to win.
+     *
+     * Task discussions are deliberately absent: there is one per task, they are read inside
+     * their task, and an inbox holding three hundred of them is not an inbox.
+     *
+     * @return Collection<int, Conversation>
+     */
+    public function inboxFor(User $user): Collection
+    {
+        if (! $user->isActive() || ! $user->hasPermission(Permission::MessagesUse)) {
+            return new Collection;
         }
 
-        // Refuse an unacceptable upload BEFORE writing the message row. Without this the
-        // transaction would roll the message back anyway, but the caller would have burnt an id
-        // and — more to the point — FileService would have written bytes to disk inside a
-        // transaction that then disappeared, leaving an orphan file with no row.
-        if ($upload !== null) {
-            FileService::assertAcceptable($upload);
+        $candidates = Conversation::query()
+            ->with(['project', 'dmOne', 'dmTwo'])
+            ->whereIn('type', [
+                ConversationType::Team->value,
+                ConversationType::Announcement->value,
+                ConversationType::Project->value,
+            ])
+            ->orWhere(fn ($query) => $query->dmsFor($user))
+            ->get();
+
+        return $candidates
+            ->filter(fn (Conversation $conversation): bool => Gate::forUser($user)->allows('view', $conversation))
+            ->values();
+    }
+
+    /**
+     * The newest message in each of these conversations, keyed by conversation id.
+     *
+     * One query for the whole inbox rather than one per row: a `DISTINCT ON` is the Postgres
+     * way to say "the latest per group", and the `(conversation_id, id)` index already exists
+     * for it.
+     *
+     * @param  iterable<int, Conversation>  $conversations
+     * @return Collection<int, Message>
+     */
+    public function latestMessages(iterable $conversations): Collection
+    {
+        $ids = [];
+
+        foreach ($conversations as $conversation) {
+            $ids[] = (int) $conversation->getKey();
         }
 
-        return DB::transaction(function () use ($actor, $conversation, $body, $upload): Message {
-            $message = Message::create([
-                'conversation_id' => $conversation->getKey(),
-                'author_id' => $actor->getKey(),
-                'body' => $body,
-            ]);
+        if ($ids === []) {
+            return new Collection;
+        }
 
-            if ($upload !== null) {
-                $file = $this->files->store($actor, $message, $upload);
+        $latest = Message::query()
+            ->whereIn('conversation_id', $ids)
+            ->selectRaw('DISTINCT ON (conversation_id) *')
+            ->orderBy('conversation_id')
+            ->orderByDesc('id')
+            ->with('author')
+            ->get();
 
-                // How the file rides on the bubble. `kind` comes off the file's own MIME type
-                // through the inline list, so an image renders in place and everything else is
-                // a download. `duration_seconds` stays null — voice is Phase 6.
-                $message->attachments()->attach($file->getKey(), [
-                    'kind' => AttachmentKind::forFile($file)->value,
-                    'duration_seconds' => null,
-                ]);
-            }
+        return $latest->keyBy('conversation_id');
+    }
 
-            // The task's own timeline gets a line, the way a checklist tick or a link does —
-            // so somebody scanning the activity panel sees that the discussion moved without
-            // the timeline becoming a second copy of what was said. The BODY is deliberately
-            // not in it: activity_logs is a different audience from the discussion, and
-            // quoting a comment into it would be publishing it twice with one set of rules.
-            $subject = $conversation->subject();
+    /**
+     * How many unread messages this person has in each of these conversations, keyed by id.
+     *
+     * One grouped query over the whole inbox, with the reader's own messages excluded for the
+     * reason readState() excludes them: a count that goes up when you post is measuring the
+     * wrong thing.
+     *
+     * @param  iterable<int, Conversation>  $conversations
+     * @return array<int, int>
+     */
+    public function unreadCounts(User $user, iterable $conversations): array
+    {
+        $ids = [];
 
-            if ($subject !== null) {
-                $this->activity->record($subject, $upload === null
-                    ? 'Message posted in the discussion'
-                    : 'Message posted in the discussion, with an attachment', $actor);
-            }
+        foreach ($conversations as $conversation) {
+            $ids[] = (int) $conversation->getKey();
+        }
 
-            // Slice 5. The spec's "comments" are these messages, so TaskCommented is fired
-            // here and nowhere else. The `instanceof` is not a placeholder for the other four
-            // conversation types: they cannot exist yet (ConversationPolicy denies them
-            // outright) and each gets its own event in Phase 6 with its own recipients — a
-            // project channel is not a task discussion with a different id.
-            //
-            // Inside the transaction with the message it is about: a post that rolls back
-            // notifies nobody. This is the type §11's dedup example is written about — twelve
-            // of these inside the window are one row reading "12 new comments in …".
-            if ($subject instanceof Task) {
-                event(new TaskCommented($subject, $actor, $message));
-            }
+        if ($ids === []) {
+            return [];
+        }
 
-            // The author has by definition read their own message.
-            $this->markRead($actor, $conversation);
+        $rows = DB::table('messages')
+            ->leftJoin('conversation_members', function ($join) use ($user) {
+                $join->on('conversation_members.conversation_id', '=', 'messages.conversation_id')
+                    ->where('conversation_members.user_id', '=', $user->getKey());
+            })
+            ->whereIn('messages.conversation_id', $ids)
+            ->where('messages.author_id', '!=', $user->getKey())
+            ->where(function ($query) {
+                $query->whereNull('conversation_members.last_read_at')
+                    ->orWhereColumn('messages.created_at', '>', 'conversation_members.last_read_at');
+            })
+            ->groupBy('messages.conversation_id')
+            ->selectRaw('messages.conversation_id, count(*) as total')
+            ->get();
 
-            return $message->load(self::MESSAGE_RELATIONS);
-        });
+        $counts = [];
+
+        foreach ($rows as $row) {
+            $counts[(int) $row->conversation_id] = (int) $row->total;
+        }
+
+        return $counts;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reading a thread
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * The messages, oldest first, with their authors, attachments and mentions.
+     *
+     * NOT scoped by the requester, deliberately: the caller has already established that this
+     * person may see the conversation, and that is the whole of the rule — a message is exactly
+     * as visible as the discussion it is in, and no more. The same shape FileService::for() has,
+     * for the same reason.
+     *
+     * `$before` walks backwards a window at a time. The rows come back oldest-first either way,
+     * because a thread is read downwards however it was fetched.
+     *
+     * @return Collection<int, Message>
+     */
+    public function messages(Conversation $conversation, ?int $before = null, ?int $limit = null): Collection
+    {
+        $limit = $limit ?? self::THREAD_WINDOW;
+
+        $window = $conversation->messages()
+            ->with(self::MESSAGE_RELATIONS)
+            ->when($before !== null, fn ($query) => $query->where('id', '<', $before))
+            ->reorder('id', 'desc')
+            ->limit(max(1, $limit))
+            ->get();
+
+        return $window->sortBy('id')->values();
+    }
+
+    /**
+     * Is there anything older than the window just fetched? What a *Load earlier* control needs.
+     */
+    public function hasOlderThan(Conversation $conversation, ?int $oldestId): bool
+    {
+        if ($oldestId === null) {
+            return false;
+        }
+
+        return $conversation->messages()->where('id', '<', $oldestId)->exists();
     }
 
     /**
@@ -202,10 +347,11 @@ class ConversationService
      *
      * The ONLY thing that writes `conversation_members`, and all it writes is a timestamp. A
      * row here is read state, not an access grant: ConversationPolicy never looks at it, so one
-     * left behind by somebody who has since been taken off the task grants them nothing.
+     * left behind by somebody who has since been taken off the task — or the project, or
+     * deactivated — grants them nothing.
      *
-     * `updateOrCreate` on the pivot rather than `syncWithoutDetaching`, so an existing row keeps
-     * its identity and only its timestamp moves.
+     * `updateExistingPivot` rather than `syncWithoutDetaching`, so an existing row keeps its
+     * identity and only its timestamp moves.
      */
     public function markRead(User $user, Conversation $conversation): void
     {
@@ -246,12 +392,51 @@ class ConversationService
     }
 
     /**
-     * Trim, and treat a message of nothing but whitespace as no message at all.
+     * Who may be @mentioned in this conversation: the people who can already read it.
+     *
+     * The picker's option list and the mention rule are **the same set**, computed here once, so
+     * a name a composer offers is never one the server then refuses. It is policy-checked per
+     * person rather than derived from a role or from `conversation_members`, which means the
+     * Accountant is absent from every picker in the application without being named in any of
+     * them — they hold no `messages.use`, and for a task discussion TaskPolicy refuses them.
+     *
+     * Fifteen people is the whole company (Part A), so this is a full scan and a gate call per
+     * active user, deliberately: a cleverer query would be a second statement of five different
+     * access rules.
+     *
+     * @return Collection<int, User>
      */
-    private function clean(?string $value): ?string
+    public function mentionableIn(Conversation $conversation): Collection
     {
-        $value = trim((string) $value);
+        /** @var Collection<int, User> $active */
+        $active = User::query()
+            ->where('status', UserStatus::Active->value)
+            ->orderBy('name')
+            ->get();
 
-        return $value === '' ? null : $value;
+        return $active
+            ->filter(fn (User $user): bool => Gate::forUser($user)->allows('view', $conversation))
+            ->values();
+    }
+
+    /**
+     * Note in the subject's own activity trail that its discussion moved.
+     *
+     * Called by MessageService, and here rather than there because the subject of a conversation
+     * is this class's business. The BODY is deliberately not in it: `activity_logs` is a
+     * different audience from the discussion, and quoting a comment into it would be publishing
+     * it twice under one set of rules.
+     */
+    public function recordActivity(Conversation $conversation, User $actor, bool $withAttachment): void
+    {
+        $subject = $conversation->subject();
+
+        if ($subject === null) {
+            return;
+        }
+
+        $this->activity->record($subject, $withAttachment
+            ? 'Message posted in the discussion, with an attachment'
+            : 'Message posted in the discussion', $actor);
     }
 }

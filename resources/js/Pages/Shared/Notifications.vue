@@ -8,9 +8,10 @@ import type {
     NotificationTabKey,
     NotificationTabSummary,
 } from '@/Components/Notifications/notifications';
-import { TAB_PHASE, centerHref, markAllRead } from '@/Components/Notifications/notifications';
+import { TAB_PHASE, centerHref, markAllRead, useNotificationBell } from '@/Components/Notifications/notifications';
 import NotificationRow from '@/Components/Notifications/NotificationRow.vue';
 import PageShell from '@/Components/PageShell.vue';
+import LiveUpdateNotice from '@/Components/Realtime/LiveUpdateNotice.vue';
 import Pagination from '@/Components/Pagination.vue';
 import type { PaginationLinks, PaginationMeta } from '@/Components/Pagination.vue';
 import { Button } from '@/Components/ui/button';
@@ -62,6 +63,36 @@ const props = defineProps<{
 
 const pending = useNavigationPending();
 
+/**
+ * The Center, live (Phase 6).
+ *
+ * It does **not** re-fetch itself when something arrives, and that is the decision rather than
+ * the shortcut: this is a page somebody opened to read, and a list that reordered itself under
+ * their cursor while they were half-way down it would be worse than a list that is thirty
+ * seconds old. So the arrival is offered, in a sentence, at the end of the flow — see
+ * `LiveUpdateNotice`.
+ *
+ * The state is the BELL's, not a second subscription: `useNotificationBell()` is
+ * reference-counted and module-scoped, so mounting it here joins the one channel the shell
+ * already holds rather than opening another. On a polling build the same comparison works off
+ * the same 15-second read, which is why nothing here asks which transport is running.
+ *
+ * The comparison is against this page's own server-rendered count. A rise means rows arrived
+ * after the render; a fall means the same person read something elsewhere, which is not news
+ * and says nothing.
+ */
+const { unreadCount: liveUnreadCount } = useNotificationBell();
+
+const arrivals = computed(() => {
+    const extra = liveUnreadCount.value - props.unread_count;
+
+    if (extra <= 0) {
+        return '';
+    }
+
+    return extra === 1 ? 'A notification arrived while you were reading.' : `${extra} notifications arrived while you were reading.`;
+});
+
 const current = computed(
     () => props.tabs.find((tab) => tab.key === props.tab) ?? props.tabs[0]!,
 );
@@ -77,6 +108,12 @@ const waitingForPhase = computed(() => (current.value.is_built ? null : TAB_PHAS
  * request rather than seven. The selected tab follows the server's answer rather than the
  * click, so the strip and the list can never disagree about which tab is being shown.
  */
+function refresh(): void {
+    // A re-fetch the reader asked for. `reload()` keeps the scroll position and the tab,
+    // because the tab is in the URL.
+    router.reload();
+}
+
 function choose(value: string | number): void {
     const key = String(value) as NotificationTabKey;
 
@@ -177,5 +214,8 @@ function choose(value: string | number): void {
                 </div>
             </TabsContent>
         </Tabs>
+
+        <!-- Last in the flow, so an arrival moves nothing above it. See LiveUpdateNotice. -->
+        <LiveUpdateNotice :message="arrivals" @reload="refresh" />
     </PageShell>
 </template>

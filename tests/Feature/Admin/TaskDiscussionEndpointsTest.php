@@ -4,6 +4,7 @@ use App\Models\Message;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\ConversationService;
+use App\Services\MessageService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -29,6 +30,7 @@ beforeEach(function () {
     Storage::fake(config('filesystems.default'));
 
     $this->conversations = app(ConversationService::class);
+    $this->messages = app(MessageService::class);
 
     $this->admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
     $this->tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
@@ -122,18 +124,25 @@ it('has no route to edit or delete a message', function () {
 */
 
 it('sends exactly the documented discussion keys', function () {
-    $this->conversations->post($this->admin, $this->conversation, 'One');
+    $this->messages->post($this->admin, $this->conversation, 'One');
 
     $payload = $this->actingAs($this->admin)
         ->getJson("/admin/tasks/{$this->task->id}/discussion")
         ->assertOk()
         ->json();
 
+    // Phase 6 made a thread one shape for every conversation type, so the task discussion now
+    // carries what a project channel and a DM carry: what the room is CALLED to this reader,
+    // whether there is older history behind the window, and the @mention picker's option list
+    // (which is the same set the server will accept a mention from).
     expect(array_keys($payload))->toEqualCanonicalizing([
-        'conversation_id', 'messages', 'can_post', 'last_read_at', 'unread_count',
+        'conversation_id', 'type', 'label', 'messages', 'has_more', 'can_post',
+        'mentionable', 'last_read_at', 'unread_count',
     ])
+        ->and($payload['type'])->toBe('task')
         ->and(array_keys($payload['messages'][0]))->toEqualCanonicalizing([
             'id', 'body', 'author', 'is_mine', 'created_at', 'attachments',
+            'mentions', 'mentions_me',
         ])
         // Resolved on the server, so the panel does not compare ids to decide which side of
         // the thread a bubble sits on.
@@ -142,7 +151,7 @@ it('sends exactly the documented discussion keys', function () {
 })->group('phase2');
 
 it('sends an attachment through FileResource, with how it rides on the bubble beside it', function () {
-    $this->conversations->post(
+    $this->messages->post(
         $this->tapu,
         $this->conversation,
         'The crawl export.',
@@ -172,7 +181,7 @@ it('sends an attachment through FileResource, with how it rides on the bubble be
 })->group('phase2');
 
 it('inlines the same payload into both task detail pages', function () {
-    $this->conversations->post($this->tapu, $this->conversation, 'On the detail page.');
+    $this->messages->post($this->tapu, $this->conversation, 'On the detail page.');
 
     foreach ([
         [$this->admin, "/admin/tasks/{$this->task->id}"],
@@ -181,7 +190,8 @@ it('inlines the same payload into both task detail pages', function () {
         $discussion = $this->actingAs($user)->get($url)->assertOk()->inertiaPage()['props']['discussion'];
 
         expect(array_keys($discussion))->toEqualCanonicalizing([
-            'conversation_id', 'messages', 'can_post', 'last_read_at', 'unread_count',
+            'conversation_id', 'type', 'label', 'messages', 'has_more', 'can_post',
+            'mentionable', 'last_read_at', 'unread_count',
         ])
             ->and($discussion['messages'])->toHaveCount(1)
             ->and($discussion['can_post'])->toBeTrue();
@@ -195,7 +205,7 @@ it('inlines the same payload into both task detail pages', function () {
 */
 
 it('marks the thread read when the panel fetches it, and not when the page renders', function () {
-    $this->conversations->post($this->admin, $this->conversation, 'Unread until somebody looks');
+    $this->messages->post($this->admin, $this->conversation, 'Unread until somebody looks');
 
     // Rendering a page that happens to contain a panel is not the same as reading it.
     $props = $this->actingAs($this->tapu)

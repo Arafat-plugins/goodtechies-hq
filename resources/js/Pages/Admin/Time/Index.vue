@@ -22,6 +22,7 @@ import EmptyState from '@/Components/EmptyState.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { usePagePoll } from '@/lib/pagePoll';
 
 defineOptions({ layout: AdminLayout });
 
@@ -68,6 +69,9 @@ const props = defineProps<{
     byProject: TimeBreakdownRow[];
     byTask: TimeBreakdownRow[];
 }>();
+
+/** Part 0.5 refresh rule: the approval queue an employee fills while the Admin reads it. */
+usePagePoll(['queue', 'queue_total', 'flagged']);
 
 const rejecting = ref<AdminTimeEntry | null>(null);
 const rejectOpen = ref(false);

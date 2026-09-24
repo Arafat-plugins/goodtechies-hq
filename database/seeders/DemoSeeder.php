@@ -7,6 +7,7 @@ use App\Models\Employee;
 use App\Models\Project;
 use App\Models\ProjectFinance;
 use App\Models\ProjectMember;
+use App\Services\ConversationService;
 use App\Support\BillingFrequency;
 use App\Support\BillingType;
 use App\Support\ClientStatus;
@@ -100,6 +101,14 @@ class DemoSeeder extends Seeder
                 $projectData['finance'],
             );
         }
+
+        // The project's channel (Phase 6). These rows do not go through ProjectService — they
+        // are `firstOrCreate`d straight onto the table — so the guarantee that a project is
+        // born with somewhere to talk about it has to be restated here, exactly as TaskSeeder
+        // restates it for a task's discussion. `forProject()` is a firstOrCreate behind a
+        // unique index, which is what makes restating it safe on the launcher's
+        // reseed-every-start.
+        app(ConversationService::class)->forProject($project);
     }
 
     private function employee(string $employeeNumber): Employee

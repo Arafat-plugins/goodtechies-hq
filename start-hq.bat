@@ -50,8 +50,24 @@ REM     APP_NAME="goodERP"
 REM ...and then this line does nothing, which is fine.
 set "APP_NAME=goodERP"
 
+REM ---------- 0. PHP dependencies ----------
+REM Phase 6 added laravel/reverb, and a phase that adds a composer package leaves this
+REM machine's vendor/ a package behind the moment the new files land. Without this the app
+REM 500s on a class that does not exist yet, which reads as a broken build rather than a
+REM missing install. `composer install` only installs what composer.lock already pins; it
+REM never resolves a new version and never touches composer.json.
+echo [1/5] Updating PHP dependencies...
+echo === composer install === >> "%LOG%"
+call composer install --no-interaction >> "%LOG%" 2>&1
+if errorlevel 1 (
+    echo    [X] composer install failed - see %LOG%
+    goto :hold
+)
+echo    [ok]
+echo.
+
 REM ---------- 1. JS dependencies ----------
-echo [1/4] Updating JS dependencies...
+echo [2/5] Updating JS dependencies...
 echo === npm install === >> "%LOG%"
 call npm install >> "%LOG%" 2>&1
 if errorlevel 1 (
@@ -62,7 +78,7 @@ echo    [ok]
 echo.
 
 REM ---------- 2. Database reachable? ----------
-echo [2/4] Checking the database...
+echo [3/5] Checking the database...
 echo === migrate:status === >> "%LOG%"
 call php artisan migrate:status >> "%LOG%" 2>&1
 if errorlevel 1 (
@@ -115,7 +131,7 @@ echo    [ok]
 echo.
 
 REM ---------- 3. Build the frontend ----------
-echo [3/4] Building the frontend ^(about 30 seconds^)...
+echo [4/5] Building the frontend ^(about 30 seconds^)...
 echo === npm run build === >> "%LOG%"
 call npm run build >> "%LOG%" 2>&1
 if errorlevel 1 (
@@ -144,7 +160,7 @@ REM ---------- 4. Serve ----------
 for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_PASSWORD=" .env')          do set "SEED_PW=%%b"
 for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"SEED_TWO_FACTOR_SECRET=" .env') do set "SEED_2FA=%%b"
 
-echo [4/4] Starting the server.
+echo [5/5] Starting the server.
 echo.
 echo ============================================================
 echo   Open  http://localhost:8000

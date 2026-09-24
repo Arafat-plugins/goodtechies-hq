@@ -12,6 +12,7 @@ use App\Models\Client;
 use App\Models\Employee;
 use App\Models\Project;
 use App\Services\ActivityLogger;
+use App\Services\ConversationService;
 use App\Services\ProjectService;
 use App\Support\BillingFrequency;
 use App\Support\BillingType;
@@ -48,6 +49,7 @@ class ProjectController extends Controller
     public function __construct(
         private readonly ProjectService $projects,
         private readonly ActivityLogger $activity,
+        private readonly ConversationService $conversations,
     ) {}
 
     public function index(Request $request): Response
@@ -119,6 +121,16 @@ class ProjectController extends Controller
             'project' => new ProjectResource($project),
             'activity' => $this->activityFor($project),
             'assignableEmployees' => $this->assignableEmployees(),
+
+            // The project's channel (Phase 6). Only its ID travels in the props: the Discussion
+            // tab mounts the same thread component the Messages page does, and that component
+            // fetches its own payload from `GET /messages/{conversation}` the way `FilePanel`
+            // fetches its own list — so a project page that nobody opens the tab on costs
+            // nothing, and the thread it then shows is the one the policy built.
+            //
+            // `forProject()` rather than a relation read, so a project created in the window
+            // while the Phase 6 backfill ran gets its channel here rather than a missing tab.
+            'discussionConversationId' => $this->conversations->forProject($project)->getKey(),
         ]);
     }
 

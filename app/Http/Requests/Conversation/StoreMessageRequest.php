@@ -34,6 +34,15 @@ class StoreMessageRequest extends FormRequest
      */
     public const MAX_BODY = 4000;
 
+    /**
+     * The most people one message may name.
+     *
+     * Twenty, which is more than the whole company (Part A: five to fifteen people) — so it is
+     * not a rule about how many colleagues you may address, it is a ceiling that stops a
+     * hand-built request asking the server to gate-check ten thousand ids.
+     */
+    public const MAX_MENTIONS = 20;
+
     public function authorize(): bool
     {
         return true;
@@ -54,6 +63,15 @@ class StoreMessageRequest extends FormRequest
                 'max:'.FileService::maxKilobytes(),
                 $this->acceptable(),
             ],
+
+            // Who the composer's @mention picker named. Ids only, and validated no further
+            // here on purpose: `exists:users,id` would be a second, weaker statement of a rule
+            // MessageService already applies properly — it keeps only the ids that can read
+            // this conversation AND are named in the body, and silently drops the rest. A 422
+            // for an id that does not exist would also tell a caller which ids do, which is a
+            // question no endpoint in this application answers.
+            'mentions' => ['sometimes', 'array', 'max:'.self::MAX_MENTIONS],
+            'mentions.*' => ['integer'],
         ];
     }
 
@@ -66,6 +84,7 @@ class StoreMessageRequest extends FormRequest
             'body.required_without' => 'Write something, or attach a file.',
             'file.required_without' => 'Write something, or attach a file.',
             'body.max' => 'That message is too long. The limit is '.self::MAX_BODY.' characters.',
+            'mentions.max' => 'That is more people than one message can name.',
             'file.max' => 'That file is too large. The limit is '
                 .round(FileService::MAX_BYTES / 1048576).' MB.',
         ];
@@ -76,6 +95,22 @@ class StoreMessageRequest extends FormRequest
         $body = trim((string) $this->validated('body'));
 
         return $body === '' ? null : $body;
+    }
+
+    /**
+     * The ids the picker named, de-duplicated. What they mean is MessageService's business.
+     *
+     * @return list<int>
+     */
+    public function mentionIds(): array
+    {
+        $ids = $this->validated('mentions');
+
+        if (! is_array($ids)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map('intval', $ids))));
     }
 
     public function upload(): ?UploadedFile

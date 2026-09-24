@@ -36,6 +36,7 @@ class RolePermissionSeeder extends Seeder
             PermissionKey::PayrollApprove->value,
             PermissionKey::FinanceView->value,
             PermissionKey::FinanceManage->value,
+            PermissionKey::MessagesUse->value,
             PermissionKey::AnnouncementsSend->value,
             PermissionKey::RolesManage->value,
             PermissionKey::AuditView->value,
@@ -53,6 +54,7 @@ class RolePermissionSeeder extends Seeder
             PermissionKey::LeaveApply->value,
             PermissionKey::LeaveApprove->value,
             PermissionKey::PayrollViewOwn->value,
+            PermissionKey::MessagesUse->value,
         ],
         RoleName::EMPLOYEE->value => [
             PermissionKey::ProjectsView->value,
@@ -60,6 +62,7 @@ class RolePermissionSeeder extends Seeder
             PermissionKey::AttendanceViewOwn->value,
             PermissionKey::LeaveApply->value,
             PermissionKey::PayrollViewOwn->value,
+            PermissionKey::MessagesUse->value,
         ],
         RoleName::REMOTE_EMPLOYEE->value => [
             PermissionKey::ProjectsView->value,
@@ -68,6 +71,7 @@ class RolePermissionSeeder extends Seeder
             PermissionKey::AttendanceViewOwn->value,
             PermissionKey::LeaveApply->value,
             PermissionKey::PayrollViewOwn->value,
+            PermissionKey::MessagesUse->value,
         ],
         RoleName::ACCOUNTANT->value => [
             PermissionKey::ProjectsViewFinance->value,

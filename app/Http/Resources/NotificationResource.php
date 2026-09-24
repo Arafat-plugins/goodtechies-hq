@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Conversation;
 use App\Models\LeaveRequest;
 use App\Models\Notification;
 use App\Models\Project;
@@ -98,6 +99,20 @@ class NotificationResource extends JsonResource
         // answers are addressed to the person who asked, so they open My Leave, where the row
         // carries its status and the approver's note. An Admin gets both, on different rows,
         // which is correct — they both apply for leave and decide other people's.
+        // A conversation, like a leave request, is reached at ONE url by every surface that has
+        // it: `/messages` is a shared route, because whose mail a thread is belongs to the
+        // person and not to the shell they are in. It is resolved before the surface prefix for
+        // that reason — there is no prefix to pick.
+        //
+        // The Accountant never reaches this branch: they hold no `messages.use`, so
+        // `NotificationType::requires()` means no messaging row is ever written for them, and
+        // `Route::has()` would refuse anyway if that ever changed.
+        if ($target['type'] === Conversation::class) {
+            return Route::has('messages.index')
+                ? route('messages.index', ['conversation' => $target['id']])
+                : null;
+        }
+
         if ($target['type'] === LeaveRequest::class) {
             $name = $this->type === NotificationType::LeaveRequested ? 'admin.leave.index' : 'leave.show';
 

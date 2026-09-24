@@ -80,7 +80,7 @@ it('restores the newest backup into a scratch database and records the verificat
         $output = Artisan::output();
 
         expect($output)->toContain('Backup verified: verify-test:'.config('backup.backup.name').'/')
-            ->and($output)->toContain('restored into goodtechies_verify, roles=5 permissions=23 settings=11 users=')
+            ->and($output)->toContain('restored into goodtechies_verify, roles=5 permissions=24 settings=11 users=')
             ->and(lastVerifiedRow())->toBe($now->toIso8601String())
             ->and(app(SettingsService::class)->get('backup_last_verified_at'))->toBe($now->toIso8601String());
     });

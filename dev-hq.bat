@@ -88,6 +88,11 @@ echo   Stop with Ctrl+C in this window - not the X button.
 echo ============================================================
 echo.
 
+REM Phase 6 added laravel/reverb. `composer install` only installs what composer.lock
+REM already pins, so this is a no-op once you are current and the fix when you are not.
+call composer install --no-interaction
+call npm install
+
 call composer run dev
 
 echo.

@@ -9,6 +9,10 @@
 #
 # Migrations are forward-only. A failed release leaves maintenance mode off again,
 # but a schema change is rolled back only by restoring a backup (docs/runbooks/deploy.md).
+#
+# Realtime: this script starts, restarts or stops hq-reverb to match BROADCAST_CONNECTION in
+# .env, and `npm run build` bakes VITE_REALTIME into the assets — so both halves of the switch
+# are applied by a release and by nothing else. See docs/runbooks/realtime.md.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -102,12 +106,28 @@ fix_ownership
 step "restart queue workers"
 artisan queue:restart
 
-step "restart Reverb if installed"
+step "Reverb follows .env"
+# Two conditions, both necessary. `reverb:start` must exist (the package is installed), and
+# .env must actually be in socket mode — BROADCAST_CONNECTION=reverb. Polling is a supported
+# mode (master prompt Part B), so a release in that mode STOPS Reverb rather than leaving a
+# websocket server running that nothing connects to.
+#
+# The restart itself drops every open socket. That is fine and it is why the client reconnects
+# on its own: the bell falls back to polling in the gap and says so, and a reconnect makes it
+# re-read rather than assume. See resources/js/Components/Notifications/notifications.ts.
+#
+# Note the ORDER in this script: `npm run build` ran several steps ago, and it is what bakes
+# VITE_REALTIME into the assets. A .env change to either half of the switch therefore needs a
+# release (`SKIP_PULL=1 deploy/deploy.sh`), never a `config:clear`.
 commands="$(artisan list --raw)"
-if grep -q '^reverb:start' <<<"$commands"; then
+broadcast_connection="$(sed -n 's/^BROADCAST_CONNECTION=//p' "$APP_DIR/.env" | tail -n 1 | tr -d "\"'")"
+if ! grep -q '^reverb:start' <<<"$commands"; then
+    echo "reverb:start is not available (laravel/reverb is not installed), skipping"
+elif [ "$broadcast_connection" = "reverb" ]; then
     supervisorctl restart hq-reverb
 else
-    echo "reverb:start not available (Reverb arrives in Phase 6), skipping"
+    echo "BROADCAST_CONNECTION=${broadcast_connection:-unset}, so the bell polls; stopping hq-reverb"
+    supervisorctl stop hq-reverb > /dev/null 2>&1 || true
 fi
 
 step "reload $PHP_FPM_SERVICE"

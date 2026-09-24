@@ -11,6 +11,7 @@ import type { BoardPayload, TransitionMap } from '@/Components/Tasks/taskBoard';
 import { Button } from '@/Components/ui/button';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
+import { usePagePoll } from '@/lib/pagePoll';
 import { queryParam, syncQuery } from '@/lib/tableState';
 
 defineOptions({ layout: AdminLayout });
@@ -29,6 +30,9 @@ defineProps<{
     canManageTags: boolean;
     employees: TaskNamedRef[];
 }>();
+
+/** Part 0.5 refresh rule: somebody else moves a card. */
+usePagePoll(['board']);
 
 /**
  * Every move on this screen is a server round trip that answers with a sentence, refusals

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { Bell, BellOff, CheckCheck, TriangleAlert } from '@lucide/vue';
+import { Bell, BellOff, CheckCheck, PlugZap, TriangleAlert } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import NotificationRow from '@/Components/Notifications/NotificationRow.vue';
@@ -12,20 +12,36 @@ import { Skeleton } from '@/Components/ui/skeleton';
 /**
  * The bell: the unread badge, and the newest ten behind it.
  *
- * It reads `GET /notifications/recent` every 15 seconds — §11 is in-app only until Reverb
- * arrives in Phase 6 — through `useNotificationBell()`, which owns the single interval and
- * stops it whenever nobody is looking. Nothing about the poll lives in this file, so a second
- * mount of the bell cannot start a second one.
+ * It subscribes to `private-notifications.{user}` and falls back to reading
+ * `GET /notifications/recent` every 15 seconds — on a polling build, and while the socket is
+ * down on a socket build. Both come through `useNotificationBell()`, which owns the single
+ * interval and the single subscription and stops the interval whenever nobody is looking.
+ * Nothing about either transport lives in this file, so a second mount of the bell cannot
+ * start a second one.
  *
- * **The count is the server's.** Marking read does not subtract one here; it writes, and the
- * write re-reads. The badge caps at `9+` because anything wider stretches past the icon.
+ * **The count is the server's**, on both transports. Marking read does not subtract one here;
+ * it writes, and the write re-reads. The badge caps at `9+` because anything wider stretches
+ * past the icon.
  *
- * The bell removes itself for somebody with no mailbox rather than greying out (DESIGN.md
- * §5.12), and it finds that out the way the backend states it — by being refused once. See
- * `notifications.ts`.
+ * ## When the socket drops
+ *
+ * The bell says so, in the popover, in words — *"Reconnecting — checking every 15 seconds"* —
+ * and keeps polling until it is back. It does not go quiet and it does not pretend: a bell
+ * that has silently stopped being right looks exactly like a bell with nothing to say, which
+ * is the one thing it must never look like.
+ *
+ * It is not a banner and not a toast. The state is worth knowing when you open the bell and is
+ * not worth interrupting anybody for, so it lives behind the click that asks about it.
+ *
+ * ## What a screen reader hears
+ *
+ * One polite live region, always in the DOM, holding at most one sentence every 30 seconds and
+ * only when the unread count has RISEN (`notifications.ts`). Arrivals never move anything on
+ * the page — the badge changes a number inside a fixed-width pill, the list behind the popover
+ * is only redrawn while the popover is shut — and nothing here takes focus.
  */
 
-const { unreadCount, recent, status } = useNotificationBell();
+const { unreadCount, recent, status, transport, announcement } = useNotificationBell();
 
 const open = ref(false);
 const page = usePage();
@@ -67,6 +83,12 @@ const loading = computed(() => recent.value.length === 0 && (status.value === 'i
                 </span>
             </Button>
         </PopoverTrigger>
+
+        <!-- The one live region. It is always in the DOM — a region created at the moment it
+             has something to say is a region a screen reader never announces — and `polite`
+             means it waits for a pause rather than cutting across whatever is being read.
+             What goes in it, and how rarely, is `notifications.ts`'s decision. -->
+        <span class="sr-only" role="status" aria-live="polite">{{ announcement }}</span>
         <!-- `PopoverContent` already caps itself at the available width, so 320 px is a
              preference and not an overflow at 360. -->
         <PopoverContent align="end" class="w-80 p-0">
@@ -108,6 +130,17 @@ const loading = computed(() => recent.value.length === 0 && (status.value === 'i
             <ul v-else class="max-h-96 overflow-y-auto">
                 <NotificationRow v-for="row in recent" :key="row.id" :row="row" compact />
             </ul>
+
+            <!-- Only when the socket is a socket that is down. A polling build says nothing:
+                 it is working exactly as it was built to, and an apology would be a bug report
+                 about a supported mode. The icon never carries this alone (DESIGN.md §5.6). -->
+            <p
+                v-if="transport === 'reconnecting'"
+                class="flex items-start gap-2 border-t px-3 py-2 text-xs text-muted-foreground"
+            >
+                <PlugZap class="mt-px size-3.5 shrink-0" aria-hidden="true" />
+                <span>Live updates are reconnecting. Checking every 15 seconds meanwhile.</span>
+            </p>
 
             <div class="border-t p-2">
                 <Button as-child variant="ghost" size="sm" class="w-full">

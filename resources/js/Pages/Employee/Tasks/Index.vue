@@ -15,6 +15,7 @@ import TaskList, { taskColumns } from '@/Components/Tasks/TaskList.vue';
 import TaskViewSwitcher from '@/Components/Tasks/TaskViewSwitcher.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
+import { usePagePoll } from '@/lib/pagePoll';
 import { queryParam } from '@/lib/tableState';
 
 defineOptions({ layout: EmployeeLayout });
@@ -32,6 +33,9 @@ defineProps<{
     /** `TagPolicy::create`, answered by the controller — whether the tag manager is offered. */
     canManageTags: boolean;
 }>();
+
+/** Part 0.5 refresh rule: somebody else moves or closes a task in a column you are reading. */
+usePagePoll(['tasks']);
 
 /** The drawer's writes are this screen's writes; the toaster announces them. */
 useFlashAsToast();

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Events\NotificationFeedChanged;
+use App\Http\Resources\NotificationResource;
 use App\Models\Notification;
 use App\Models\User;
 use App\Support\NotificationChannel;
@@ -10,6 +12,7 @@ use App\Support\NotificationType;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -24,8 +27,12 @@ use Illuminate\Support\Facades\DB;
  *
  * `event` is NotificationDispatcher's half — it turns one of the seven task events into a call
  * to notify() with a type, an object and a candidate list. Everything after that is here.
- * `realtime push` is Phase 6 and is not built; the bell polls, which is why the read methods
- * below are shaped to be cheap rather than clever.
+ *
+ * **`realtime push` is built (Phase 6)** and it is the last three lines of it: every write in
+ * this class ends at announce(), which dispatches NotificationFeedChanged on
+ * `private-notifications.{user}`. The read methods are still shaped to be cheap rather than
+ * clever, because the polling fallback is a supported mode and not dead code — a VPS running
+ * without Reverb asks these same two queries every fifteen seconds.
  *
  * ## Recipients are filtered by PERMISSION, never by role name
  *
@@ -51,9 +58,13 @@ use Illuminate\Support\Facades\DB;
  *
  * ## In-app only
  *
- * deliver() writes a row and does nothing else. No mail, no Web Push, no broadcast — the
- * `channels` list on the type is carried through so that Phase 12 has somewhere to hang a
- * second delivery, and today it resolves to exactly one channel and one row.
+ * deliver() writes a row and does nothing else. No mail and no Web Push — both are post-MVP
+ * (Part H) — and the `channels` list on the type is carried through so that Phase 12 has
+ * somewhere to hang a second delivery. Today it resolves to exactly one channel and one row.
+ *
+ * The Phase 6 broadcast is **not** a second channel in that sense and deliberately is not in
+ * that list: it delivers nothing new, it tells a bell that is already entitled to the row that
+ * the row is there. Putting it in `channels()` would have made "in-app" mean two things.
  */
 class NotificationService
 {
@@ -94,7 +105,16 @@ class NotificationService
         // resolving act on this team has no recipients at all. Shahadat is the reviewer, the
         // creator and the actor, so his approval writes zero rows; if resolving hung off a row
         // being written, the one flow 2-48 was raised about would be the one flow it missed.
-        $this->resolveFor($type, $target, $actor);
+        $resolved = $this->resolveFor($type, $target, $actor);
+
+        // The actor's own bell changed too, and it changed by rows LEAVING it. Announced
+        // before the early return below, for the same reason resolveFor() runs before it: the
+        // commonest resolving act on this team notifies nobody at all, and a bell that only
+        // updated when somebody else was told would keep showing a review request its owner
+        // has already answered.
+        if ($resolved > 0 && $actor !== null) {
+            $this->announce($actor);
+        }
 
         $recipients = $this->eligible($type, $recipients, $actor);
 
@@ -106,9 +126,16 @@ class NotificationService
         $body = $this->payload($target, $payload, $actor);
         $since = $this->windowStart();
 
-        return $recipients->map(
-            fn (User $user): Notification => $this->deliver($type, $user, $groupKey, $body, $since),
-        );
+        return $recipients->map(function (User $user) use ($type, $groupKey, $body, $since): Notification {
+            $notification = $this->deliver($type, $user, $groupKey, $body, $since);
+
+            // One announcement per recipient, after the row is written. A grouped delivery
+            // announces too: the row did not appear, but its count went up and its summary now
+            // reads "12 new comments in …", which is a different sentence on the same bell.
+            $this->announce($user);
+
+            return $notification;
+        });
     }
 
     /**
@@ -140,18 +167,18 @@ class NotificationService
      * One UPDATE over a set of group keys — the same `type:Class:id` strings groupKey() builds,
      * so "about this object" means here what it means everywhere else in this file.
      */
-    private function resolveFor(NotificationType $type, Model $target, ?User $actor): void
+    private function resolveFor(NotificationType $type, Model $target, ?User $actor): int
     {
         // A date-driven send (overdue, due tomorrow) has no actor: nobody acted, so nothing is
         // answered.
         if ($actor === null) {
-            return;
+            return 0;
         }
 
         $resolves = $type->resolves();
 
         if ($resolves === []) {
-            return;
+            return 0;
         }
 
         $keys = array_map(
@@ -161,7 +188,9 @@ class NotificationService
 
         $now = now();
 
-        Notification::query()
+        // The row count is returned so notify() knows whether the ACTOR's own bell changed —
+        // see the call site. Nothing else reads it.
+        return Notification::query()
             ->forUser($actor)
             ->unread()
             ->whereIn('group_key', $keys)
@@ -187,6 +216,8 @@ class NotificationService
 
         $notification->forceFill(['is_read' => true, 'read_at' => now()])->save();
 
+        $this->announce($user);
+
         return $notification;
     }
 
@@ -201,10 +232,16 @@ class NotificationService
     {
         $now = now();
 
-        return Notification::query()
+        $marked = Notification::query()
             ->forUser($user)
             ->unread()
             ->update(['is_read' => true, 'read_at' => $now, 'updated_at' => $now]);
+
+        if ($marked > 0) {
+            $this->announce($user);
+        }
+
+        return $marked;
     }
 
     /**
@@ -285,6 +322,43 @@ class NotificationService
             ->newestFirst()
             ->limit(max(1, $limit))
             ->get();
+    }
+
+    /**
+     * **The bell's whole payload**, in the one shape both transports carry.
+     *
+     * `GET /notifications/recent` returns this, and `NotificationFeedChanged::broadcastWith()`
+     * broadcasts this. That is the entire polling-fallback story: flipping
+     * `BROADCAST_CONNECTION` and `VITE_REALTIME` changes how the bell is TOLD and nothing about
+     * what it is told, because there is one method here and no second assembly anywhere.
+     * `tests/Feature/Realtime/PollingFallbackTest.php` asserts the two byte-for-byte.
+     *
+     * ## The request argument
+     *
+     * `NotificationResource` resolves each row's deep link **against the reader's own surface**
+     * — the same task is `/admin/tasks/41` for Shahadat and `/employee/tasks/41` for Tapu — and
+     * it reads that reader off the request. A broadcast has no request: it is assembled in a
+     * queued job, and a `Request` built there has no user, so every link would come back null
+     * and the socket's payload would quietly be a poorer one than the poll's.
+     *
+     * So a caller that HAS a request passes it, and a caller that does not gets one made here
+     * with this user resolved onto it. Neither branch decides anything: the link depends on the
+     * user's surface and on nothing else about the request, which is what makes the two
+     * identical and what the test pins down.
+     *
+     * @return array{unread_count: int, notifications: array<int, array<string, mixed>>}
+     */
+    public function feed(User $user, ?Request $request = null): array
+    {
+        $request ??= tap(
+            Request::create(route('notifications.recent')),
+            fn (Request $made) => $made->setUserResolver(fn (): User => $user),
+        );
+
+        return [
+            'unread_count' => $this->unreadCount($user),
+            'notifications' => NotificationResource::collection($this->recent($user))->resolve($request),
+        ];
     }
 
     /**
@@ -476,6 +550,22 @@ class NotificationService
      * with no cache to clear and no constant to change. A window of zero or less turns grouping
      * off rather than grouping everything, which is what an admin who types 0 means.
      */
+    /**
+     * Tell this person's bell that their feed changed.
+     *
+     * Called from every place that writes `notifications` for somebody and from nowhere else,
+     * which is the same discipline that keeps this class the only writer of the table: one
+     * door in, one announcement out. A caller cannot forget, because a caller cannot write.
+     *
+     * With `BROADCAST_CONNECTION=log` — the supported fallback — this writes the payload to the
+     * log and the bell learns the same thing fifteen seconds later by asking. Nothing here
+     * knows which of the two is running, and nothing here should.
+     */
+    private function announce(User $user): void
+    {
+        NotificationFeedChanged::dispatch($user);
+    }
+
     private function windowStart(): Carbon
     {
         $minutes = (int) $this->settings->get(self::WINDOW_SETTING);

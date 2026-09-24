@@ -64,7 +64,10 @@ trait ManagesDiscussion
     }
 
     /**
-     * Post a message, with or without a file on it.
+     * Post a message, with or without a file on it, naming whoever the picker named.
+     *
+     * MessageService is the one writer of a message, for every conversation type — see its
+     * docblock. This controller resolves the task and hands over.
      */
     private function discussionStore(StoreMessageRequest $request, Task $task): RedirectResponse
     {
@@ -72,11 +75,12 @@ trait ManagesDiscussion
         $conversation = $this->conversations->forTask($task);
 
         try {
-            $this->conversations->post(
+            $this->messages->post(
                 $request->user(),
                 $conversation,
                 $request->body(),
                 $request->upload(),
+                $request->mentionIds(),
             );
         } catch (ConversationStateException|FileStateException $exception) {
             return back()->with('error', $exception->getMessage());

@@ -6,6 +6,7 @@ use App\Events\LeaveApproved;
 use App\Events\LeaveCorrectionRequested;
 use App\Events\LeaveRejected;
 use App\Events\LeaveRequested;
+use App\Events\MessagePosted;
 use App\Events\ProjectCancelled;
 use App\Events\TaskAssigned;
 use App\Events\TaskBecameOverdue;
@@ -16,6 +17,7 @@ use App\Events\TaskDueTomorrow;
 use App\Events\TaskReassigned;
 use App\Events\TaskStatusChanged;
 use App\Events\TaskSubmittedForReview;
+use App\Models\Conversation;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
 use App\Models\Message;
@@ -24,6 +26,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\TaskService;
+use App\Support\ConversationType;
 use App\Support\NotificationType;
 use App\Support\Permission;
 use App\Support\RoleName;
@@ -96,6 +99,9 @@ class NotificationDispatcher
             LeaveApproved::class => 'onLeaveApproved',
             LeaveRejected::class => 'onLeaveRejected',
             LeaveCorrectionRequested::class => 'onLeaveCorrectionRequested',
+
+            // Phase 6. One event for every message in every conversation type.
+            MessagePosted::class => 'onMessagePosted',
         ];
     }
 
@@ -205,6 +211,14 @@ class NotificationDispatcher
 
         $candidates = $this->assigneesAndCreator($event->task)
             ->merge($this->usersByIds($priorAuthorIds));
+
+        // Anybody the message NAMED hears about it as a mention instead — one row per message
+        // per person, and the one that carries more information. See App\Events\TaskCommented.
+        $mentioned = array_map('intval', $event->mentionedUserIds);
+
+        $candidates = $candidates->reject(
+            fn (User $user): bool => in_array((int) $user->getKey(), $mentioned, true),
+        );
 
         $this->notifications->notify(
             NotificationType::TaskCommented,
@@ -561,6 +575,185 @@ class NotificationDispatcher
                 fn (mixed $value): bool => $value !== null,
             ),
         ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Messages (Phase 6, master prompt Part D §10)
+    |--------------------------------------------------------------------------
+    |
+    | One event, three notifications, and a deliberate silence.
+    |
+    | The silence first, because it is the design: **a message in the team channel or a project
+    | channel notifies nobody.** Five to fifteen people are replacing a Telegram group and the
+    | Messages page is open in a tab all day; a bell row per channel line is a bell nobody reads
+    | by Tuesday, and §11's whole purpose is that it stays worth looking at. A channel's unread
+    | count lives on the channel, where the reader chose to look. If you want somebody's
+    | attention in a channel you name them — which is what makes @mention mean something rather
+    | than being decoration on top of a notification they were getting anyway.
+    |
+    | What does notify:
+    |
+    |   - a MENTION, in any conversation including a task discussion. Addressed to one person.
+    |   - a DM, to the other half of it. There is nowhere else for it to appear.
+    |   - an ANNOUNCEMENT, to everybody who can read the channel.
+    |
+    | All three are grouped by `NotificationService` on the CONVERSATION, so twelve lines from
+    | one person inside the window are one row saying twelve — the same rule, the same window
+    | and the same reading-closes-the-group behaviour as the task comment it was written for
+    | (decision 2-33).
+    */
+
+    /**
+     * Somebody posted. Who hears about it depends on what kind of room it was.
+     */
+    public function onMessagePosted(MessagePosted $event): void
+    {
+        $this->notifyMentions($event);
+
+        match ($event->conversation->type) {
+            ConversationType::Dm => $this->notifyDirectMessage($event),
+            ConversationType::Announcement => $this->notifyAnnouncement($event),
+            // Team, project and task channels: the mention above was the whole of it.
+            default => null,
+        };
+    }
+
+    /**
+     * The people this message named.
+     *
+     * The ids arrive already filtered to people who can read the conversation — MessageService
+     * writes no mention row for anybody else, because a mention is not a grant. They still go
+     * through the object gate here, for the same reason every other candidate list does: the
+     * two halves of the rule are applied separately and independently, and the list-shaped one
+     * is never trusted to have been the policy.
+     */
+    private function notifyMentions(MessagePosted $event): void
+    {
+        $mentioned = $this->usersByIds(array_map('intval', $event->mentionedUserIds));
+
+        if ($mentioned->isEmpty()) {
+            return;
+        }
+
+        $this->notifications->notify(
+            NotificationType::MessageMentioned,
+            $event->conversation,
+            $this->canSeeConversation($event->conversation, $mentioned),
+            $this->messagePayload($event, fn (User $reader): string => $this->label($event, $reader)),
+            $event->actor,
+        );
+    }
+
+    /**
+     * A DM: the other person, and nobody else by construction — a DM has exactly two columns.
+     *
+     * Somebody who was ALSO named in it is dropped, so a DM containing "@Tapu" is one row and
+     * not two. The mention is the one that survives, for the reason it survives on a task
+     * comment: it says more.
+     */
+    private function notifyDirectMessage(MessagePosted $event): void
+    {
+        $other = $event->conversation->dmCounterpartFor($event->actor);
+
+        if ($other === null || in_array((int) $other->getKey(), array_map('intval', $event->mentionedUserIds), true)) {
+            return;
+        }
+
+        $this->notifications->notify(
+            NotificationType::MessageReceived,
+            $event->conversation,
+            $this->canSeeConversation($event->conversation, new Collection([$other])),
+            // The title is the SENDER's name, because that is what a DM is called from the
+            // receiving side — `labelFor()` asked from the reader's end gives the same answer,
+            // and this is the one payload where the two coincide.
+            $this->messagePayload($event, fn (User $reader): string => (string) $event->actor->name),
+            $event->actor,
+        );
+    }
+
+    /**
+     * An announcement: everybody who can read the channel.
+     *
+     * The candidate list is every active user and the gate narrows it — which for this channel
+     * is `messages.use`, so the Accountant falls out twice over (here, and again on
+     * `NotificationType::requires()`) without appearing in this file. People already named in
+     * it are dropped, so a broadcast that greets somebody by name gives them one row.
+     */
+    private function notifyAnnouncement(MessagePosted $event): void
+    {
+        $mentioned = array_map('intval', $event->mentionedUserIds);
+
+        $candidates = new Collection(User::query()
+            ->where('status', UserStatus::Active->value)
+            ->get()
+            ->reject(fn (User $user): bool => in_array((int) $user->getKey(), $mentioned, true))
+            ->all());
+
+        $this->notifications->notify(
+            NotificationType::AnnouncementPosted,
+            $event->conversation,
+            $this->canSeeConversation($event->conversation, $candidates),
+            $this->messagePayload($event, fn (User $reader): string => 'Announcements'),
+            $event->actor,
+        );
+    }
+
+    /**
+     * Keep the candidates who can read this conversation — the object-shaped half, for a room.
+     *
+     * @param  Collection<int, User>  $candidates
+     * @return Collection<int, User>
+     */
+    private function canSeeConversation(Conversation $conversation, Collection $candidates): Collection
+    {
+        return $candidates
+            ->filter(fn (mixed $user): bool => $user instanceof User)
+            ->unique(fn (User $user): int => (int) $user->getKey())
+            ->filter(fn (User $user): bool => Gate::forUser($user)->allows('view', $conversation))
+            ->values();
+    }
+
+    /**
+     * What a message notification stores.
+     *
+     * The conversation's NAME and no message text at all. A payload is written once and read
+     * later by one person, so it must carry nothing whose visibility could change in between —
+     * and a message body is the most obviously changeable thing in this application, since the
+     * conversation it was said in can stop being readable the moment somebody leaves a project.
+     * The sentence names the room; the room is one click away and re-checks the policy.
+     *
+     * The title is resolved with a callback because a DM's name depends on who is reading it,
+     * and `labelFor()` is the one place that knows that. Every recipient of one `notify()` call
+     * shares a title here, which is true for all three types: a mention row's title is the room,
+     * a DM's is the sender, an announcement's is the channel.
+     *
+     * @param  callable(User): string  $title
+     * @return array{title: string, context: array<string, mixed>}
+     */
+    private function messagePayload(MessagePosted $event, callable $title): array
+    {
+        return [
+            'title' => $title($event->actor),
+            'context' => array_filter([
+                'conversation_id' => (int) $event->conversation->getKey(),
+                'conversation_type' => $event->conversation->type?->value,
+                'message_id' => (int) $event->message->getKey(),
+            ], fn (mixed $value): bool => $value !== null),
+        ];
+    }
+
+    /**
+     * What this conversation is called, as a sentence about it would name it.
+     *
+     * Asked from the ACTOR's side rather than each reader's, because one `notify()` call writes
+     * one payload for everybody in it. That is exact for a team, project or announcement
+     * channel, whose name is the same to everyone, and for a task discussion; the only type
+     * whose name differs per reader is a DM, and a DM's payload does not come through here.
+     */
+    private function label(MessagePosted $event, User $reader): string
+    {
+        return $event->conversation->labelFor($reader);
     }
 
     /*

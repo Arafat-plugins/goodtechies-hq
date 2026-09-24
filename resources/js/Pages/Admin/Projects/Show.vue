@@ -5,6 +5,8 @@ import { computed, ref } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
 import { fileRoutes } from '@/Components/Files/files';
+import MessageThread from '@/Components/Messages/MessageThread.vue';
+import { conversationRoutes, emptyThread } from '@/Components/Messages/messages';
 import PageShell from '@/Components/PageShell.vue';
 import FinanceCard from '@/Components/Projects/FinanceCard.vue';
 import MembersCard from '@/Components/Projects/MembersCard.vue';
@@ -32,6 +34,8 @@ const props = defineProps<{
     project: { data: Project };
     activity: { description: string; actor: string | null; at: string }[];
     assignableEmployees: EmployeeOption[];
+    /** The project's channel (Phase 6). The Discussion tab fetches the thread itself. */
+    discussionConversationId: number;
 }>();
 
 const project = computed(() => props.project.data);
@@ -156,6 +160,7 @@ function confirmArchiveToggle(): void {
                     <TabsTrigger value="overview">Overview</TabsTrigger>
                     <TabsTrigger v-if="permissions.can_view_finance" value="finance">Finance</TabsTrigger>
                     <TabsTrigger value="members">Members</TabsTrigger>
+                    <TabsTrigger value="discussion">Discussion</TabsTrigger>
                     <TabsTrigger value="activity">Activity</TabsTrigger>
                     <TabsTrigger value="tasks">Tasks</TabsTrigger>
                     <TabsTrigger value="recurring">Recurring</TabsTrigger>
@@ -255,6 +260,29 @@ function confirmArchiveToggle(): void {
                     :can-manage="permissions.can_update === true"
                     :employees="assignableEmployees"
                 />
+            </TabsContent>
+
+            <!--
+                The project's channel — the same conversation the Messages page lists under
+                Projects, and the same thread component. Mounted only while the tab is open, so
+                the page carries an id rather than a thread and the payload it shows is the one
+                the policy built (see `emptyThread`). Who may post is `ConversationPolicy`,
+                which asks `ProjectPolicy::view` about this project: a member speaks in it
+                because they are a member, with no list synced anywhere.
+            -->
+            <TabsContent value="discussion" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+                <Card class="min-w-0 shadow-xs">
+                    <CardContent class="min-w-0">
+                        <MessageThread
+                            v-if="tab === 'discussion'"
+                            :thread="emptyThread(discussionConversationId, project.name)"
+                            :routes="conversationRoutes(discussionConversationId)"
+                            heading="Discussion"
+                            description="The project channel. Everybody who can see this project can read and post here."
+                            scroll
+                        />
+                    </CardContent>
+                </Card>
             </TabsContent>
 
             <TabsContent value="files" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">

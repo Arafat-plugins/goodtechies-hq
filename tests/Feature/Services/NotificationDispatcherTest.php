@@ -5,6 +5,7 @@ use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\ConversationService;
+use App\Services\MessageService;
 use App\Services\NotificationService;
 use App\Services\ProjectService;
 use App\Services\TaskService;
@@ -38,6 +39,7 @@ beforeEach(function () {
 
     $this->tasks = app(TaskService::class);
     $this->conversations = app(ConversationService::class);
+    $this->messages = app(MessageService::class);
     $this->projects = app(ProjectService::class);
 
     $this->admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
@@ -252,7 +254,7 @@ it('collapses twelve real comments into one row reading "12 new comments"', func
     $conversation = $this->conversations->forTask($this->task);
 
     foreach (range(1, 12) as $i) {
-        $this->conversations->post($this->admin, $conversation, 'Comment number '.$i);
+        $this->messages->post($this->admin, $conversation, 'Comment number '.$i);
     }
 
     $rows = Notification::query()->forUser($this->tapu)->get();
@@ -268,7 +270,7 @@ it('does not tell an employee about a task they are not assigned to', function (
 
     // Yaseen is an EMPLOYEE and is not on this task, so TaskPolicy::view says no and the
     // dispatcher drops him — the same 404-shaped rule the list endpoints enforce.
-    $this->conversations->post($this->admin, $this->conversations->forTask($this->task), 'Anyone looking at this?');
+    $this->messages->post($this->admin, $this->conversations->forTask($this->task), 'Anyone looking at this?');
 
     expect(typesFor($this->yaseen))->toBe([])
         ->and(typesFor($this->tapu))->toBe([NotificationType::TaskCommented->value]);

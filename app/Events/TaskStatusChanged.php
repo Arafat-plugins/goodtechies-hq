@@ -2,9 +2,11 @@
 
 namespace App\Events;
 
+use App\Events\Concerns\BroadcastsTaskStatus;
 use App\Models\Task;
 use App\Models\User;
 use App\Support\TaskStatus;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 
 /**
  * A task moved along the status machine.
@@ -20,8 +22,10 @@ use App\Support\TaskStatus;
  * "waiting for your review" and "status changed to In review" would have been told the same
  * thing twice, and the second one would be the less useful of the two.
  */
-class TaskStatusChanged
+class TaskStatusChanged implements ShouldBroadcast
 {
+    use BroadcastsTaskStatus;
+
     public function __construct(
         public readonly Task $task,
         public readonly User $actor,

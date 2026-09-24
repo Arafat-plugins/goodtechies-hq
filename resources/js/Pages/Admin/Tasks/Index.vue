@@ -18,6 +18,7 @@ import TaskViewSwitcher from '@/Components/Tasks/TaskViewSwitcher.vue';
 import { Button } from '@/Components/ui/button';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
+import { usePagePoll } from '@/lib/pagePoll';
 import { queryParam, syncQuery } from '@/lib/tableState';
 
 defineOptions({ layout: AdminLayout });
@@ -37,6 +38,9 @@ defineProps<{
     /** Slice 1 had no list to build the assignee chip from; slice 2's controller sends one. */
     employees: TaskNamedRef[];
 }>();
+
+/** Part 0.5 refresh rule: somebody else moves or closes a task in a column you are reading. */
+usePagePoll(['tasks']);
 
 /**
  * The drawer's writes are this screen's writes, and a drawer covers the layout's alert strip

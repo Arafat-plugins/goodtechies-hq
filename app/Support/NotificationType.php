@@ -80,12 +80,40 @@ enum NotificationType: string
     case LeaveRejected = 'leave.rejected';
     case LeaveCorrectionRequested = 'leave.correction_requested';
 
+    /* Messages tab (Phase 6) ------------------------------------------------------------- */
+
+    /**
+     * A message in a DM — a thread whose entire audience is you and one other person.
+     *
+     * **There is deliberately no type for a message in the team or a project channel.** On a
+     * team of five to fifteen replacing a Telegram group, a bell row per channel message is a
+     * bell nobody reads by Tuesday, and §11's whole purpose is that the bell stays worth
+     * looking at. A channel's unread count lives on the channel, in the Messages list, where
+     * the reader chose to look; a DM is addressed to one person and has nowhere else to appear.
+     * If you want somebody's attention in a channel, you name them — which is the next case,
+     * and which is what makes @mention mean something.
+     */
+    case MessageReceived = 'message.received';
+
+    /**
+     * Somebody named you in a message, in any conversation you can see.
+     *
+     * The one messaging event that is a request rather than news: a mention says *this line is
+     * for you*. It is why its priority is High while a DM's is Normal — see priority().
+     */
+    case MessageMentioned = 'message.mentioned';
+
+    /** A holder of `announcements.send` broadcast something to everybody. */
+    case AnnouncementPosted = 'announcement.posted';
+
     public function tab(): NotificationTab
     {
         return match ($this) {
             self::ProjectCancelled => NotificationTab::System,
             self::LeaveRequested, self::LeaveApproved, self::LeaveRejected,
             self::LeaveCorrectionRequested => NotificationTab::Leave,
+            self::MessageReceived, self::MessageMentioned,
+            self::AnnouncementPosted => NotificationTab::Messages,
             default => NotificationTab::Tasks,
         };
     }
@@ -104,6 +132,16 @@ enum NotificationType: string
             // for may be tomorrow. A correction request is the same shape pointed the other
             // way: the request has stopped moving and only the employee can start it again.
             self::LeaveRequested, self::LeaveCorrectionRequested => NotificationPriority::High,
+
+            // Being named is the one messaging event somebody is waiting on an answer to. It is
+            // the same shape as a review request pointed at a sentence instead of a task, and it
+            // is what a reader is buying when they type somebody's name instead of just talking.
+            self::MessageMentioned => NotificationPriority::High,
+
+            // Addressed to you, and nothing is blocked until you answer it — the same rank a
+            // leave decision gets. An announcement is news for everybody at once; its loudness
+            // is the banner on the Messages page, not the bell.
+            self::MessageReceived, self::AnnouncementPosted => NotificationPriority::Normal,
 
             // The answer to a question they asked. It matters, and nothing is blocked on
             // reading it — the decision has already been made and the calendar already shows it.
@@ -230,6 +268,24 @@ enum NotificationType: string
         return match ($this) {
             self::LeaveRequested => Permission::LeaveApprove,
             self::LeaveApproved, self::LeaveRejected, self::LeaveCorrectionRequested => Permission::LeaveApply,
+
+            // ## Phase 6, and what it means for the Accountant
+            //
+            // `messages.use` — the key Phase 6 adds, held by every role but ACCOUNTANT. So the
+            // Accountant, who from Phase 5 has a mailbox (decision 5-14), can never receive a
+            // message row in it, and nobody had to name them to arrange that.
+            //
+            // It is also the last of four gates that make "what would a mention of an Accountant
+            // mean?" a question with no reachable answer: the mention picker only offers people
+            // who can see the conversation, MessageService refuses to write a mention row for
+            // anybody who cannot, ConversationPolicy refuses the Accountant every non-task
+            // conversation and TaskPolicy refuses them every task one — and if a row were forged
+            // past all three, this line drops the notification. Four gates for one rule is not
+            // belt and braces; each of them is the natural place for its own question, and the
+            // rule is that none of them says "Accountant".
+            self::MessageReceived, self::MessageMentioned,
+            self::AnnouncementPosted => Permission::MessagesUse,
+
             default => Permission::TasksView,
         };
     }
@@ -320,6 +376,29 @@ enum NotificationType: string
                 sprintf('Your %s leave needs a correction (%s)', self::leaveType($context), self::window($context)),
                 $context,
             ),
+
+            // Messages (Phase 6). `title` is what the conversation is CALLED to this reader —
+            // for a DM that is the other person's name, which is why the singular does not
+            // repeat the actor. The grouped branches are the visible half of the dedup rule
+            // again: twelve lines from one person in two minutes are one row saying twelve.
+            self::MessageReceived => $grouped
+                ? sprintf('%d new messages from %s', $count, $title)
+                : sprintf('New message from %s', $title),
+
+            // The mention says WHO named you, because that is the first thing you want and it
+            // is what tells a mention apart from the comment notification it sits beside. The
+            // grouped form drops the name for the reason the grouped status line drops the
+            // reason: a row standing for four mentions cannot honestly carry one person's name.
+            self::MessageMentioned => $grouped
+                ? sprintf('%d mentions of you in %s', $count, $title)
+                : sprintf('%s mentioned you in %s', self::actor($payload), $title),
+
+            // Nothing of the announcement's text is in the payload, on purpose: a payload is
+            // written once and read later, and the announcement itself is one click away in a
+            // conversation every recipient can already open.
+            self::AnnouncementPosted => $grouped
+                ? sprintf('%d new announcements', $count)
+                : sprintf('New announcement from %s', self::actor($payload)),
         };
     }
 
@@ -353,6 +432,21 @@ enum NotificationType: string
         return $start->month === $end->month
             ? sprintf('%d–%s', $start->day, $end->isoFormat('D MMM'))
             : sprintf('%s – %s', $start->isoFormat('D MMM'), $end->isoFormat('D MMM'));
+    }
+
+    /**
+     * Who did it, as the payload recorded them — or a placeholder, never an empty gap in a
+     * sentence. Every payload NotificationService writes carries an `actor` block or an
+     * explicit null (a date-driven send has nobody).
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private static function actor(array $payload): string
+    {
+        $actor = is_array($payload['actor'] ?? null) ? $payload['actor'] : [];
+        $name = trim((string) ($actor['name'] ?? ''));
+
+        return $name === '' ? 'Somebody' : $name;
     }
 
     /**
