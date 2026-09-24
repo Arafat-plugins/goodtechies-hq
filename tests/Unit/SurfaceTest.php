@@ -31,9 +31,16 @@ it('uses dotted audit event values', function () {
     // what Phase 9 will pay, so each is recorded with old and new values. (It was 24 from
     // Phase 2 slice 4, which added `tag.deleted`.)
     //
+    // 30 since Phase 5 added `leave.balance_adjusted` — Part C §4 names leave approved and
+    // rejected and stops there, but Part D §9 asks for balance adjustments to be audit-logged
+    // in as many words ("no accrual logic in MVP — Admin adjusts balances, audit-logged"). It
+    // is the same shape of act as `attendance.edited`: one person quietly changing a number on
+    // somebody else's record that decides what they are allowed later.
+    //
     // Decision 4-17 stands: this asserting a COUNT rather than the set is brittle, and every
     // phase adding an event has to come here. It is a count away from being a real test.
-    expect(AuditEvent::cases())->toHaveCount(29)
+    expect(AuditEvent::cases())->toHaveCount(30)
         ->and(AuditEvent::TwoFactorDisabled->value)->toBe('user.two_factor_disabled')
+        ->and(AuditEvent::LeaveBalanceAdjusted->value)->toBe('leave.balance_adjusted')
         ->and(AuditEvent::RestrictedAccessAttempt->value)->toBe('access.restricted_attempt');
 })->group('phase0');

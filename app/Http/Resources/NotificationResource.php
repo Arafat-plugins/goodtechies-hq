@@ -2,9 +2,11 @@
 
 namespace App\Http\Resources;
 
+use App\Models\LeaveRequest;
 use App\Models\Notification;
 use App\Models\Project;
 use App\Models\Task;
+use App\Support\NotificationType;
 use App\Support\Surface;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -84,12 +86,30 @@ class NotificationResource extends JsonResource
             return null;
         }
 
+        // Leave is the first object every surface can reach, and it is reached at the same URL
+        // by all three: `GET /leave` is a shared route, because applying for leave is a fact
+        // about the person rather than about the shell they are in (decision 4-15's shape). So
+        // it is resolved BEFORE the surface prefix below — there is no prefix to pick — and it
+        // is why the Accountant now has a notification that links somewhere.
+        //
+        // There is no page for one request, so the link is to the screen the READER would act
+        // on. Which one that is follows from the TYPE and not from the role: `leave.requested`
+        // is addressed to somebody who has to rule on it, so it opens the queue; the three
+        // answers are addressed to the person who asked, so they open My Leave, where the row
+        // carries its status and the approver's note. An Admin gets both, on different rows,
+        // which is correct — they both apply for leave and decide other people's.
+        if ($target['type'] === LeaveRequest::class) {
+            $name = $this->type === NotificationType::LeaveRequested ? 'admin.leave.index' : 'leave.show';
+
+            return Route::has($name) ? route($name) : null;
+        }
+
         $prefix = match ($surface) {
             Surface::Admin => 'admin',
             Surface::Employee => 'employee',
             // The Accountant has no task or project screens at all (Part C: 403 on every
-            // project route), so there is nowhere for a notification of theirs to point. They
-            // cannot reach these endpoints in this phase either.
+            // project route), so there is nowhere for a notification of theirs about one to
+            // point.
             Surface::Accountant => null,
         };
 

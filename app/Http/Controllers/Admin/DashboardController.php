@@ -3,12 +3,16 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\HolidayResource;
 use App\Models\AttendanceRecord;
 use App\Models\DailyWorkSummary;
 use App\Models\Employee;
+use App\Models\Holiday;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\AttendanceService;
+use App\Services\HolidayService;
+use App\Services\LeaveService;
 use App\Services\ProjectService;
 use App\Services\TaskReviewers;
 use App\Services\TaskService;
@@ -76,6 +80,8 @@ class DashboardController extends Controller
         private readonly ProjectService $projects,
         private readonly TaskReviewers $reviewers,
         private readonly AttendanceService $attendance,
+        private readonly HolidayService $holidays,
+        private readonly LeaveService $leave,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -94,7 +100,31 @@ class DashboardController extends Controller
             'workStats' => $this->workStats($user, $asOf, $maySeeTasks),
             'attention' => $maySeeTasks ? $this->attention($user, $asOf) : [],
             'taskStatuses' => $maySeeTasks ? $this->taskStatuses($user, $asOf) : [],
+            'upcomingHolidays' => $this->upcomingHolidays($request, $asOf),
         ]);
+    }
+
+    /**
+     * "Upcoming holidays" — Part D §3's card, recorded from the design references (Part I).
+     *
+     * Four rows, today included, straight out of `HolidayService`: the same service the
+     * attendance derivation and the Holidays screen read, so this card and the grid cannot
+     * disagree about whether Thursday is Victory Day.
+     *
+     * Empty for somebody who may not see the calendar, which today is nobody signed in — a
+     * holiday has no employee, no project and no scope, so there is no holiday that is present
+     * for one reader and absent for another (`HolidayPolicy`). The gate is asked anyway rather
+     * than assumed, because that is where the answer lives if it ever stops being everybody.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function upcomingHolidays(Request $request, Carbon $asOf): array
+    {
+        if (! Gate::forUser($request->user())->allows('viewAny', Holiday::class)) {
+            return [];
+        }
+
+        return HolidayResource::collection($this->holidays->upcoming($asOf))->resolve($request);
     }
 
     /**
@@ -113,9 +143,12 @@ class DashboardController extends Controller
      *     for: reporting. The target beside it is the employee's own
      *     `schedules.working_hours_per_day` and nothing is divided by it — no percentage, no bar
      *     presented as a grade, no comparison between the people on the list (Part H §1).
-     *   - **On leave** stays a placeholder naming Phase 5. `leave_requests` does not exist, so a
-     *     card reading "0" would be a measurement nobody has taken — and would read as *nobody
-     *     is on leave*, which is a different and possibly false statement.
+     *   - **On leave** (Phase 5) — how many DISTINCT PEOPLE have an approved leave request
+     *     whose window covers today. It is counted off `leave_requests` and not off attendance
+     *     rows, which matters: a remote-timer employee has no attendance rows at all
+     *     (decision 4-11), so a count of Leave-status rows would have quietly left Tapu out of
+     *     the one number that is about people being away. It is a count of people and nothing
+     *     else — no percentage of the agency, no comparison with last week (Part H §1).
      *
      * Empty for somebody who may not manage other people's attendance: the whole block is
      * absent from the payload rather than sent with zeroes (Part C §1 — a field the requester
@@ -138,6 +171,10 @@ class DashboardController extends Controller
         return [
             'present' => $present,
             'absent' => (int) $counts->get(AttendanceStatus::Absent->value, 0),
+            // Phase 5. Counted off approved `leave_requests` covering today — see the docblock
+            // for why that is not the same as counting Leave attendance rows.
+            'on_leave' => $this->leave->onLeaveCount($asOf),
+            'leave_href' => '/admin/leave/calendar',
             'href' => '/admin/attendance',
             'remote' => $this->remoteTimeToday($user, $asOf),
         ];

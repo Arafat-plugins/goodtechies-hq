@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Shared\AttendanceController;
 use App\Http\Controllers\Shared\FileDownloadController;
+use App\Http\Controllers\Shared\LeaveController;
 use App\Http\Controllers\Shared\NotificationController;
 use App\Http\Controllers\Shared\ProfileController;
 use App\Http\Controllers\Shared\ProfilePasswordController;
@@ -72,6 +73,32 @@ Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
         ->name('attendance.show');
     Route::post('/attendance/clock-in', [AttendanceController::class, 'clockIn'])->name('attendance.clock-in');
     Route::post('/attendance/clock-out', [AttendanceController::class, 'clockOut'])->name('attendance.clock-out');
+
+    // My Leave, and applying for it (master prompt Part D §9, Phase 5). Shared rather than one
+    // set per surface for the reason the clock above is, and Part C §1 states it outright:
+    // **every** role may apply for their own leave, the ACCOUNTANT included — and the note
+    // under that matrix says so again ("The Accountant shell therefore carries My Leave and My
+    // Payslip"). Applying is a fact about the person, not about the shell they are in
+    // (decision 4-15), so three copies of these three routes would have been three places for
+    // "whose leave is this" to be answered differently — and the Accountant's copy would have
+    // been the one nobody tested.
+    //
+    // **The Accountant still applies in its own shell.** That is the page's doing, not the
+    // route's: `Pages/Shared/Leave.vue` picks its layout from `auth.user.surface`, exactly as
+    // Profile and Attendance do, so an Accountant gets `AccountantLayout` and imports nothing
+    // from `Layouts/AdminLayout.vue` or `Pages/Admin/`.
+    //
+    // The QUEUE is not here. Approving, rejecting, sending a request back and editing a balance
+    // are Admin acts on the Admin surface — see `routes/admin.php`.
+    //
+    // `PUT /leave/{leaveRequest}` is the employee's one move: answering a correction request by
+    // amending and resubmitting, which is `correction_requested → pending` on the SAME request.
+    // The id is re-resolved through `LeaveRequest::visibleTo()` before the policy is asked, so
+    // somebody else's request is **404** and never 403 — the requester never learns whether the
+    // id existed (Part C).
+    Route::get('/leave', [LeaveController::class, 'show'])->name('leave.show');
+    Route::post('/leave', [LeaveController::class, 'store'])->name('leave.store');
+    Route::put('/leave/{leaveRequest}', [LeaveController::class, 'update'])->name('leave.update');
 
     // Downloading a file. Shared rather than one route per surface, because who may fetch a
     // file is a fact about the requester and the record it hangs off, not about the shell they

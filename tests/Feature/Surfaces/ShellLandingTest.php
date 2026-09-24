@@ -87,12 +87,20 @@ it('gives each dashboard exactly its documented props', function (string $email,
     // `attendance` is Phase 4's: Present today, Absent, and the remote time per remote
     // employee (AC2). Absent entirely — not zeroed — for anyone without
     // `attendance.manage_others`, which is why it is asserted on the Admin row only.
-    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats', 'attention', 'taskStatuses', 'attendance']],
+    // `upcomingHolidays` and the `attendance.on_leave` count inside the block above are Phase
+    // 5's: the company calendar's next few days, and how many people are on approved leave
+    // today. The On leave placeholder that used to sit in this payload is gone — it is a real
+    // number now, so it lives inside `attendance` rather than as a key of its own.
+    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats', 'attention', 'taskStatuses', 'attendance', 'upcomingHolidays']],
     'accountant' => ['accountant@goodtechies.test', '/accountant/dashboard', ['greetingName', 'today']],
     // `timer` and `attendance` are Phase 4's hero: exactly one of them is non-null, and which
     // one the server decides from `tracking_mode`. Both keys are always present, because a
     // payload whose shape depended on the reader is a payload no screen can be typed against.
-    'employee' => ['yaseen@goodtechies.test', '/employee/dashboard', ['greetingName', 'today', 'trackingMode', 'taskStats', 'timer', 'attendance']],
+    // `upcomingHolidays` and `leave` are Phase 5's two cards in this shell. `leave` is always
+    // present and is null only for somebody with no employee record — the same reason `timer`
+    // and `attendance` are both always present: a payload whose SHAPE depended on the reader
+    // is a payload no screen can be typed against.
+    'employee' => ['yaseen@goodtechies.test', '/employee/dashboard', ['greetingName', 'today', 'trackingMode', 'taskStats', 'timer', 'attendance', 'upcomingHolidays', 'leave']],
 ])->group('phase0');
 
 it('passes the greeting name and tracking mode to the employee dashboard', function (string $email, string $name, string $mode) {

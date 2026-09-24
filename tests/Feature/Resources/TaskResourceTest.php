@@ -57,6 +57,10 @@ it('sends exactly the documented task keys', function () {
         'created_at', 'created_by',
         'project', 'assignees', 'primary_assignee', 'tags',
         'subtask_count', 'subtasks_done_count', 'attachment_count', 'permissions',
+        // Phase 5: the assignees who are on approved leave when this task is due. Always an
+        // array — empty for a task nobody is away for AND for a reader who may not see that
+        // leave, so there is no second meaning for null to carry (Part D §5's flag).
+        'assignees_on_leave',
         // checklist, links, dependencies, dependents, attachments and available_transitions
         // are the detail page's; on a list they are absent, not empty.
     ]);

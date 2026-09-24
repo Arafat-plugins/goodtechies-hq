@@ -62,6 +62,15 @@ enum AuditEvent: string
     case ScheduleChanged = 'schedule.changed';
     case LeaveApproved = 'leave.approved';
     case LeaveRejected = 'leave.rejected';
+    // Part C §4 names leave approved and rejected and stops there. Adjusting a BALANCE is
+    // recorded as well, and Part D §9 is what asks for it: "no accrual logic in MVP — Admin
+    // adjusts balances, **audit-logged**". It is the same shape of act as `attendance.edited`
+    // — one person quietly changing a number on somebody else's record that decides what they
+    // are allowed later — so it carries the reason the Form Request required and old and new
+    // values. Approving a request decrements the same number and is NOT logged twice: the
+    // `leave.approved` row already says which request spent the days, and a second row per
+    // approval would be the log recording that the software worked.
+    case LeaveBalanceAdjusted = 'leave.balance_adjusted';
     case SalaryChanged = 'salary.changed';
     case PayrollApproved = 'payroll.approved';
     case PayrollLockReversed = 'payroll.lock_reversed';

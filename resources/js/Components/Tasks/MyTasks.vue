@@ -106,6 +106,7 @@ export function bucketSubline(key: string, count: number): string {
 import { Link, router } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import DataTable from '@/Components/DataTable/DataTable.vue';
+import OnLeaveFlag from '@/Components/Leave/OnLeaveFlag.vue';
 import StatCard from '@/Components/StatCard.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { formatTaskDate, tagTone, taskColumns } from '@/Components/Tasks/TaskList.vue';
@@ -193,7 +194,17 @@ const loading = useNavigationPending();
                 @row-click="openTask"
             >
                 <template #cell-title="{ row }">
-                    <span class="font-medium break-words">{{ row.title }}</span>
+                    <div class="flex min-w-0 flex-col gap-1">
+                        <span class="font-medium break-words">{{ row.title }}</span>
+                        <!--
+                            "Assignee on leave" (Part D §9 puts the flag on the task list and
+                            the dashboard). On this page it is almost always the reader's own
+                            leave — the server scopes it — so it reads as "you are away when
+                            this is due", which is the one thing a plate cannot otherwise tell
+                            you. It is a flag and nothing reassigns anything.
+                        -->
+                        <OnLeaveFlag :people="row.assignees_on_leave ?? []" variant="compact" />
+                    </div>
                 </template>
 
                 <!-- The tone is the server's answer; this screen only paints it. -->

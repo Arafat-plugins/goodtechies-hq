@@ -135,6 +135,54 @@ class Employee extends Model
     }
 
     /**
+     * Employees whose LEAVE this user may read and manage (Phase 5, Part C §1's *Approve
+     * leave* cell).
+     *
+     * The same three cases `attendanceVisibleTo()` draws, keyed on the leave permissions
+     * instead of the attendance ones — and that is the point of it being a second scope rather
+     * than a reuse of the first. The two cells are genuinely different in Part C's matrix, and
+     * borrowing the attendance scope would have meant that taking `attendance.manage_others`
+     * away from a role silently took their leave queue with it, for no reason anybody could
+     * find by reading either file.
+     *
+     * It is a scope and not a policy call for the reason the attendance one is: a list narrowed
+     * by it does not contain somebody out of scope, and a lookup by id comes back empty — so
+     * **404 is what the controller has rather than what it decides** (Part C). It is also the
+     * employee half of `LeaveRequest::visibleTo()`, which narrows the requests; the two answer
+     * the same question about the same people, so the balances screen and the queue can never
+     * disagree about who is on them.
+     *
+     * @param  Builder<$this>  $query
+     */
+    public function scopeLeaveVisibleTo(Builder $query, ?User $user): void
+    {
+        if ($user === null || ! $user->isActive()) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $own = $user->employee?->getKey();
+
+        if (! $user->hasPermission(Permission::LeaveApprove)) {
+            // Every seeded role holds `leave.apply`, the Accountant included — it is still
+            // asked, so a role that lost it loses the page rather than keeping it because
+            // everybody else has one.
+            $query->where('employees.id', $user->hasPermission(Permission::LeaveApply) ? $own : null);
+
+            return;
+        }
+
+        if ($user->hasRole(RoleName::ADMIN)) {
+            return;
+        }
+
+        $query->where(function (Builder $scoped) use ($own): void {
+            $scoped->where('employees.manager_id', $own)->orWhere('employees.id', $own);
+        });
+    }
+
+    /**
      * Everybody whose day the roster has something to say about.
      *
      * `tracking_mode` and not the role: an employee who is tracked by neither the office clock

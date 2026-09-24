@@ -218,18 +218,33 @@ it('marks all read for the caller and nobody else', function () {
 |--------------------------------------------------------------------------
 */
 
-it('refuses the Accountant every notification route', function () {
+it('gives the Accountant a mailbox of their own leave, and never a task row in it', function () {
     $row = $this->notifications->notify(NotificationType::TaskAssigned, $this->task, [$this->tapu], [])->first();
 
-    // They hold no tasks.* key, and every Phase 2 notification type requires one — so there is
-    // no kind of mail they could receive and no mailbox to open. 403, because this is about
-    // their role and not about a record.
-    expect($this->accountant->hasPermission(NotificationType::TaskAssigned->requires()))->toBeFalse();
+    // **This changed in Phase 5, and nothing was carved out to change it.** Through Phases 2–4
+    // every type in the catalogue required a `tasks.*` key, so `NotificationPolicy::viewAny`
+    // refused the Accountant outright and they had no mailbox at all. Phase 5 added
+    // `leave.approved` and its two siblings, which require `leave.apply` — a key Part C §1
+    // gives to EVERY role — so the catalogue now holds a type they can receive and the gate
+    // stops refusing them. Decision 2-42's follow-up closes with it.
+    //
+    // What has not changed is the task half: they still hold no `tasks.view`, so a task
+    // notification is still something they can never receive. The two assertions below are
+    // the same rule read from both ends.
+    expect($this->accountant->hasPermission(NotificationType::TaskAssigned->requires()))->toBeFalse()
+        ->and($this->accountant->hasPermission(NotificationType::LeaveApproved->requires()))->toBeTrue();
 
-    $this->actingAs($this->accountant)->get('/notifications')->assertForbidden();
-    $this->actingAs($this->accountant)->get('/notifications/recent')->assertForbidden();
-    $this->actingAs($this->accountant)->post('/notifications/read-all')->assertForbidden();
-    $this->actingAs($this->accountant)->post('/notifications/'.$row->id.'/read')->assertForbidden();
+    $this->actingAs($this->accountant)->get('/notifications')->assertOk();
+    $this->actingAs($this->accountant)->get('/notifications/recent')->assertOk();
+    $this->actingAs($this->accountant)->post('/notifications/read-all')->assertRedirect();
+
+    // Somebody else's row is ABSENT, not refused — which is the privacy rule getting stronger:
+    // they used to be stopped at the gate before the row was looked up, and now they reach the
+    // route and learn nothing about whether the id exists (Part C).
+    $this->actingAs($this->accountant)->post('/notifications/'.$row->id.'/read')->assertNotFound();
+
+    // And their own mailbox holds nothing, because nothing has happened to their leave.
+    expect(Notification::query()->forUser($this->accountant)->count())->toBe(0);
 })->group('phase2');
 
 it('sends a guest to the login page', function () {

@@ -69,7 +69,10 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
                 { label: 'Notifications', icon: Bell, phase: 2 },
                 tracking,
                 ...timesheet,
-                { label: 'Leave', icon: CalendarOff, phase: 5 },
+                // The shared My Leave page — applying for leave is a fact about the person, not
+                // about the shell (Part C §1 gives the cell to every role), so this points at
+                // `/leave` and the page picks `EmployeeLayout` from the viewer's surface.
+                { label: 'My Leave', href: '/leave', icon: CalendarOff },
                 { label: 'My Reports', icon: ChartColumn, phase: 10 },
                 { label: 'Profile', href: '/profile', icon: UserRound },
             ],

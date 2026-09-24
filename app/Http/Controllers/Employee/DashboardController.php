@@ -3,12 +3,18 @@
 namespace App\Http\Controllers\Employee;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\HolidayResource;
 use App\Models\AttendanceRecord;
 use App\Models\Employee;
+use App\Models\Holiday;
+use App\Models\LeaveRequest;
 use App\Models\Task;
 use App\Services\AttendanceService;
+use App\Services\HolidayService;
+use App\Services\LeaveService;
 use App\Services\TaskService;
 use App\Services\TimerService;
+use App\Support\LeaveStatus;
 use App\Support\TaskBucket;
 use App\Support\TrackingMode;
 use Illuminate\Http\Request;
@@ -38,6 +44,8 @@ class DashboardController extends Controller
         private readonly TaskService $tasks,
         private readonly TimerService $timers,
         private readonly AttendanceService $attendance,
+        private readonly HolidayService $holidays,
+        private readonly LeaveService $leave,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -54,7 +62,77 @@ class DashboardController extends Controller
             // role, and never by the card itself.
             'timer' => $this->timerHero($user?->employee),
             'attendance' => $this->attendanceHero($user?->employee),
+            'upcomingHolidays' => $this->upcomingHolidays($request),
+            'leave' => $this->myLeave($user?->employee),
         ]);
+    }
+
+    /**
+     * "My Leave" — Part D §9 puts this card in the My Work group of this dashboard.
+     *
+     * Three numbers about **this person and nobody else**: days left of the type they have most
+     * of, how many of their own requests are still waiting on a decision, and whether one has
+     * been sent back to them for a correction. Nothing here is anybody else's leave, nothing is
+     * a comparison, and nothing is a total across the team (Part H §1).
+     *
+     * The correction count leads the card's sub-line when it is non-zero, because it is the one
+     * of the three that is waiting on the READER — a pending request is waiting on an approver
+     * and there is nothing for them to do about it.
+     *
+     * Null for somebody with no employee record, who has no leave to have.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function myLeave(?Employee $employee): ?array
+    {
+        if ($employee === null) {
+            return null;
+        }
+
+        $balances = $this->leave->balancesFor($employee);
+
+        $byStatus = LeaveRequest::query()
+            ->forEmployee($employee)
+            ->groupBy('status')
+            ->selectRaw('status, count(*) as total')
+            ->pluck('total', 'status')
+            ->all();
+
+        return [
+            // The four capped types with their numbers, so the card can print the largest and
+            // link to the page that has all of them. Zero is an answer and stays in the list.
+            'balances' => array_map(fn (array $row): array => [
+                'name' => (string) $row['type']['name'],
+                'days' => (int) $row['balance_days'],
+            ], $balances),
+            'pending' => (int) ($byStatus[LeaveStatus::Pending->value] ?? 0),
+            'correction_requested' => (int) ($byStatus[LeaveStatus::CorrectionRequested->value] ?? 0),
+            'href' => '/leave',
+        ];
+    }
+
+    /**
+     * "Upcoming holidays" — Part D §3 puts the card on this dashboard as well as the Admin's.
+     *
+     * The **same** `HolidayService::upcoming()` and the same `HolidayResource` the Company
+     * dashboard reads, because it is the same question with the same answer: a holiday is a
+     * fact about the company, not about the person looking at it, so there is nothing to scope
+     * and nothing that could make the two screens disagree.
+     *
+     * What differs is what the card offers: no "See all" and no add control, because this
+     * surface has no holiday screen to send anybody to. The permissions block on each row says
+     * so per record (`can_update` is false here), which is the same server-resolved answer the
+     * Admin screen reads — never a role compared in Vue (decisions 2-28, 2-31).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function upcomingHolidays(Request $request): array
+    {
+        if (! Gate::forUser($request->user())->allows('viewAny', Holiday::class)) {
+            return [];
+        }
+
+        return HolidayResource::collection($this->holidays->upcoming())->resolve($request);
     }
 
     /**

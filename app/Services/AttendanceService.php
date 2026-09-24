@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\AttendanceStateException;
 use App\Models\AttendanceRecord;
 use App\Models\Employee;
+use App\Models\LeaveRequest;
 use App\Models\Schedule;
 use App\Models\TimeEntry;
 use App\Models\User;
@@ -42,12 +43,16 @@ use Illuminate\Support\Facades\Gate;
  *
  * ## The seams — one still open, one now closed
  *
- * **Leave and holidays (Phase 5).** `coveredByLeaveOrHoliday()` returns false and is called
- * from exactly one place — `markAbsent()`. Phase 5 replaces its body with a lookup in
- * `leave_requests` (approved, covering the date) and `holidays`, and nothing else in this
- * phase changes: not the command, not the query that feeds it, not a test that does not name
- * leave. That is the seam, and it is one method because the plan says the skip "is a filter
- * added in one place".
+ * **Holidays (Phase 5) — closed. Leave (Phase 5) — still open.**
+ * `coveredByLeaveOrHoliday()` is called from exactly one place, `markAbsent()`, and its body
+ * now holds the holiday half: `HolidayService::covers()`, which is the one place the `holidays`
+ * table is read. The seam held exactly as designed — the command, the query that feeds it and
+ * every test that does not name a holiday are untouched, and filling the method's body was the
+ * whole of the change. The leave half (an approved `leave_requests` row whose window covers the
+ * date) is marked inside the method for the agent building it.
+ *
+ * Note that holidays also changed `dayFor()`, which the leave half will not: the sweep skip and
+ * the derived status are two different questions, and only one of them is this seam.
  *
  * **The remote timer's minutes — closed.** `trackedMinutes()` now sums `time_entries` for the
  * employee and the day, asking `approved_at is not null` and nothing else (decision 4-7). The
@@ -70,6 +75,7 @@ class AttendanceService
     public function __construct(
         private readonly SettingsService $settings,
         private readonly AuditLogger $audit,
+        private readonly HolidayService $holidays,
     ) {}
 
     /**
@@ -168,17 +174,50 @@ class AttendanceService
      * an off day". The off-day half is `isWorkingDay()` and is live now; the other two need
      * `leave_requests` and `holidays`, which Phase 5 creates.
      *
-     * When they exist, this method's body becomes the two lookups and **nothing else in this
-     * phase moves**: `markAbsent()` already calls it for every candidate, the command already
-     * reports what it skipped, and the sweep's tests already pass a fixed date. Phase 5 should
-     * prefer a set-based pre-load over a query per employee — the caller loops over four people
-     * today and a hundred one day — which is why this takes the employee and the date rather
-     * than being buried inside a `whereNotExists` that would have to be rewritten instead of
-     * filled in.
+     * **The holiday half is filled (Phase 5).** It is `HolidayService::covers()` and nothing
+     * else moved: `markAbsent()` already called this for every candidate, the command already
+     * reported what it skipped, and the sweep's tests already passed a fixed date. The set-based
+     * pre-load the seam asked for is `HolidayService::prime()`, so a roster or a month grid
+     * still costs one query however many days or people ask — which is why this takes a date
+     * rather than being buried in a `whereNotExists` that would have had to be rewritten.
+     *
+     * **The leave half is filled too (Phase 5).** It is `LeaveRequest::coversDate()`, asked of
+     * the model rather than of `LeaveService` so that the two services do not
+     * constructor-inject each other — see the body. It takes the *employee*, which the holiday
+     * half does not: leave is a fact about a person and a holiday is a fact about the company,
+     * which is also why only one of the two needed a per-employee signature.
+     *
+     * The seam is now closed on both sides and nothing else in Phase 4 moved to make room for
+     * either half, which is exactly what decision 4-12 asked of it.
      */
     public function coveredByLeaveOrHoliday(Employee $employee, CarbonInterface $date): bool
     {
-        return false;
+        // --- Holidays (Phase 5, filled) -------------------------------------------------
+        //
+        // The company calendar, asked through the one service that owns it. It takes no
+        // employee because a holiday is a fact about the company: it is the same answer for
+        // everybody, which is why `HolidayService::prime()` can read a whole range in one query
+        // and why nothing here is per-person.
+        if ($this->holidays->covers($date)) {
+            return true;
+        }
+
+        // --- Approved leave (Phase 5, filled) -------------------------------------------
+        //
+        // An approved `leave_requests` row for THIS employee whose window covers `$date`. It is
+        // the half that takes the employee, because leave is a fact about a person.
+        //
+        // It is asked of the MODEL rather than of `LeaveService`, and that is deliberate:
+        // `LeaveService` already depends on this class for the working-day predicate, so a
+        // service call here would have made two services constructor-inject each other.
+        // `LeaveRequest::coversDate()` is one indexed EXISTS over `(start_date, end_date)`, and
+        // it is the only statement of "on leave that day" in the application — the calendar,
+        // the dashboard card and this sweep all read the same scopes.
+        //
+        // Nothing else in Phase 4 moved to make room for it, which is what decision 4-12 asked:
+        // `markAbsent()` already called this for every candidate, `hq:mark-absent` already
+        // reported what it skipped, and every test that does not name leave is untouched.
+        return LeaveRequest::coversDate($employee, $date);
     }
 
     /**
@@ -500,16 +539,41 @@ class AttendanceService
      *      arrived, and a past day the 23:55 sweep has not reached. It is printed as *No
      *      record*, never as Absent, because Absent is a word the sweep writes down and
      *      guessing it at 10 a.m. would put it on a pay record with nothing behind it.
+     *
+     * ## Where Holiday slots in — between 2 and 3 (Phase 5)
+     *
+     * **Holiday comes after Off Day and before Remote**, and both halves of that are the same
+     * argument rule 2 already makes:
+     *
+     *   - *After Off Day*, because a public holiday landing on somebody's own non-working day
+     *     is not news. Friday is already off for them, and the more specific statement about
+     *     **this person's** week beats the company-wide one.
+     *   - *Before Remote*, because the company calendar applies to everybody however their work
+     *     is tracked — the same sentence rule 2 uses about the schedule. So on Victory Day
+     *     Tapu's day reads Holiday, not Remote. His tracked minutes still ride along beside it:
+     *     somebody who chose to work on a holiday worked, and the figure says so.
+     *
+     * And it is **derived here, stored nowhere** — decision 4-9 applied a third time, after Off
+     * Day and Remote. That is what makes adding or removing a holiday change what a PAST day
+     * reads: the grid asks the table every time it is drawn, so 16 December turns into Victory
+     * Day across every month already rendered, and turns back if the row is deleted. The one
+     * day it cannot change is a day that already has a record — rule 1 still wins, because
+     * somebody clocking in is what actually happened, and an Admin who wants that day to read
+     * otherwise edits the row with a reason.
      */
     public function dayFor(Employee $employee, CarbonInterface $date, ?AttendanceRecord $record = null): AttendanceDay
     {
         $date = Carbon::parse($date)->startOfDay();
         $today = Carbon::today();
         $scheduled = $this->isWorkingDay($employee->schedule, $date);
+        // Asked for every day, holiday or not — `HolidayService` answers from a primed range
+        // where the caller primed one, so a month grid is one query and not thirty.
+        $holiday = $this->holidays->nameFor($date);
 
         $status = match (true) {
             $record !== null => $record->status,
             ! $scheduled => AttendanceStatus::OffDay,
+            $holiday !== null => AttendanceStatus::Holiday,
             $employee->tracking_mode === TrackingMode::RemoteTimer => AttendanceStatus::Remote,
             default => null,
         };
@@ -518,6 +582,11 @@ class AttendanceService
             date: $date,
             status: $status,
             record: $record,
+            // The NAME travels whether or not the status is Holiday: a day off that happens to
+            // be Eid should say so in the cell, and a day somebody clocked in on should say
+            // which holiday they worked through. The status answers "was the office open"; the
+            // name answers "why".
+            holidayName: $holiday,
             workedMinutes: $record?->workedMinutes(),
             trackedMinutes: $employee->tracking_mode === TrackingMode::RemoteTimer
                 ? $this->trackedMinutes($employee, $date)
@@ -557,6 +626,11 @@ class AttendanceService
             $this->primeTrackedMinutes([(int) $employee->getKey()], $start, $end);
         }
 
+        // And one for the month's holidays, for the same reason: every cell asks, so without
+        // this a thirty-day grid would be thirty queries. The days with no holiday are cached
+        // as misses too — see HolidayService::prime().
+        $this->holidays->prime($start, $end);
+
         $days = new Collection;
 
         for ($day = $start->copy(); $day->lessThanOrEqualTo($end); $day->addDay()) {
@@ -579,6 +653,10 @@ class AttendanceService
     public function roster(?User $viewer, CarbonInterface $date): Collection
     {
         $date = Carbon::parse($date)->startOfDay();
+
+        // One query for the day, however many rows the roster has: a holiday is a fact about
+        // the company, so every row would otherwise ask the same question about the same date.
+        $this->holidays->prime($date, $date);
 
         $employees = Employee::query()
             ->attendanceVisibleTo($viewer)

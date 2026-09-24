@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { Bell, History, PartyPopper, Video } from '@lucide/vue';
+import { Bell, CalendarClock, CalendarOff, History, MessageSquareWarning, Video } from '@lucide/vue';
 import type { AttendanceDay } from '@/Components/Attendance/attendance';
 import ClockWidget from '@/Components/Attendance/ClockWidget.vue';
 import TimerHeroCard from '@/Components/Dashboard/TimerHeroCard.vue';
 import EmptyState from '@/Components/EmptyState.vue';
+import type { Holiday } from '@/Components/Holidays/holidays';
+import UpcomingHolidaysCard from '@/Components/Holidays/UpcomingHolidaysCard.vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatCard from '@/Components/StatCard.vue';
 import type { MyTaskBucket } from '@/Components/Tasks/MyTasks.vue';
@@ -13,6 +15,7 @@ import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import type { TrackingMode } from '@/types';
+import { computed } from 'vue';
 
 defineOptions({ layout: EmployeeLayout });
 
@@ -22,7 +25,7 @@ defineOptions({ layout: EmployeeLayout });
  * and each one carrying the link to the bucket it counted. Nothing on this page computes a
  * number, and there is no list here it could have been computed from.
  */
-defineProps<{
+const props = defineProps<{
     greetingName: string;
     today: string;
     trackingMode: TrackingMode;
@@ -34,7 +37,44 @@ defineProps<{
      */
     timer: { counted_seconds: number; pending_seconds: number; target_seconds: number | null } | null;
     attendance: { today: AttendanceDay; can_clock: boolean } | null;
+    /**
+     * The next few company holidays, today included.
+     *
+     * The same `HolidayService::upcoming()` the Company dashboard reads, through the same
+     * resource — a holiday is a fact about the company, not about the person looking at it, so
+     * there is nothing here to scope and no way for the two screens to disagree. Empty is an
+     * answer ("nothing on the calendar"), not a placeholder.
+     */
+    upcomingHolidays: Holiday[];
+    /**
+     * This person's own leave, in three numbers (Part D §9's My Leave card).
+     *
+     * Null for somebody with no employee record, who has no leave to have. Everything in it is
+     * about the reader — there is no total across the team and no comparison with anybody
+     * (Part H §1).
+     */
+    leave: {
+        balances: { name: string; days: number }[];
+        pending: number;
+        correction_requested: number;
+        href: string;
+    } | null;
 }>();
+
+/**
+ * The capped type this person has most days of, for the card's one number.
+ *
+ * The card prints one balance and links to My Leave, where all four are. Picking the largest
+ * rather than the first is what keeps the card useful for somebody who has spent their Annual
+ * leave and still has Sick days: it answers "have I got any leave" rather than "have I got any
+ * Annual leave". Ties keep the server's order, which is the order every leave picker uses.
+ */
+const largestBalance = computed(() =>
+    (props.leave?.balances ?? []).reduce<{ name: string; days: number } | null>(
+        (best, row) => (best === null || row.days > best.days ? row : best),
+        null,
+    ),
+);
 
 /**
  * The panels this page is still waiting on, each naming the phase that brings it.
@@ -48,7 +88,10 @@ defineProps<{
  */
 const panels = [
     { title: 'Upcoming meetings', phase: 7, icon: Video, description: 'Meetings you are invited to will show here.' },
-    { title: 'Upcoming holidays', phase: 5, icon: PartyPopper, description: 'Company holidays will show here.' },
+    // "Upcoming holidays" has left this list: Phase 5 built it, and a marker has to name a
+    // phase that has not happened. It is `UpcomingHolidaysCard` below, reading the same
+    // `HolidayService` the Company dashboard and the attendance grid read — so a holiday says
+    // the same thing on every screen in the application.
     { title: 'Recent activity', phase: 7, icon: History, description: 'Your latest task changes will show here.' },
 ];
 </script>
@@ -92,6 +135,43 @@ const panels = [
             />
         </section>
 
+        <!--
+            My Leave (Part D §9's "My Leave" card in the My Work group).
+
+            Three numbers, all of them about this person: the largest balance they have, what is
+            waiting on an approver, and — leading the sub-line when there is one — what has been
+            sent back for them to answer. Nothing here is anybody else's leave and nothing is a
+            comparison (Part H §1). Zero is an answer: "nothing waiting" is a sentence, not a
+            blank.
+        -->
+        <section v-if="leave" aria-label="My leave" class="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <StatCard
+                size="compact"
+                label="Leave balance"
+                :value="largestBalance?.days ?? 0"
+                :sub="largestBalance ? `${largestBalance.name} — most days left` : 'No balance set yet'"
+                :icon="CalendarOff"
+                :href="leave.href"
+            />
+            <StatCard
+                size="compact"
+                label="Leave waiting"
+                :value="leave.pending"
+                :sub="leave.pending === 0 ? 'Nothing waiting on an approver' : 'Waiting on a decision'"
+                :icon="CalendarClock"
+                :href="leave.href"
+            />
+            <StatCard
+                v-if="leave.correction_requested > 0"
+                size="compact"
+                label="Needs your correction"
+                :value="leave.correction_requested"
+                sub="Sent back to you — amend and send it again"
+                :icon="MessageSquareWarning"
+                :href="leave.href"
+            />
+        </section>
+
         <section aria-label="Coming up" class="grid gap-4 md:grid-cols-2">
             <!--
                 Notifications are built, so this panel is not a placeholder any more. It does
@@ -113,6 +193,13 @@ const panels = [
                     </template>
                 </EmptyState>
             </Card>
+
+            <!--
+                Real rows since Phase 5, in the slot the "Arrives in Phase 5" placeholder used
+                to hold. No manage link: this shell has no holiday screen to send anybody to,
+                and a control the endpoint would refuse is the lie DESIGN.md §5.11 forbids.
+            -->
+            <UpcomingHolidaysCard :holidays="upcomingHolidays" />
 
             <Card v-for="panel in panels" :key="panel.title" class="min-w-0 gap-4 p-6 shadow-xs">
                 <h2 class="text-sm font-medium">{{ panel.title }}</h2>

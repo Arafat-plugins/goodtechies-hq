@@ -175,14 +175,26 @@ overloaded so asking for one is a compile error rather than a 404 found in stagi
 The local cloud workspace has PostgreSQL 16 on `127.0.0.1:5432`, superuser `postgres`, trust auth (dev only), and Redis on `127.0.0.1:6379`.
 
 ## Known-failing baseline
-Measured 2026-09-25 at Phase 4 complete (timer, attendance, Time queue, Timesheet, Workload)
-with `php vendor/bin/pest`: none failing (**1363 passed, 7317 assertions**).
+Measured 2026-09-26 at Phase 5 complete (leave and holidays) with `php vendor/bin/pest`: none
+failing (**1455 passed, 7903 assertions**).
 `vendor/bin/pint --test`: passed. `npx vue-tsc --noEmit`: passed. `npm run build`: passed. If
-your number is not 1363, that is a finding, not drift.
+your number is not 1455, that is a finding, not drift.
 
 **Two concurrent agents must not share a dev-server port.** `php artisan serve` defaults to
 the same port for both; the loser silently reads the winner's database, and three measurement
 runs went unnoticed that way. Pick a distinct port, and check what answered before trusting it.
+
+**The suite no longer finishes inside a 10-minute tool timeout** — it is about 12 minutes in one
+process. Run it in two halves and add the numbers:
+```
+php vendor/bin/pest tests/Unit tests/Permissions tests/Feature/{Leave,Workforce,Attendance,Console,Database,Resources,Policies,Privacy}
+php vendor/bin/pest tests/Feature/{Admin,Employee,Services,Shared,Surfaces,Auth,Middleware,Profile,Backup} tests/Feature/ScheduleTest.php tests/Feature/ExampleTest.php
+```
+
+**A test file's constants and functions are GLOBAL in Pest.** Two files defining `ENDPOINT_MONDAY`
+silently gave one of them the other's date: each file passed alone and the suite failed. Prefix
+them with the folder (`LEAVE_`, `SHEET_`, `SWEEP_`). A duplicate is a PHP *warning*, not an error,
+so nothing stops you.
 
 **Two suites cannot share this checkout.** `php artisan test` runs in parallel here and
 deadlocks on migration DDL before any test body runs — use `php vendor/bin/pest`. And if a

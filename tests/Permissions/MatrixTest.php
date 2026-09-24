@@ -3,6 +3,9 @@
 use App\Models\Client;
 use App\Models\Employee;
 use App\Models\File;
+use App\Models\Holiday;
+use App\Models\LeaveRequest;
+use App\Models\LeaveType;
 use App\Models\Notification;
 use App\Models\Project;
 use App\Models\RecurringTask;
@@ -120,6 +123,21 @@ function matrixParameters(): array
         // happened cannot be recorded — though the row is body-less and stops at the Form
         // Request long before that check.
         '{date}' => '2026-09-14',
+
+        // Holidays (Phase 5). A seeded row, and a fixed-date one — Victory Day is 16 December
+        // by statute, so the row it points at does not move when HolidaySeeder's lunar
+        // estimates are corrected. The DELETE row overrides this with its own holiday, because
+        // it consumes the one it is aimed at.
+        '{holiday}' => matrixResolve('holiday:Victory Day'),
+
+        // Leave (Phase 5). The balance row's type is Annual — a CAPPED one, because an uncapped
+        // type has no balance for that URL to be about and the row would then be testing the
+        // wrong refusal. The `{employee}` beside it is Tapu's, shared with the attendance rows
+        // above: an Admin sets somebody else's balance, which is what the endpoint is for.
+        //
+        // `{leaveRequest}` has no default: every row that uses one overrides it with its own,
+        // because two of the three verbs would otherwise decide the row the third is aimed at.
+        '{leaveType}' => (string) LeaveType::where('name', 'Annual')->firstOrFail()->id,
     ];
 }
 
@@ -221,6 +239,63 @@ function matrixNotificationId(): string
 }
 
 /**
+ * The four dates the leave rows use, one window per row.
+ *
+ * They are Sundays and Mondays in October 2026 — working days on the seeded Sunday-to-Thursday
+ * week — and they do not touch each other, because `leave_requests_no_overlap` refuses two
+ * pending or approved requests of the same person over overlapping dates. One row approving its
+ * request must not make the next row's unfileable.
+ *
+ * @var array<string, array{0: string, 1: string}>
+ */
+const MATRIX_LEAVE_WINDOWS = [
+    'approve' => ['2026-10-04', '2026-10-05'],
+    'reject' => ['2026-10-11', '2026-10-12'],
+    'correction' => ['2026-10-18', '2026-10-19'],
+    'resubmit' => ['2026-10-25', '2026-10-26'],
+];
+
+/**
+ * A leave request for the rows that act on one, created once per key and remembered.
+ *
+ * Leave is not seeded — `LeaveSeeder` writes the six types and an opening balance per person
+ * and deliberately creates no requests, so the acceptance walk starts from an empty queue — so
+ * these are made here, the way the file, notification and time-entry rows make theirs. The
+ * existence check keeps the memo honest across a rolled-back database.
+ *
+ * They are **Yaseen's**, so every one of them is a request an Admin may rule on and nobody
+ * else's surface can reach: that is what the rows are about. The resubmit row's is already in
+ * `correction_requested`, which is the one status its endpoint accepts — and it is written with
+ * that status in the INSERT, which the model's guard allows (a row that does not exist yet has
+ * no status to move away from) and which keeps the matrix from depending on a decision another
+ * row happened to make first.
+ */
+function matrixLeaveRequestId(string $key): string
+{
+    static $ids = [];
+
+    if (! isset($ids[$key]) || ! LeaveRequest::whereKey($ids[$key])->exists()) {
+        $yaseen = User::where('email', 'yaseen@goodtechies.test')->firstOrFail();
+        [$from, $to] = MATRIX_LEAVE_WINDOWS[$key] ?? MATRIX_LEAVE_WINDOWS['approve'];
+
+        $factory = LeaveRequest::factory()
+            ->forEmployee($yaseen->employee)
+            ->ofType(LeaveType::where('name', 'Annual')->firstOrFail())
+            ->between($from, $to);
+
+        if ($key === 'resubmit') {
+            $factory = $factory->correctionRequested(
+                User::where('email', 'shahadat@goodtechies.test')->firstOrFail(),
+            );
+        }
+
+        $ids[$key] = (string) $factory->create()->id;
+    }
+
+    return $ids[$key];
+}
+
+/**
  * Resolve a per-row override token to an id.
  *
  * The rows carry tokens rather than ids because permissionMatrix() is also read by the coverage
@@ -248,6 +323,12 @@ function matrixResolve(string $token): string
         // By name, because the four seeded labels are global and named, and a row that
         // consumes one must not be pointed at whichever id happens to sort first.
         'tag' => (string) Tag::query()->whereNull('project_id')->where('name', $value)->firstOrFail()->id,
+        // By name, for the same reason the tags are: the DELETE row consumes the row it points
+        // at, and an id that happened to sort first would take a different holiday each time
+        // the seeded list changed.
+        'holiday' => (string) Holiday::query()->where('name', $value)->firstOrFail()->id,
+        // A leave request per row that acts on one. See matrixLeaveRequestId().
+        'leave' => matrixLeaveRequestId($value),
         default => $value,
     };
 }
@@ -264,8 +345,16 @@ function permissionMatrix(): array
     $employee = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 200, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403];
     $accountant = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 200];
     // Everybody with a mailbox, which is everybody who holds a permission some notification
-    // type requires — see NotificationPolicy. In Phase 2 that is everybody but the Accountant.
-    $notifications = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => 403];
+    // type requires — see NotificationPolicy.
+    //
+    // **In Phases 2–4 that was everybody but the Accountant; from Phase 5 it is everybody.**
+    // Nothing was carved out for them: `leave.approved` / `.rejected` / `.correction_requested`
+    // require `leave.apply`, which Part C §1 gives to every role, so the catalogue now contains
+    // a type they can receive and `NotificationPolicy::viewAny` stops refusing them. Their
+    // mailbox holds exactly those rows and no task ones, because the task types still require
+    // `tasks.view` and they still hold none. Decision 2-42's follow-up — "the Accountant costs
+    // one 403 /notifications/recent per page load" — closes by itself here.
+    $notifications = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => $status];
 
     // A DELETE row destroys the record it points at, and route-model binding runs before the
     // surface middleware — so every cell after the one that is allowed sees 404 where it would
@@ -431,6 +520,70 @@ function permissionMatrix(): array
         ['PUT', 'admin/attendance/{employee}/{date}', $adminAction],
         ['GET', 'admin/schedules', $admin],
         ['PUT', 'admin/schedules/{employee}', $adminAction],
+
+        // Admin surface — Workforce → Leave → Holidays (Phase 5). The company calendar.
+        //
+        // **Every cell here is 403 and not one is 404**, and unlike the Recurring block above
+        // that is not a fact about this surface — it is a fact about the record. A holiday has
+        // no employee, no project and no scope: it is the same fact for everybody signed in, so
+        // there is no holiday that is present for one reader and absent for another and Part C's
+        // absence rule has nothing to be about. The only 404 these routes can produce is an id
+        // that is not in the table, which is route-model binding and is asserted directly in
+        // tests/Feature/Workforce/HolidayEndpointsTest.php.
+        //
+        // Two gates agree on the 403s: `surface:admin` stops the other shells, and
+        // `can:settings.manage` sits behind it — so widening the surface one day would not
+        // quietly hand somebody the power to shut the agency for a day. The MANAGER cell is the
+        // one worth reading twice: a Manager may approve their own team's leave, and still may
+        // not put a day on the company calendar (HolidayPolicy says why).
+        ['GET', 'admin/holidays', $admin],
+        // Body-less, so an Admin stops at the Form Request's missing `date` and `name` — proof
+        // it got past every gate.
+        ['POST', 'admin/holidays', $adminAction],
+        // Same, and it points at a seeded fixed-date holiday, so it consumes nothing and the
+        // DELETE row below still has its own to take.
+        ['PUT', 'admin/holidays/{holiday}', $adminAction],
+        // Its own holiday, because it destroys the one it is pointed at. Christmas Day is
+        // seeded, fixed by statute, and nothing else in the matrix points at it.
+        ['DELETE', 'admin/holidays/{holiday}', $consumed, ['{holiday}' => 'holiday:Christmas Day']],
+
+        // Admin surface — Workforce → Leave (Phase 5): the queue, the calendar and the
+        // balances grid.
+        //
+        // **Every cell but the Admin's is 403**, and that is the shape of the rule on this
+        // surface: reading the agency's leave, ruling on it and setting somebody's days are
+        // Admin acts, so `surface:admin` stops the other shells before a record is looked up
+        // and `LeaveRequestPolicy::review` / `::decide` / `::manageBalances` sit behind it —
+        // widening the surface one day would not quietly hand somebody the power to approve
+        // leave. The MANAGER cell is the one worth reading twice: a Manager holds
+        // `leave.approve` and would rule on their own team, and they still get 403 here,
+        // because this queue is on the Admin shell and a Manager lands on the Employee one
+        // (decision 0-5).
+        //
+        // The **404** half — a request or an employee outside the requester's scope — cannot be
+        // shown here, because an Admin sees every request and everybody else is refused by the
+        // surface first. It is asserted directly in tests/Feature/Leave/LeaveEndpointsTest.php,
+        // the same way decision 3-8 handles it for a recurring template.
+        ['GET', 'admin/leave', $admin],
+        ['GET', 'admin/leave/calendar', $admin],
+        ['GET', 'admin/leave/balances', $admin],
+        // Body-less, so an Admin stops at the Form Request's missing `balance_days` and
+        // `reason` — proof it got past every gate, and proof the reason is required.
+        ['PUT', 'admin/leave/balances/{employee}/{leaveType}', $adminAction],
+
+        // The three verbs, each pointed at its OWN request, because two of them would otherwise
+        // decide the row the third is aimed at — and because the requests may not overlap each
+        // other's dates (`leave_requests_no_overlap`), so they are three separate windows.
+        //
+        // `approve` carries no required body, so the Admin cell really does approve: it spends
+        // two days of Yaseen's Annual balance, writes the Leave attendance rows and fires the
+        // notification. That is the point — the row proves the whole side effect runs through
+        // this endpoint, not just that a validator was reached. `reject` and `correction`
+        // require a reason, so their Admin cells stop at the validation redirect, which is
+        // equally proof they got past every gate and proof a refusal cannot be made silently.
+        ['POST', 'admin/leave/{leaveRequest}/approve', $adminAction, ['{leaveRequest}' => 'leave:approve']],
+        ['POST', 'admin/leave/{leaveRequest}/reject', $adminAction, ['{leaveRequest}' => 'leave:reject']],
+        ['POST', 'admin/leave/{leaveRequest}/correction', $adminAction, ['{leaveRequest}' => 'leave:correction']],
 
         // Admin surface — Workforce → Time (Phase 4): the approval queue, and hours today and
         // this week. Decision 4-16's answer.
@@ -656,6 +809,26 @@ function permissionMatrix(): array
         ['POST', 'attendance/clock-in', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
         ['POST', 'attendance/clock-out', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
 
+        // Shared — My Leave, and applying for it (Phase 5). No surface, like the clock above
+        // and the bell below: applying for leave is a fact about the person and not about the
+        // shell they are looking at, and Part C §1 gives that cell to **every** role.
+        //
+        // **The ACCOUNTANT cell is a 200, and it is the whole point of these three rows.** It
+        // is the first thing the Accountant surface does beyond finance — Part C §1 says so
+        // under its own matrix — and this is where it is proved rather than argued. They reach
+        // the same route an Admin does and the page picks `AccountantLayout` from their surface.
+        ['GET', 'leave', $everyone(200)],
+        // Body-less, so everybody stops at the Form Request's missing type, dates and reason:
+        // proof they all got past the gate, and proof a request cannot be filed with nothing in
+        // it. That the refusals for overlap and balance are flashes rather than status codes is
+        // asserted in tests/Feature/Leave/LeaveEndpointsTest.php.
+        ['POST', 'leave', $everyone(302)],
+        // Resubmitting after a correction. `ApplyLeaveRequest` runs before the controller, so a
+        // body-less PUT stops at validation for everybody — including the roles that would have
+        // got a 404 one line later. The 404 for somebody else's request, and the refusal to
+        // resubmit one that was not sent back, are asserted directly in that same file.
+        ['PUT', 'leave/{leaveRequest}', $everyone(302), ['{leaveRequest}' => 'leave:resubmit']],
+
         // Shared — the bell and the Notification Center. No surface, like the file download
         // above: a person's own mail is a fact about the person, not about the shell they are
         // looking at, so all four roles that have a mailbox reach the same four routes.
@@ -672,8 +845,14 @@ function permissionMatrix(): array
         //   ADMIN / MANAGER / EMPLOYEE  404 — somebody else's mail is ABSENT, not refused,
         //                                     even to an Admin who can see the whole agency
         //   REMOTE_EMPLOYEE             302 — it is Tapu's, and marking it read is idempotent
-        //   ACCOUNTANT                  403 — stopped at the gate before the row is looked up
-        ['POST', 'notifications/{notification}/read', ['guest' => '302 /login', 'ADMIN' => 404, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        //   ACCOUNTANT                  404 — since Phase 5 they have a mailbox of their own
+        //                                     (leave), so they reach the route and are told the
+        //                                     row is ABSENT rather than refused at the gate.
+        //                                     The cell moved from 403 to 404 and that is the
+        //                                     privacy rule getting *stronger*: they now learn
+        //                                     nothing about whether the id exists, which is
+        //                                     exactly what the three cells above it say.
+        ['POST', 'notifications/{notification}/read', ['guest' => '302 /login', 'ADMIN' => 404, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 404]],
 
         // Downloading a file: one route, no surface, its own file so that no earlier row has
         // consumed it. The matrix sends no signature, and that is what this row asserts — every

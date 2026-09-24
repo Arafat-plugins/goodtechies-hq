@@ -19,6 +19,7 @@ import {
     ListChecks,
     ListTodo,
     MessagesSquare,
+    PartyPopper,
     Receipt,
     ScrollText,
     Settings,
@@ -53,7 +54,11 @@ export const adminNav: NavGroup[] = [
             // employees include both Admins — and the page picks its layout from the viewer's
             // surface, the way Profile does.
             { label: 'My Attendance', href: '/attendance', icon: UserCheck },
-            { label: 'My Leave', icon: CalendarOff, phase: 5 },
+            // An Admin's own leave. It points at the SHARED route, because applying for leave
+            // is a fact about the person rather than about the shell — Part C §1 gives that
+            // cell to every role — and the page picks its layout from the viewer's surface,
+            // exactly as My Attendance above it does.
+            { label: 'My Leave', href: '/leave', icon: CalendarOff },
         ],
     },
     {
@@ -96,7 +101,17 @@ export const adminNav: NavGroup[] = [
             // nav row does not have to know who exists.
             { label: 'Timesheet', href: '/admin/timesheet', icon: CalendarRange },
             { label: 'Workload', href: '/admin/workload', icon: Weight },
-            { label: 'Leave', icon: CalendarOff, phase: 5 },
+            // The requests queue. `activePrefix` is `/admin/leave`, so the calendar, the
+            // balances grid and the three decision POST paths all keep this row lit — a
+            // redirect back after a decision must not unlight the row it was made from, which
+            // is the same reason the Time row above carries one.
+            { label: 'Leave', href: '/admin/leave', activePrefix: '/admin/leave', icon: CalendarOff },
+            // Workforce → Leave → Holidays (Part D §9). The menu path names Leave, and this row
+            // sits directly under it rather than inside it, because the sidebar is one level
+            // deep by design (NavGroup → NavItem) and a holiday is not a leave request anyway:
+            // no employee, no approval, no balance, a different permission key. The page's
+            // breadcrumb carries the full path Workforce / Leave / Holidays.
+            { label: 'Holidays', href: '/admin/holidays', icon: PartyPopper },
             { label: 'Work Schedule', href: '/admin/schedules', icon: AlarmClock },
         ],
     },

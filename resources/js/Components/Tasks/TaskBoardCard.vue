@@ -13,6 +13,7 @@ import {
     MoreHorizontal,
 } from '@lucide/vue';
 import { computed } from 'vue';
+import OnLeaveFlag from '@/Components/Leave/OnLeaveFlag.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { tagTone } from '@/Components/Tasks/TaskList.vue';
 import type { BoardCard } from '@/Components/Tasks/taskBoard';
@@ -228,6 +229,13 @@ const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || prop
             </span>
             <span v-else class="text-xs text-muted-foreground">Unassigned</span>
         </div>
+
+        <!--
+            "Assignee on leave" (Part D §5 and §9). Its own line, because it is a sentence and
+            the row under it is a row of three-word facts. `compact` keeps it to one line on a
+            288px lane. It is information: the card offers no reassign control, and must not.
+        -->
+        <OnLeaveFlag :people="card.assignees_on_leave ?? []" variant="compact" />
 
         <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             <!--

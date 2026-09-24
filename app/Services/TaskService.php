@@ -10,6 +10,7 @@ use App\Events\TaskStatusChanged;
 use App\Events\TaskSubmittedForReview;
 use App\Exceptions\TaskStateException;
 use App\Models\Employee;
+use App\Models\LeaveRequest;
 use App\Models\Tag;
 use App\Models\Task;
 use App\Models\TaskChecklistItem;
@@ -158,6 +159,22 @@ class TaskService
                 // The paperclip on a card. The `files` relation is already current-versions
                 // only, so this counts files and not revisions.
                 'files as attachment_count',
+            ])
+            // **"Assignee on leave" (Phase 5, Part D §5 and §9).** A correlated subquery, not a
+            // second pass: this method is the single funnel for the List, the Board, the
+            // Calendar, My Tasks and the dashboard cards, so hanging the flag here gives every
+            // one of them the same answer with no controller change and no extra round trip.
+            // A board of two hundred cards costs the query it already cost.
+            //
+            // It is information, never an action. Nothing anywhere reassigns a task because its
+            // assignee is away — Part D §5 says flag, Part H forbids inventing the rest, and an
+            // Admin is the one who decides what to do about Thursday.
+            //
+            // Who may see whose flag is resolved on the server by `taskFlagScopeFor()`: an
+            // approver sees every assignee's, everybody else sees only their own. See
+            // `LeaveRequest::taskFlagQuery()`.
+            ->addSelect([
+                'assignees_on_leave' => LeaveRequest::taskFlagQuery(LeaveRequest::taskFlagScopeFor($user)),
             ]), $order);
     }
 

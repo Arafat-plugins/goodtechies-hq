@@ -28,6 +28,20 @@ final readonly class AttendanceDay
         public Carbon $date,
         public ?AttendanceStatus $status,
         public ?AttendanceRecord $record = null,
+        /**
+         * The company holiday this date falls on, or null on an ordinary day.
+         *
+         * It is carried **independently of `status`**, because the two answer different
+         * questions: `status` says whether the office was open, and this says why it was not.
+         * A holiday falling on somebody's own off day still reads *Off day* (decision 4-9's
+         * ordering, see `dayFor()`) and should still be able to say "Eid ul-Fitr" beside it;
+         * a day somebody clocked in on reads *Present* and should still name the holiday they
+         * worked through.
+         *
+         * Derived on every read from the `holidays` table and stored on no row — adding or
+         * removing a holiday changes what a past day says, which is the whole point.
+         */
+        public ?string $holidayName = null,
         /** Minutes between clock-in and clock-out; null while the day is open or never clocked. */
         public ?int $workedMinutes = null,
         /**
@@ -68,6 +82,10 @@ final readonly class AttendanceDay
 
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),
+            // Null on an ordinary day. Present even when the status is not Holiday — see the
+            // property. Never the only carrier of anything: the screens print it beside the
+            // status word, not instead of it (DESIGN.md §5.6).
+            'holiday_name' => $this->holidayName,
             // The StatusBadge key. Resolved here, from AttendanceStatus::tone(), because a
             // second status-to-colour map in a Vue computed drifts (decision 2-37).
             'tone' => $this->status?->tone(),

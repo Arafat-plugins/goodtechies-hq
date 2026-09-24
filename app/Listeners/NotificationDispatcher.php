@@ -2,6 +2,10 @@
 
 namespace App\Listeners;
 
+use App\Events\LeaveApproved;
+use App\Events\LeaveCorrectionRequested;
+use App\Events\LeaveRejected;
+use App\Events\LeaveRequested;
 use App\Events\ProjectCancelled;
 use App\Events\TaskAssigned;
 use App\Events\TaskBecameOverdue;
@@ -13,6 +17,7 @@ use App\Events\TaskReassigned;
 use App\Events\TaskStatusChanged;
 use App\Events\TaskSubmittedForReview;
 use App\Models\Employee;
+use App\Models\LeaveRequest;
 use App\Models\Message;
 use App\Models\Project;
 use App\Models\Task;
@@ -20,6 +25,7 @@ use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\TaskService;
 use App\Support\NotificationType;
+use App\Support\Permission;
 use App\Support\RoleName;
 use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Builder;
@@ -84,6 +90,12 @@ class NotificationDispatcher
             TaskBecameOverdue::class => 'onTaskBecameOverdue',
             TaskDueTomorrow::class => 'onTaskDueTomorrow',
             ProjectCancelled::class => 'onProjectCancelled',
+
+            // Phase 5. Four events, four methods, same two filters.
+            LeaveRequested::class => 'onLeaveRequested',
+            LeaveApproved::class => 'onLeaveApproved',
+            LeaveRejected::class => 'onLeaveRejected',
+            LeaveCorrectionRequested::class => 'onLeaveCorrectionRequested',
         ];
     }
 
@@ -377,6 +389,178 @@ class NotificationDispatcher
             ],
             $event->actor,
         );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Leave (Phase 5, master prompt Part D §9)
+    |--------------------------------------------------------------------------
+    |
+    | Four events and two directions. A request goes UP to the people who can rule on it; the
+    | three answers go DOWN to the person who asked. Neither list names a role:
+    |
+    |   - the type-shaped filter is `NotificationType::requires()` — `leave.approve` for the
+    |     request, `leave.apply` for the answers — so an employee is never told that a colleague
+    |     has asked for next week off, and the Accountant, who may apply but not approve, gets
+    |     their own answers and nobody else's request;
+    |   - the object-shaped filter is `Gate::allows('view', $request)`, which is
+    |     `LeaveRequestPolicy` asking `LeaveRequest::visibleTo()` — the same scope the list
+    |     endpoints enforce, applied to the mail.
+    |
+    | The applicant is always told, and never filtered out by the object gate: it is their own
+    | request, so `visibleTo()` returns it by construction. The one person who is ALWAYS dropped
+    | is the actor, by `NotificationService::eligible()` — which is why an approver who is also
+    | somehow the applicant would be told nothing, and why `LeaveService` refuses to let anybody
+    | rule on their own request in the first place.
+    */
+
+    /**
+     * Applied, or resubmitted after a correction: everybody who can rule on it.
+     *
+     * The title is the APPLICANT'S name, because that is the first thing an approver scanning a
+     * bell needs — *"Tapu asked for Annual leave (3–4 Oct)"*. The other three carry the type's
+     * name instead, for the same reason from the other side: the employee knows who they are.
+     */
+    public function onLeaveRequested(LeaveRequested $event): void
+    {
+        $this->notifications->notify(
+            NotificationType::LeaveRequested,
+            $event->request,
+            $this->canSeeLeave($event->request, $this->leaveApprovers()),
+            $this->leavePayload($event->request, [
+                'applicant' => $event->request->employee?->user?->name,
+                'resubmitted' => $event->resubmitted,
+            ], title: $event->request->employee?->user?->name ?? 'Somebody'),
+            $event->actor,
+        );
+    }
+
+    public function onLeaveApproved(LeaveApproved $event): void
+    {
+        $this->notifications->notify(
+            NotificationType::LeaveApproved,
+            $event->request,
+            $this->canSeeLeave($event->request, $this->applicant($event->request)),
+            $this->leavePayload($event->request, [
+                // How many attendance rows the approval actually wrote. Zero for a remote-timer
+                // employee, who has no attendance rows at all (decision 4-11) — so the sentence
+                // must not claim any, and the screen reads this rather than assuming `days`.
+                'attendance_days_written' => $event->attendanceDaysWritten,
+                'note' => $event->request->decision_note,
+            ]),
+            $event->actor,
+        );
+    }
+
+    /**
+     * Turned down: the applicant, with the approver's reason in the sentence.
+     *
+     * The reason travels as `reason` because that is the key `withReason()` reads, which is the
+     * same helper the task-status summary uses — one spelling of "the actor's own words,
+     * whitespace collapsed and capped" rather than a second one for leave (decision 2-54).
+     */
+    public function onLeaveRejected(LeaveRejected $event): void
+    {
+        $this->notifications->notify(
+            NotificationType::LeaveRejected,
+            $event->request,
+            $this->canSeeLeave($event->request, $this->applicant($event->request)),
+            $this->leavePayload($event->request, ['reason' => $event->request->decision_note]),
+            $event->actor,
+        );
+    }
+
+    /**
+     * Sent back with a question: the applicant, with the question in the sentence.
+     *
+     * Not a rejection and it must not read as one — the request keeps its place and the
+     * employee can amend it and send it back, which is the whole reason the status exists.
+     */
+    public function onLeaveCorrectionRequested(LeaveCorrectionRequested $event): void
+    {
+        $this->notifications->notify(
+            NotificationType::LeaveCorrectionRequested,
+            $event->request,
+            $this->canSeeLeave($event->request, $this->applicant($event->request)),
+            $this->leavePayload($event->request, ['reason' => $event->request->decision_note]),
+            $event->actor,
+        );
+    }
+
+    /**
+     * Everybody who could rule on a leave request: the holders of `leave.approve`.
+     *
+     * Asked as a permission, never as a role (decision 2-13). The seed gives it to ADMIN and
+     * MANAGER, so both Admins are in this list today and a Manager would be too — and the
+     * per-request `view` gate below is what narrows a Manager to their own team, because
+     * `LeaveRequest::visibleTo()` already states that scope.
+     *
+     * @return Collection<int, User>
+     */
+    private function leaveApprovers(): Collection
+    {
+        return new Collection(User::query()
+            ->where('status', UserStatus::Active->value)
+            ->get()
+            ->filter(fn (User $user): bool => $user->hasPermission(Permission::LeaveApprove))
+            ->all());
+    }
+
+    /**
+     * The person whose leave it is.
+     *
+     * @return Collection<int, User>
+     */
+    private function applicant(LeaveRequest $request): Collection
+    {
+        $user = $request->employee?->user;
+
+        return new Collection($user === null ? [] : [$user]);
+    }
+
+    /**
+     * The object-shaped half for a leave request — `LeaveRequestPolicy::view`.
+     *
+     * @param  Collection<int, User>  $candidates
+     * @return Collection<int, User>
+     */
+    private function canSeeLeave(LeaveRequest $request, Collection $candidates): Collection
+    {
+        return $candidates
+            ->filter(fn (mixed $user): bool => $user instanceof User)
+            ->unique(fn (User $user): int => (int) $user->getKey())
+            ->filter(fn (User $user): bool => Gate::forUser($user)->allows('view', $request))
+            ->values();
+    }
+
+    /**
+     * What every leave notification stores.
+     *
+     * The dates, the type and the day count — and nothing about the person beyond the name the
+     * title already needs. A payload is written once and read by one person later, so it must
+     * carry nothing whose visibility could change in between; a leave REASON in particular is
+     * the applicant's own words about why they need the time, and it stays on the request where
+     * only somebody who may see the request can read it.
+     *
+     * @param  array<string, mixed>  $context
+     * @return array{title: string, context: array<string, mixed>}
+     */
+    private function leavePayload(LeaveRequest $request, array $context = [], ?string $title = null): array
+    {
+        return [
+            'title' => $title ?? ($request->leaveType?->name ?? 'Leave'),
+            'context' => array_filter(
+                $context + [
+                    'leave_request_id' => (int) $request->getKey(),
+                    'leave_type' => $request->leaveType?->name,
+                    'start_date' => $request->start_date?->toDateString(),
+                    'end_date' => $request->end_date?->toDateString(),
+                    'days' => (int) $request->days,
+                    'unpaid_days' => (int) $request->unpaid_days,
+                ],
+                fn (mixed $value): bool => $value !== null,
+            ),
+        ];
     }
 
     /*

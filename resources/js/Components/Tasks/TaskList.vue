@@ -73,6 +73,18 @@ export interface Task {
     primary_assignee: TaskEmployeeRef | null;
     tags: TaskTag[];
     subtask_count: number;
+    /**
+     * Assignees on approved leave when this task is due (Part D §5 and §9, Phase 5).
+     *
+     * Resolved in SQL by `TaskService::query()` and scoped per reader on the server — an
+     * approver sees every assignee's, everybody else sees only their own. It is a **flag**: the
+     * task is never reassigned because of it (Part D §5 is explicit and Part H forbids
+     * inventing the rest).
+     *
+     * Empty means nobody, or nobody this reader may see. There is no second meaning for null to
+     * carry, so the server always sends an array.
+     */
+    assignees_on_leave: { name: string; until: string }[];
     permissions: {
         can_update: boolean;
         can_delete: boolean;
@@ -251,6 +263,7 @@ import { ListChecks } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { TableGroup } from '@/Components/DataTable/types';
+import OnLeaveFlag from '@/Components/Leave/OnLeaveFlag.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import TaskFilterBar, { taskFiltersActive } from '@/Components/Tasks/TaskFilterBar.vue';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
@@ -427,14 +440,23 @@ const loading = useNavigationPending();
             </template>
 
             <template #cell-title="{ row }">
-                <div class="flex min-w-0 flex-wrap items-center gap-2">
-                    <span class="font-medium break-words">{{ row.title }}</span>
-                    <span
-                        v-if="row.is_archived"
-                        class="rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground"
-                    >
-                        Archived
-                    </span>
+                <div class="flex min-w-0 flex-col gap-1">
+                    <div class="flex min-w-0 flex-wrap items-center gap-2">
+                        <span class="font-medium break-words">{{ row.title }}</span>
+                        <span
+                            v-if="row.is_archived"
+                            class="rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                        >
+                            Archived
+                        </span>
+                    </div>
+                    <!--
+                        "Assignee on leave" (Part D §5 and §9). Information for an Admin to act
+                        on; the task is never reassigned because of it. It sits under the title
+                        rather than in the Assignee column because the employee surface drops
+                        that column entirely (decision 2-6) and the flag has to survive there.
+                    -->
+                    <OnLeaveFlag :people="row.assignees_on_leave ?? []" variant="compact" />
                 </div>
             </template>
 

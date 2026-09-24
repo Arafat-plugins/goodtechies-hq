@@ -22,6 +22,8 @@ import { formatMinutes } from '@/Components/Attendance/attendance';
 import AttentionList, { type AttentionItem } from '@/Components/Dashboard/AttentionList.vue';
 import AreaTrend from '@/Components/Charts/AreaTrend.vue';
 import DonutBreakdown, { type DonutSlice } from '@/Components/Charts/DonutBreakdown.vue';
+import type { Holiday } from '@/Components/Holidays/holidays';
+import UpcomingHolidaysCard from '@/Components/Holidays/UpcomingHolidaysCard.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatCard from '@/Components/StatCard.vue';
@@ -76,6 +78,14 @@ interface RemoteTimeRow {
 interface AttendanceToday {
     present?: number;
     absent?: number;
+    /**
+     * How many distinct PEOPLE have approved leave covering today (Phase 5). Counted off
+     * `leave_requests`, not off Leave attendance rows — a remote-timer employee has no
+     * attendance rows at all (decision 4-11), so counting rows would have left them out of the
+     * one number that is about people being away.
+     */
+    on_leave?: number;
+    leave_href?: string;
     href?: string;
     remote?: RemoteTimeRow[];
 }
@@ -99,8 +109,9 @@ const props = defineProps<{
      * server from the same roster the Attendance screen draws, so the card and the screen it
      * opens cannot disagree. `{}` for a viewer who may not manage other people's attendance.
      *
-     * On leave is NOT in here and is still a placeholder: `leave_requests` arrives in Phase 5,
-     * and a card reading 0 would be a measurement nobody has taken.
+     * On leave joined them in Phase 5 and is a real count now. **Zero is an answer** here —
+     * "nobody is on approved leave today" is a measurement somebody took, which is exactly what
+     * the placeholder that used to sit in this slot could not say.
      */
     attendance: AttendanceToday;
     /**
@@ -119,6 +130,16 @@ const props = defineProps<{
     attention: AttentionRow[];
     /** Open tasks per status, for the donut. Server-counted, server-toned. */
     taskStatuses: TaskStatusCount[];
+    /**
+     * The next few company holidays, today included — Part D §3's card, recorded from the
+     * design references (Part I).
+     *
+     * Straight from `HolidayService`, which is the same service the attendance derivation and
+     * the Holidays screen read, so this card and the month grid cannot disagree about whether
+     * Thursday is Victory Day. Empty is an answer, not a placeholder: it means the calendar is
+     * clear, and the card then offers the screen where next year's gazette is typed in.
+     */
+    upcomingHolidays: Holiday[];
 }>();
 
 /**
@@ -253,9 +274,9 @@ const monthStats = [
             Tier 1b — the people numbers, at a lower weight than the work.
 
             Present today and Absent carry real counts now and both lead to the roster, which is
-            where the split between Present and Late lives. On leave keeps its "Arrives in
-            Phase 5" marker: `leave_requests` does not exist, and a card reading 0 would not be
-            a blank — it would say "nobody is on leave", which is a claim nothing can support.
+            where the split between Present and Late lives. On leave is a real number since
+            Phase 5 and leads to the leave calendar — and zero on it is an answer, not a blank:
+            "nobody is on approved leave today" is a claim `leave_requests` can now support.
         -->
         <section aria-label="Team today" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
@@ -283,7 +304,15 @@ const monthStats = [
                 :icon="UserX"
                 :href="attendance.href"
             />
-            <StatCard size="compact" label="On leave" :phase="5" :icon="CalendarOff" />
+            <StatCard
+                v-if="hasAttendance"
+                size="compact"
+                label="On leave"
+                :value="attendance.on_leave"
+                :sub="attendance.on_leave === 0 ? 'Nobody is on approved leave today' : 'Approved leave covering today'"
+                :icon="CalendarOff"
+                :href="attendance.leave_href"
+            />
         </section>
 
         <!--
@@ -342,14 +371,32 @@ const monthStats = [
             not built, and a list that silently dropped that sentence the moment it had one item
             in it would claim to be the whole of what needs you.
         -->
-        <AttentionList
-            title="Needs your attention"
-            :items="attentionItems"
-            :empty-icon="Inbox"
-            empty-title="Nothing is waiting on you"
-            empty-description="No task is sitting in your review queue, and nothing is past its due date."
-            note="Tasks only for now — approvals arrive in Phases 8–9 and leave decisions in Phase 5."
-        />
+        <!--
+            Tier 2 shares its row with "Upcoming holidays" (Part D §3, recorded from the design
+            references in Part I). Two thirds and one third rather than two full-width blocks:
+            the attention panel is the thing you act on and the holidays are the thing you plan
+            around, so one leads and the other sits beside it. Below `lg` they stack, attention
+            first, because on a phone the order IS the priority.
+        -->
+        <section aria-label="Attention and holidays" class="grid min-w-0 gap-4 lg:grid-cols-3">
+            <div class="min-w-0 lg:col-span-2">
+                <AttentionList
+                    title="Needs your attention"
+                    :items="attentionItems"
+                    :empty-icon="Inbox"
+                    empty-title="Nothing is waiting on you"
+                    empty-description="No task is sitting in your review queue, and nothing is past its due date."
+                    note="Tasks only for now — approvals arrive in Phases 8–9 and leave decisions in Phase 5."
+                />
+            </div>
+
+            <!--
+                The company calendar, four rows deep. It links to the screen the client types
+                their own holidays into, because most of the seeded Bangladeshi dates are lunar
+                estimates and the Admin reading this card is the person who corrects them.
+            -->
+            <UpcomingHolidaysCard :holidays="upcomingHolidays" manage-href="/admin/holidays" />
+        </section>
 
         <!-- Tier 3 — two charts, the screen's whole chart budget. -->
         <section aria-label="Work and attendance" class="grid gap-4 lg:grid-cols-2">

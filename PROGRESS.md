@@ -19,10 +19,10 @@
 | 0 | Foundation: auth + 2FA, roles, three shells, audit/activity logs, CI, VPS deploy kit, backups | **GATE A** | ✅ built (gate questions still open) |
 | 1 | Clients & Projects with the privacy model | **GATE B** | 🔄 built — waiting for GATE B |
 | 0.5 | Design Foundation: brand tokens from the logo, the app shell, 8 base components, charts, every Phase 0/1 screen migrated | — | ✅ complete |
-| 2 | Tasks: List (grouped) · Board · Calendar · tags · files · task discussion · in-app notifications | — | ⬜ |
-| 3 | Recurring task engine + fixed automation rules | — | ⬜ |
-| 4 | Remote timer + Timesheet + office attendance + schedules + workload | **GATE C** | ✅ built, waiting for GATE C |
-| 5 | Leave management + holidays | — | ⬜ |
+| 2 | Tasks: List (grouped) · Board · Calendar · tags · files · task discussion · in-app notifications | — | ✅ complete |
+| 3 | Recurring task engine + fixed automation rules | — | ✅ complete |
+| 4 | Remote timer + Timesheet + office attendance + schedules + workload | **GATE C** | ✅ complete — **GATE C passed 25 Sep** |
+| 5 | Leave management + holidays | — | ✅ complete |
 | 6 | Team communication (team/project chat, DMs, announcements, voice, Team directory) + realtime | **GATE D** | ⬜ |
 | 7 | Meetings + Google Meet (one-way) + action items → tasks | — | ⬜ |
 | 8 | Finance module + Accountant surface | — | ⬜ |
@@ -414,7 +414,7 @@ cards counting six overdue.
 
 **Tests: 1184 passing, 6280 assertions.**
 
-## Phase 4 — Time & attendance ✅ complete (waiting for GATE C)
+## Phase 4 — Time & attendance ✅ complete (GATE C passed)
 
 **Goal (from the plan):** Tapu's day is timer-tracked per task with the 5h target visible to him
 and Admin; Yaseen and both Admins clock in/out; workload view exists. **Phase 4 ends at GATE C.**
@@ -470,6 +470,42 @@ pages shipped with **no layout at all** — no sidebar, no top bar, no skip link
 accessibility measurement on them had passed, because a page with no shell has nothing to
 overflow and almost nothing to tab through (4-26).
 
+## Phase 5 — Leave & holidays ✅ complete
+
+**Goal (from the plan):** apply → approve → calendar/attendance/payroll-impact flow with
+balances; company holidays. Built as two independent halves in parallel.
+
+**Holidays.** A `holidays` table the Admin edits at Workforce → Holidays, seeded with 21
+Bangladesh public holidays for 2026 as a *starting point* — which answers the question that
+looked like a GATE A blocker. Fifteen of those are lunar and move each year, so each row carries
+its certainty and the seeder prints the moving ones by name when it runs (5-5). The seeder plants
+a year only if that year is empty, so a holiday the Admin deleted is not resurrected by the
+launcher's nightly `db:seed` (5-4). A holiday is **derived, never stored** — adding one changes
+what a past day shows, and the CHECK now refuses a stored one outright (5-1).
+
+**Leave.** Three tables, `LeaveService`, and the whole flow: Apply Leave and My Leave on every
+shell including the Accountant's, the Admin queue with Approve / Reject / Request Correction, the
+balances editor, and the leave calendar. Approval is one transaction: status through the machine,
+balance decremented, `unpaid_days` stored for Phase 9, attendance auto-marked Leave for each of
+*that employee's* working days, and the task flag appears — no manual step, which is the
+acceptance sentence. Overlapping requests are refused by a **database exclusion constraint**, not
+a check in a service (5-7), and the status is guarded at the model with no escape hatch (5-8).
+
+A task whose assignee is on leave is **flagged, never reassigned** — one `addSelect` in the single
+query funnel, so every view gets it at no extra cost (5-11).
+
+**A side effect worth knowing:** the Accountant now has a notification mailbox, because
+*apply for own leave* is a key every role holds and nothing was carved out to give it to them
+(5-14). Their `POST /notifications/{n}/read` moves from 403 to **404**, which is the privacy rule
+getting stronger, and it closes follow-up 2-42 by itself.
+
+**Also found and fixed:** two test files both defined `ENDPOINT_MONDAY`, and Pest declares a test
+file's constants **globally**. Each file passed alone and the suite failed — a PHP warning, not an
+error, so nothing stopped it (5-16).
+
+**Tests: 1455 passing, 7903 assertions.** The suite now takes about 12 minutes, past a
+ten-minute tool timeout; `AGENTS.md` records the two halves to run it in.
+
 ## Deployment log
 
 | Date | Commit | Server | Result |
@@ -480,33 +516,28 @@ overflow and almost nothing to tab through (4-26).
 
 ## Next step
 
-**Stop: GATE C.** Phase 4 is built. The plan's gate is *"user tests timer + attendance on
-desktop and phone"*, so this is yours now.
+**Phase 6 — team communication and realtime.** It ends at **GATE D**, the next stop.
 
-What to walk, as Tapu (`tapu@goodtechies.test`, remote):
+The plan's shape: the Phase 2 communication tables extended to every conversation type
+(`team`, `project`, `dm`, `announcement`), `message_mentions`, `MessageService`, a
+`ConversationPolicy` covering all of them, a `project` conversation created with each project
+and backfilled for existing ones, the Team directory, **voice messages** through the same files
+pipeline, and **Laravel Reverb + Echo** with channels `conversation.{id}`,
+`notifications.{user_id}` and `task.{id}` — which is when the bell stops polling (2-39).
 
-1. Start a timer on a task, pause, resume, stop — check the arithmetic.
-2. Start one and close the tab, or drop the network. Come back: it should replay, not
-   double-count, and never end later than its last check-in.
-3. Leave one running with the laptop shut. `hq:timer-watchdog` should stop it **at the last
-   check-in** and flag it with a readable sentence.
-4. Add a manual entry. It will say "waiting for approval" and not count — that is correct.
-5. Your Timesheet: row, day and week totals against the 5h/day target.
+**Two things Phase 6 should clear on the way past**, both recorded and both getting closer to
+mattering:
 
-As Yaseen (`yaseen@goodtechies.test`, office): clock in and out on a **phone**; check Late
-against his 09:00 start and the 15-minute grace; look at your month.
-
-As Shahadat (Admin): the roster, the month grid, an edit with a reason; Work Schedule;
-**Workforce → Time** to approve Tapu's manual entry and watch his total move; Workload; and the
-Company dashboard's Present / Absent / "Tapu Xh Ym / 5h".
-
-**Then Phase 5 — Leave management + holidays.** It needs the GATE A answer about **holidays**:
-`hq:mark-absent` already has the seam for "skip approved leave and holidays" (4-12) and Phase 5
-fills it, so the list of company holidays is the one input it cannot invent.
+- **5-18** — `daily_work_summary` does not know about leave or holidays, and **Phase 9 payroll
+  reads it**. One migration covers both halves.
+- **5-17** — a leave day that is also a holiday still burns a day of Annual leave. Needs a client
+  decision, not a quiet fix.
 
 **Still open:** the rest of GATE A (real email addresses, VPS and backup bucket, Google
 Workspace, spec §46, the ClickUp export) and GATE B (contacts per client, employee priority
 visibility, the unarchive target status, the "Internal" label).
+
+**Polish the user flagged at GATE C** — accepted as-is, to be revisited rather than fixed now.
 
 **One thing only you can do:** the file bridge refuses to write `.env` (it holds the database and
 seed passwords), so line 1 of `D:\goodtechies-hq\.env` still reads `APP_NAME="GoodTechies HQ"`.

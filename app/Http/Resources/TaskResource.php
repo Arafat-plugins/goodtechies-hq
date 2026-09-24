@@ -56,6 +56,19 @@ class TaskResource extends JsonResource
             'estimated_minutes' => $this->estimated_minutes,
             'tracked_seconds' => (int) $this->tracked_seconds,
 
+            // **Assignees who are on approved leave when this task is due** (Part D §5 and §9).
+            // Resolved in SQL by `TaskService::query()`, so it costs no extra query and every
+            // view that funnels through it — List, Board, Calendar, My Tasks, the dashboards —
+            // shows the same flag.
+            //
+            // It is a FLAG and never a reassignment: Part D §5 is explicit and Part H forbids
+            // inventing the rest. Each entry names the person and the day they are back, because
+            // "somebody is away" is not something an Admin can act on.
+            //
+            // Empty for a reader who may not see that leave — the scope is
+            // `LeaveRequest::taskFlagScopeFor()`, on the server, per requester.
+            'assignees_on_leave' => $this->assigneesOnLeave(),
+
             'position' => (int) $this->position,
             'archived_at' => $this->archived_at?->toIso8601String(),
             'is_archived' => $this->resource->isArchived(),
@@ -140,6 +153,40 @@ class TaskResource extends JsonResource
 
             'permissions' => $this->permissions($user),
         ];
+    }
+
+    /**
+     * The "on leave" flag, read off the column `TaskService::query()` selected.
+     *
+     * The subquery answers a JSON array or SQL `null`; the driver hands it over as a string, so
+     * it is decoded here rather than by a cast — the attribute exists only on rows that came
+     * through that query, and a cast on the model would then be a cast for a column the detail
+     * page's own lookup does not select.
+     *
+     * **Absent means absent**, not null: a task nobody is away for, and a task whose reader may
+     * not see the leave, both answer `[]`. That is the shape every screen reads — one `v-if` on
+     * a length, no second meaning for null to carry.
+     *
+     * @return list<array{name: string, until: string}>
+     */
+    private function assigneesOnLeave(): array
+    {
+        $raw = $this->resource->getAttribute('assignees_on_leave');
+
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+
+        $decoded = is_array($raw) ? $raw : json_decode((string) $raw, true);
+
+        if (! is_array($decoded)) {
+            return [];
+        }
+
+        return array_values(array_map(fn (array $row): array => [
+            'name' => (string) ($row['name'] ?? 'Someone'),
+            'until' => (string) ($row['until'] ?? ''),
+        ], array_filter($decoded, 'is_array')));
     }
 
     /**

@@ -5,6 +5,9 @@ use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\ClientFileController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\FileController;
+use App\Http\Controllers\Admin\HolidayController;
+use App\Http\Controllers\Admin\LeaveBalanceController;
+use App\Http\Controllers\Admin\LeaveController;
 use App\Http\Controllers\Admin\MyTaskController;
 use App\Http\Controllers\Admin\ProjectController;
 use App\Http\Controllers\Admin\ProjectFileController;
@@ -189,6 +192,78 @@ Route::prefix('admin')
             Route::put('/{employee}/{date}', [AttendanceController::class, 'update'])
                 ->where('date', '\d{4}-\d{2}-\d{2}')
                 ->name('update');
+        });
+
+        // Admin → Workforce → Leave → Holidays (Part D §9, Phase 5): the company calendar the
+        // client types their own holidays into. `HolidaySeeder` supplies the Bangladesh list
+        // for the current year as a starting point and most of those dates are lunar estimates,
+        // so this screen is not an optional extra — it is where the seed is made true.
+        //
+        // It sits at `/admin/holidays` rather than under a `leave` prefix although the menu
+        // path is Workforce → Leave → Holidays. A holiday is not a leave request: it has no
+        // employee on it, no approval, no balance, and it is gated on a different key. The
+        // breadcrumb carries the menu path; the URL carries what the record is.
+        //
+        // `can:settings.manage` is the gate and the whole of it. The calendar is an agency-wide
+        // configuration that decides what a day is called for everybody, so the area keys —
+        // `leave.approve`, `attendance.manage_others` — are wrong twice: both are *🟡 own team*
+        // for a MANAGER, and a company-wide calendar has no team. See HolidayPolicy.
+        //
+        // Every refusal here is **403** and none is 404: no holiday is visible to one signed-in
+        // reader and absent for another, so Part C's absence rule has nothing to be about. An
+        // id that is not in the table is route-model binding's 404 and is asserted directly.
+        //
+        // `index` is a GET with no Form Request, so it renders; `store` and `update` have one,
+        // so a body-less call stops at validation, which is proof it passed every gate.
+        Route::prefix('holidays')->name('holidays.')->group(function () {
+            Route::get('/', [HolidayController::class, 'index'])->name('index');
+            Route::post('/', [HolidayController::class, 'store'])->name('store');
+            Route::put('/{holiday}', [HolidayController::class, 'update'])->name('update');
+            Route::delete('/{holiday}', [HolidayController::class, 'destroy'])->name('destroy');
+        })->middleware('can:settings.manage');
+
+        // Admin → Workforce → Leave (master prompt Part D §9, Phase 5): the requests queue, the
+        // leave calendar, and the balances grid.
+        //
+        // The three verbs are three routes and not one endpoint taking a `decision` field:
+        // approving, refusing and sending a request back are three acts with three different
+        // rules about the note, and which one was called is then a fact about the URL rather
+        // than a value a client chooses (see `DecideLeaveRequest`). All three go through
+        // `LeaveService`, which is the only thing that moves a request's status — the model
+        // throws if anything else writes one.
+        //
+        // `calendar` and `balances` are declared BEFORE any `{leaveRequest}` route could bind
+        // them. There is no `GET /admin/leave/{leaveRequest}` — there is no page for one
+        // request — so nothing can collide, and the order is kept anyway so that adding one
+        // later cannot quietly turn `calendar` into an id.
+        //
+        // Applying for leave is NOT here: it is `GET|POST /leave` in routes/shared.php, because
+        // both Admins apply for their own leave too and Part C §1 gives that cell to every role.
+        // The same split the clock keeps (decision 4-15).
+        //
+        // Gated by `LeaveRequestPolicy` rather than by middleware, because `::review`,
+        // `::decide` and `::manageBalances` are three different questions — the page, the
+        // verdict, and somebody else's days — and `surface:admin` has already refused every
+        // other shell before any of them is asked. A request outside the requester's scope is
+        // re-resolved through `LeaveRequest::visibleTo()` in the controller first, so it is
+        // **404** rather than a refusal that would confirm the record exists.
+        Route::prefix('leave')->name('leave.')->group(function () {
+            Route::get('/', [LeaveController::class, 'index'])->name('index');
+            Route::get('/calendar', [LeaveController::class, 'calendar'])->name('calendar');
+
+            Route::get('/balances', [LeaveBalanceController::class, 'index'])->name('balances.index');
+            // The upsert, keyed by (employee, type) — the row's own identity, which is
+            // `unique(employee_id, leave_type_id)`. Setting a first balance and correcting one
+            // are the same act to the Admin making it, and two endpoints would have been two
+            // places for the audit row to be forgotten.
+            Route::put('/balances/{employee}/{leaveType}', [LeaveBalanceController::class, 'update'])
+                ->whereNumber('employee')
+                ->whereNumber('leaveType')
+                ->name('balances.update');
+
+            Route::post('/{leaveRequest}/approve', [LeaveController::class, 'approve'])->name('approve');
+            Route::post('/{leaveRequest}/reject', [LeaveController::class, 'reject'])->name('reject');
+            Route::post('/{leaveRequest}/correction', [LeaveController::class, 'correction'])->name('correction');
         });
 
         // Admin → Workforce → Work Schedule. The working week is per employee and editable,
