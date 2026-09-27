@@ -9,6 +9,7 @@ use App\Models\Message;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
+use App\Support\AttachmentKind;
 use App\Support\AuditEvent;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -123,6 +124,64 @@ class FileService
     ];
 
     /**
+     * What a VOICE NOTE may be: extension → the content types that extension may legitimately be.
+     *
+     * ## Why this is a second list and not five more rows in TYPES
+     *
+     * TYPES is the allow-list for every file panel in the application — a task's attachments, a
+     * project's deliverables, a client's documents, and an ordinary file dropped on a message.
+     * Adding audio there to make one feature work would widen all of them at once, and the blast
+     * radius of "the Files panel now accepts media" is far larger than Phase 6 asked for: a
+     * 25 MB `.wav` in a client folder is a storage bill, not a deliverable, and nobody chose it.
+     *
+     * So a recording is checked against THIS list and only this list, reached only when the
+     * caller says `AttachmentKind::Voice` — which only the composer's mic button ever says. A
+     * plain upload stays exactly as restricted as it was before Phase 6, and the test that proves
+     * it is `tests/Feature/Messages/VoiceMessageTest.php` → *"refuses an audio file attached
+     * through the ordinary Files panel"*. Somebody will eventually want to merge the two lists;
+     * that test is the argument, and this paragraph is the reason behind it.
+     *
+     * ## The pairings, measured rather than remembered
+     *
+     * `assertAcceptable()` reads `getMimeType()`, which is **finfo over the temp file's bytes**,
+     * not the `Content-Type` the browser claimed. finfo does not care what a container is being
+     * used for, so an audio-only WebM is `video/webm` and an audio-only MP4 is `video/mp4` —
+     * which is exactly how Chrome's and Safari's recordings arrive. Both spellings are listed
+     * because a different finfo database answers differently, and a recording refused on one
+     * server and accepted on another is the bug nobody can reproduce.
+     *
+     * Measured 2026-09-24 on this box, on files ffmpeg actually produced:
+     *
+     *     ffmpeg -f lavfi -i "sine=frequency=440:duration=2" -c:a libopus rec.webm   # and so on
+     *     php -r 'echo (new finfo(FILEINFO_MIME_TYPE))->file("rec.webm");'
+     *
+     *   | webm (opus) | video/webm  |   | m4a (aac) | audio/x-m4a |   | ogg (opus)   | audio/ogg |
+     *   | mp4 (aac)   | video/mp4   |   | mp3       | audio/mpeg  |   | wav (pcm16)  | audio/x-wav |
+     *
+     * @var array<string, list<string>>
+     */
+    public const VOICE_TYPES = [
+        // Chrome and Firefox: Opus in a WebM container. finfo reports the CONTAINER, and a
+        // WebM with no video track is still a WebM — hence `video/webm`, measured, not assumed.
+        'webm' => ['audio/webm', 'video/webm'],
+
+        // Safari: AAC in an MP4 container, handed over as either extension.
+        'm4a' => ['audio/mp4', 'audio/x-m4a', 'video/mp4'],
+        'mp4' => ['audio/mp4', 'audio/x-m4a', 'video/mp4'],
+
+        // Ogg, whichever codec is inside it. `application/ogg` is what an older finfo says when
+        // it can see the container but not the stream.
+        'ogg' => ['audio/ogg', 'application/ogg'],
+        'oga' => ['audio/ogg', 'application/ogg'],
+
+        'mp3' => ['audio/mpeg'],
+
+        // Three spellings of the same 1991 header, and finfo picks between them by database
+        // vintage. This box says `audio/x-wav`.
+        'wav' => ['audio/wav', 'audio/x-wav', 'audio/vnd.wave'],
+    ];
+
+    /**
      * How long a download link lives.
      *
      * Fifteen minutes. A link is minted when a page is rendered and used when somebody clicks
@@ -173,6 +232,30 @@ class FileService
         return array_values(array_unique(array_merge(...array_values(self::TYPES))));
     }
 
+    /**
+     * The extensions a RECORDING may have. Separate from `extensions()` on purpose — see
+     * VOICE_TYPES for why the two lists are not one.
+     *
+     * @return list<string>
+     */
+    public static function voiceExtensions(): array
+    {
+        return array_keys(self::VOICE_TYPES);
+    }
+
+    /**
+     * The allow-list a given kind of attachment is checked against.
+     *
+     * One line, and the only place the two lists are chosen between, so "which list applies"
+     * cannot come to be answered differently in the validator and at the write.
+     *
+     * @return array<string, list<string>>
+     */
+    private static function acceptedTypes(?AttachmentKind $kind): array
+    {
+        return $kind === AttachmentKind::Voice ? self::VOICE_TYPES : self::TYPES;
+    }
+
     /** The size limit in kilobytes, which is the unit Laravel's `max:` rule counts in. */
     public static function maxKilobytes(): int
     {
@@ -188,14 +271,19 @@ class FileService
     /**
      * Store an upload against a record.
      *
+     * `$kind` is passed through to `assertAcceptable()` and used for nothing else: it decides
+     * which allow-list this upload is measured against, not where the bytes go or what the row
+     * says. A voice note is an ordinary file row on an ordinary message — the pivot is what
+     * remembers it was recorded, and that is MessageService's business, not this class's.
+     *
      * @throws AuthorizationException
      * @throws FileStateException
      */
-    public function store(User $actor, Model $owner, UploadedFile $upload): File
+    public function store(User $actor, Model $owner, UploadedFile $upload, ?AttachmentKind $kind = null): File
     {
         $this->guardOwner($owner);
         $this->guardMayAttach($actor, $owner);
-        self::assertAcceptable($upload);
+        self::assertAcceptable($upload, $kind);
 
         return DB::transaction(function () use ($actor, $owner, $upload): File {
             $file = $this->write($owner, $upload, $actor, null, 1);
@@ -443,9 +531,13 @@ class FileService
      * hits, and the copy that would still refuse if somebody added a second upload endpoint
      * without a Form Request.
      *
+     * `$kind` picks the allow-list, and **nothing else**: the size rule, the empty rule and the
+     * extension-versus-contents rule are identical for a recording and for a spreadsheet. Left
+     * null — which is every caller that existed before Phase 6 — it is TYPES, unchanged.
+     *
      * @throws FileStateException
      */
-    public static function assertAcceptable(UploadedFile $upload): void
+    public static function assertAcceptable(UploadedFile $upload, ?AttachmentKind $kind = null): void
     {
         if (! $upload->isValid()) {
             throw FileStateException::upload();
@@ -461,15 +553,16 @@ class FileService
             throw FileStateException::tooLarge($size, self::MAX_BYTES);
         }
 
+        $types = self::acceptedTypes($kind);
         $extension = strtolower($upload->getClientOriginalExtension());
 
-        if (! array_key_exists($extension, self::TYPES)) {
-            throw FileStateException::typeNotAllowed($extension, self::extensions());
+        if (! array_key_exists($extension, $types)) {
+            throw FileStateException::typeNotAllowed($extension, array_keys($types));
         }
 
         $mime = strtolower((string) $upload->getMimeType());
 
-        if (! in_array($mime, self::TYPES[$extension], true)) {
+        if (! in_array($mime, $types[$extension], true)) {
             throw FileStateException::mimeMismatch($extension, $mime === '' ? 'unreadable' : $mime);
         }
     }

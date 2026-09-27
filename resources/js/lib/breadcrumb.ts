@@ -74,10 +74,20 @@ export function humanizeSegment(segment: string): string {
 }
 
 /**
- * The name of the one record this page is about, taken from the Inertia resource the page
- * already receives (`{ data: { name } }` — what `ClientResource` and `ProjectResource`
- * serialize). Two candidate resources is ambiguous, so it returns null and the caller
- * falls back to the id; no page has to be edited to get its own name in the breadcrumb.
+ * The name of the one record this page is about, taken from the Inertia props the page already
+ * receives. Two candidates is ambiguous, so it returns null and the caller falls back to the
+ * id; no page has to be edited to get its own name in the breadcrumb.
+ *
+ * **Two shapes, because this repo serializes both.** A `JsonResource` sent whole arrives
+ * wrapped — `{ data: { name } }`, what `ClientResource` and `ProjectResource` do — and a
+ * resource sent through `->resolve()` arrives flat, which is what the Employees screens and
+ * every `MeetingResource` collection do. Reading only the wrapped shape is why
+ * `/admin/employees/3` said **"#3"** in the top bar while the page under it said *"Tapu"*: two
+ * breadcrumbs for one record, on one screen, disagreeing.
+ *
+ * A flat candidate must carry an **`id` as well as a name**, which is what keeps this from
+ * picking up a stray prop: `filters`, `options` and `weekdays` have no id, and a page's one
+ * record does.
  */
 export function resourceName(pageProps: Record<string, unknown> | null | undefined): string | null {
     if (!pageProps) {
@@ -87,13 +97,20 @@ export function resourceName(pageProps: Record<string, unknown> | null | undefin
     const found: string[] = [];
 
     for (const value of Object.values(pageProps)) {
-        const data = (value as { data?: unknown } | null)?.data;
-
-        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
             continue;
         }
 
-        const record = data as Record<string, unknown>;
+        const wrapped = (value as { data?: unknown }).data;
+        const isWrapped = Boolean(wrapped) && typeof wrapped === 'object' && !Array.isArray(wrapped);
+
+        const record = (isWrapped ? wrapped : value) as Record<string, unknown>;
+
+        // A flat prop has to look like a record rather than like a bag of options.
+        if (!isWrapped && record.id === undefined) {
+            continue;
+        }
+
         const name = record.name ?? record.title;
 
         if (typeof name === 'string' && name.trim() !== '') {

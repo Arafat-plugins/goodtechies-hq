@@ -4,19 +4,30 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\HolidayResource;
+use App\Http\Resources\MeetingResource;
 use App\Models\AttendanceRecord;
 use App\Models\DailyWorkSummary;
 use App\Models\Employee;
 use App\Models\Holiday;
+use App\Models\Income;
+use App\Models\Meeting;
+use App\Models\PayrollItem;
+use App\Models\PayrollPeriod;
+use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\AttendanceService;
+use App\Services\FinanceService;
 use App\Services\HolidayService;
 use App\Services\LeaveService;
 use App\Services\ProjectService;
+use App\Services\SettingsService;
 use App\Services\TaskReviewers;
 use App\Services\TaskService;
+use App\Services\WorkloadService;
 use App\Support\AttendanceStatus;
+use App\Support\ProjectStatus;
+use App\Support\ProjectType;
 use App\Support\TaskBucket;
 use App\Support\TaskStatus;
 use App\Support\TrackingMode;
@@ -26,6 +37,7 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -64,6 +76,15 @@ class DashboardController extends Controller
     private const ATTENTION_PER_SOURCE = 5;
 
     /**
+     * How many rows the "Upcoming meetings" card shows.
+     *
+     * The same five, for the same reason: it answers *"what is on today and tomorrow"*, and the
+     * Meetings screen it links to is where the rest of the diary is. `Employee\
+     * DashboardController` carries the same number.
+     */
+    private const UPCOMING_MEETINGS = 5;
+
+    /**
      * How far down the review queue the reviewer filter is allowed to look.
      *
      * "Awaiting review" is one query (TaskBucket::InReview over Task::visibleTo()); "and I am
@@ -75,6 +96,19 @@ class DashboardController extends Controller
      */
     private const REVIEW_SCAN = 50;
 
+    /**
+     * How many rows "Upcoming deadlines" shows, and how far ahead it looks.
+     *
+     * Five, like every other shortlist on this screen. Thirty days is the window because a
+     * project deadline is a planning horizon rather than a to-do: at a week the card is empty
+     * most of the time and at a quarter it is a list of things nobody can act on yet. Both
+     * numbers are named here rather than inlined, so a change to either is one edit and shows
+     * up in the docblock the reader is already looking at.
+     */
+    private const UPCOMING_DEADLINES = 5;
+
+    private const DEADLINE_WINDOW_DAYS = 30;
+
     public function __construct(
         private readonly TaskService $tasks,
         private readonly ProjectService $projects,
@@ -82,6 +116,9 @@ class DashboardController extends Controller
         private readonly AttendanceService $attendance,
         private readonly HolidayService $holidays,
         private readonly LeaveService $leave,
+        private readonly FinanceService $finance,
+        private readonly SettingsService $settings,
+        private readonly WorkloadService $workload,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -100,8 +137,191 @@ class DashboardController extends Controller
             'workStats' => $this->workStats($user, $asOf, $maySeeTasks),
             'attention' => $maySeeTasks ? $this->attention($user, $asOf) : [],
             'taskStatuses' => $maySeeTasks ? $this->taskStatuses($user, $asOf) : [],
+            // Row 2's other three. `taskStatuses` above is the donut, these two are the bars,
+            // and `upcomingDeadlines` is the LIST — Part D §3 names four things and budgets
+            // three charts, so the fourth is not a chart. See each method.
+            'tasksByEmployee' => $maySeeTasks ? $this->tasksByEmployee($user, $asOf) : [],
+            'projectsByType' => $this->projectsByType($user),
+            'upcomingDeadlines' => $this->upcomingDeadlines($user, $asOf),
             'upcomingHolidays' => $this->upcomingHolidays($request, $asOf),
+            'upcomingMeetings' => $this->upcomingMeetings($request, $user),
+            'finance' => $this->financeThisMonth($user, $asOf),
         ]);
+    }
+
+    /**
+     * Row 3 — *"This month's income, expense, payroll, operating result"* (Part D §3, ADMIN
+     * only; Phase 8).
+     *
+     * **The two real figures come from `FinanceService::monthlyRollup()`**, the same call the
+     * Finance dashboard makes, so this card and `/finance` cannot disagree about September. No
+     * total on this page is summed here and none is summed in Vue; `operating_result` is the
+     * rollup's own `net`, computed in **integer cents** rather than by subtracting two decimal
+     * strings cast to float.
+     *
+     * **`payroll` is real from Phase 9** — this month's `payroll_periods` row, its status and
+     * the sum of its items' `net_salary`. It stays `null` when there is no period for the month
+     * yet, which is the ordinary state of the 1st before `hq:create-payroll-draft` has run:
+     * the ABSENCE is the thing the card has to render, because a zero would read as *"we paid
+     * nobody this month"* — the one wrong answer. `payroll_note` carries the month, the status
+     * and the line count in words, so what the em-dash means is never left to the screen.
+     *
+     * **`operating_result` is income − expense and nothing else**, which is worth saying out
+     * loud because a figure called an operating result that quietly omitted the largest cost
+     * would be worse than no figure. Expenses filed under the *Payroll* category ARE in it —
+     * they are expenses, entered by the Accountant, and the seeded September has $1,400 of
+     * them. What is **not** in it is the payroll RUN: `payroll_items` is a different table and
+     * `FinanceService::monthlyRollup()` never reads it, which was true before Phase 9 and is
+     * still true now that the run exists. The sentence on the card said *"the Phase 9 payroll
+     * run is not in it"*; the fact has not changed, only the tense, so `Dashboard.vue` now says
+     * *"the payroll run is not in it"* — a card that still pointed at a phase number would read
+     * as unbuilt work rather than as the accounting statement it is.
+     *
+     * Empty for anybody without `finance.view` — absent from the payload rather than sent with
+     * zeroes (Part C §1: a field the requester may not see is absent, not null). Today that is
+     * nobody who can reach this route, since an Admin holds both finance keys; the gate is
+     * asked anyway, because that is where the answer lives if it ever stops being true.
+     *
+     * @return array<string, mixed>
+     */
+    private function financeThisMonth(User $user, Carbon $asOf): array
+    {
+        if (! Gate::forUser($user)->allows('viewAny', Income::class)) {
+            return [];
+        }
+
+        $rollup = $this->finance->monthlyRollup($user, (int) $asOf->year, (int) $asOf->month);
+        $payroll = $this->payrollThisMonth($user, $asOf);
+
+        return [
+            'month' => $rollup['month'],
+            'label' => $rollup['label'],
+            'income' => $rollup['income']['total'],
+            'expense' => $rollup['expenses']['total'],
+            // Phase 9. See the docblock: a real total, or null when the month has no period
+            // yet — never a zero, which would read as "we paid nobody".
+            'payroll' => $payroll['total'],
+            'payroll_note' => $payroll['note'],
+            'payroll_href' => $payroll['href'],
+            'operating_result' => $rollup['net'],
+            'currency' => (string) $this->settings->get('currency'),
+            'href' => '/finance?month='.$rollup['month'],
+        ];
+    }
+
+    /**
+     * Row 3's payroll card, made real (Part E, Phase 9: *"Admin dashboard Row 3 payroll card
+     * real"*).
+     *
+     * Three facts and no arithmetic of this controller's own:
+     *
+     *   - **the total** is `SUM(payroll_items.net_salary)` for the month's period, summed **by
+     *     PostgreSQL over the generated column** and handed back as an exact decimal string.
+     *     Not `array_sum` over a collection, not a subtraction of two floats, and not a figure
+     *     Vue adds up: every one of those is a second opinion about the agency's wage bill.
+     *     The rows are scoped by `PayrollItem::scopeVisibleTo()` — a no-op for the Admin who
+     *     holds `payroll.view_others`, and the reason this method can never quietly become a
+     *     leak if the gate above it is ever loosened;
+     *   - **the status**, from `PayrollStatus::label()`, so the card says *Draft* while a month
+     *     is still being worked on rather than presenting a provisional wage bill as settled;
+     *   - **the line count**, because a period with no items is a different thing from a period
+     *     of zero — the first is a draft that has not run, the second would be a payroll of
+     *     nothing.
+     *
+     * **`null` when the month has no period yet**, which is the state of every 1st before
+     * `hq:create-payroll-draft` fires. The card then prints an em-dash and says so in words.
+     *
+     * The link is `Route::has()`-guarded rather than hard-coded: the payroll workbench is
+     * another slice's, and a dashboard card pointing at a route that does not exist yet would
+     * be a 404 somebody found by clicking rather than by reading a test.
+     *
+     * @return array{total: string|null, note: string, href: string|null}
+     */
+    private function payrollThisMonth(User $user, Carbon $asOf): array
+    {
+        $href = Route::has('payroll.index') ? route('payroll.index', absolute: false) : null;
+
+        if (! Gate::forUser($user)->allows('viewAny', PayrollPeriod::class)) {
+            return ['total' => null, 'note' => 'You do not have access to payroll.', 'href' => null];
+        }
+
+        $period = PayrollPeriod::query()->forMonth($asOf)->first();
+
+        if ($period === null) {
+            return [
+                'total' => null,
+                'note' => 'No payroll period for this month yet.',
+                'href' => $href,
+            ];
+        }
+
+        $lines = PayrollItem::query()
+            ->visibleTo($user)
+            ->where('payroll_items.payroll_period_id', $period->getKey())
+            ->count();
+
+        // The cast pins the scale, so an empty period reads "0.00" and not "0". The string
+        // leaves PostgreSQL already formatted; nothing here parses it.
+        $total = (string) PayrollItem::query()
+            ->visibleTo($user)
+            ->where('payroll_items.payroll_period_id', $period->getKey())
+            ->selectRaw('COALESCE(SUM(payroll_items.net_salary), 0)::numeric(12,2)::text as total')
+            ->value('total');
+
+        return [
+            'total' => $total,
+            'note' => sprintf(
+                '%s · %s · %s',
+                $period->label(),
+                $period->status?->label() ?? 'Unknown',
+                $lines === 1 ? '1 person' : $lines.' people',
+            ),
+            'href' => $href,
+        ];
+    }
+
+    /**
+     * "Upcoming meetings" — Part D §12's dashboard card, Phase 7.
+     *
+     * **One query, scoped, capped.** `Meeting::visibleTo()` is `MeetingPolicy::view()` in SQL,
+     * so a meeting this Admin is not in simply is not in the result — there is no list to
+     * filter afterwards and nothing for Vue to drop. Cancelled meetings are out (`notCancelled`)
+     * and so is anything already finished; what is left is ordered by when it starts and cut at
+     * `UPCOMING_MEETINGS`. An Admin sees every meeting in the agency, which is what the scope
+     * says and is the same answer the Meetings screen gives them.
+     *
+     * **`MeetingResource`, not a shape of this card's own** — the same move `upcomingHolidays()`
+     * below makes with `HolidayResource`, and for the same reason: a meeting is the same meeting
+     * on the card, on the list and on its own page, and a fourth shape would be a fourth place
+     * for a state or a Join control to be worded differently. It also means the linked project
+     * arrives already scoped per viewer (`linkedContextFor()`), whether or not this card prints
+     * it — there is no shortcut here that could leak one.
+     *
+     * *Follow-up, in the shape decision 6-16 records:* `Employee\DashboardController` asks this
+     * same question with this same query, because Phase 7's two slices could not both add a
+     * method to `MeetingService`. It wants a `MeetingService::upcomingFor(User, int)` that both
+     * call.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function upcomingMeetings(Request $request, User $user): array
+    {
+        if (! Gate::forUser($user)->allows('viewAny', Meeting::class)) {
+            return [];
+        }
+
+        $meetings = Meeting::query()
+            ->visibleTo($user)
+            ->notCancelled()
+            // Still to come, or happening right now. `start_at` would have dropped the meeting
+            // somebody is five minutes late for, which is the one this card is most useful for.
+            ->where('end_at', '>=', now())
+            ->with(['organizer', 'participantSeats.user', 'project', 'task'])
+            ->orderBy('start_at')
+            ->limit(self::UPCOMING_MEETINGS)
+            ->get();
+
+        return MeetingResource::collection($meetings)->resolve($request);
     }
 
     /**
@@ -444,5 +664,179 @@ class DashboardController extends Controller
             TaskStatus::boardOrder(),
             fn (TaskStatus $status): bool => $status->isOpen(),
         )));
+    }
+
+    /**
+     * "Tasks by employee" — Part D §3's second Row 2 chart, and a **count**.
+     *
+     * ## It is `WorkloadService`'s answer, not a second one
+     *
+     * The agency already has a screen that answers *"who is carrying what"* — Admin → Workforce
+     * → Workload — and `WorkloadService::forViewer()` is the single statement of it: one
+     * `TaskService::count()` per person with `assignee_id` and `TaskBucket::Open`, which is
+     * exactly the query `/admin/tasks?assignee_id=…&bucket=open` runs. So this chart and the
+     * table it links to cannot disagree, and no new definition of "how much work has Yaseen
+     * got" enters the application. A `group by task_assignees.employee_id` written here would
+     * have been that second definition, and it would have differed the first time either side
+     * changed what "open" means.
+     *
+     * ## No score, no ranking, no comparison (Part H §1, Part B §3 rule 12)
+     *
+     * **Ordered by name**, because that is the order `WorkloadService` returns and the order it
+     * chose for the same reason: an order picked by a number is a league table whatever the
+     * column is called, and the first bar of one reads as the winner. There is no target, no
+     * percentage, no "vs last week" and no capacity line — a bar's length is a count of tasks
+     * and nothing else. A flatter chart is the correct trade.
+     *
+     * Everybody in the viewer's scope is on the list, **including the people at zero**: the same
+     * reason `taskStatuses()` ships its empty statuses, and the reason the Workload table lists
+     * everybody. A chart whose categories come and go as the week does is one whose axis cannot
+     * be read twice, and "nothing on Yaseen's plate" is an answer an Admin deciding who takes
+     * the next job actually wants.
+     *
+     * `href` carries the two filters the number was counted with, so a bar that looks wrong can
+     * be opened and read. The chart itself cannot hold a link — `BarCompare` has no per-bar
+     * `href` — so the card's header links to the Workload table, where every one of these counts
+     * is a link; see `Dashboard.vue`.
+     *
+     * @return list<array{id: int, name: string, count: int, href: string}>
+     */
+    private function tasksByEmployee(User $user, Carbon $asOf): array
+    {
+        /** @var list<array<string, mixed>> $employees */
+        $employees = $this->workload->forViewer($user, $asOf)['employees'];
+
+        return array_map(fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'name' => (string) $row['name'],
+            'count' => (int) $row['open_count'],
+            'href' => '/admin/tasks?assignee_id='.$row['id'].'&bucket='.TaskBucket::Open->value,
+        ], $employees);
+    }
+
+    /**
+     * "Projects by type" — Part D §3's third Row 2 chart.
+     *
+     * One `group by project_type` over `Project::visibleTo()`, not archived: the same two
+     * predicates `/admin/projects` starts from, so each bar's `href` opens exactly the projects
+     * it counted. No status narrowing, because the list it links to applies none either — a bar
+     * reading 3 over a list of 4 is the one failure this card can have.
+     *
+     * **Every type ships, the empty ones included**, in the enum's own order. `ProjectType` is a
+     * fixed set of eight and this is the same argument `taskStatuses()` makes: an axis whose
+     * categories appear and disappear as work is won and archived is an axis nobody can compare
+     * against last month's. The label is `ProjectType::label()`, so *WooCommerce* is spelled
+     * here exactly as it is spelled in the filter bar and on the project's own page.
+     *
+     * Empty for anybody who may not see projects at all — absent from the payload rather than
+     * eight zeroes (Part C §1). `visibleTo()` would already return nothing for them, but a
+     * payload of eight zeroes is a statement that the agency has no work, which is a different
+     * lie from *"this is not yours to see"*.
+     *
+     * @return list<array{key: string, label: string, count: int, href: string}>
+     */
+    private function projectsByType(User $user): array
+    {
+        if (! Gate::forUser($user)->allows('viewAny', Project::class)) {
+            return [];
+        }
+
+        $counts = Project::query()
+            ->visibleTo($user)
+            ->notArchived()
+            ->groupBy('project_type')
+            ->selectRaw('project_type, count(*) as total')
+            ->pluck('total', 'project_type')
+            ->all();
+
+        return array_map(fn (ProjectType $type): array => [
+            'key' => $type->value,
+            'label' => $type->label(),
+            'count' => (int) ($counts[$type->value] ?? 0),
+            'href' => '/admin/projects?project_type='.$type->value,
+        ], ProjectType::cases());
+    }
+
+    /**
+     * "Upcoming deadlines" — the fourth thing in Part D §3's Row 2, and the one that is a LIST.
+     *
+     * Part D names four things and calls three of them the chart budget, so this is not a
+     * fourth chart. It is `AttentionList`, the panel this file already feeds, because a
+     * deadline is something somebody opens rather than something they measure.
+     *
+     * **It is PROJECT deadlines, not task due dates.** Every task date on this screen is
+     * already answered twice over — *Tasks due today* and *Overdue* count them and the attention
+     * panel lists the late ones — so a second list of task dates would be a third opinion about
+     * the same column. `projects.deadline` is the one date on the Company dashboard that nothing
+     * else shows, and it is the date a client was promised.
+     *
+     * Scoped by `Project::visibleTo()` and narrowed to projects that are still being worked on
+     * (`ProjectStatus::isOpen()` — Active or On Hold), not archived, with a deadline inside the
+     * window. A finished or cancelled project has no deadline anybody has to meet, and an
+     * archived one is read-only by definition (Part D §4).
+     *
+     * **How near it is, in words.** "Due today", "Due tomorrow", "Due in 9 days" — the second
+     * encoding of the urgent medallion, and the only part a screen reader gets (DESIGN.md §5.6,
+     * a bug this repo has fixed twice). The client's name rides along because two of the seeded
+     * projects are both called *Website Maintenance*.
+     *
+     * @return list<array{id: string, title: string, meta: string, href: string, tone: string}>
+     */
+    private function upcomingDeadlines(User $user, Carbon $asOf): array
+    {
+        if (! Gate::forUser($user)->allows('viewAny', Project::class)) {
+            return [];
+        }
+
+        $projects = Project::query()
+            ->visibleTo($user)
+            ->notArchived()
+            ->whereIn('status', array_map(
+                fn (ProjectStatus $status): string => $status->value,
+                array_filter(ProjectStatus::cases(), fn (ProjectStatus $status): bool => $status->isOpen()),
+            ))
+            ->whereNotNull('deadline')
+            ->whereBetween('deadline', [
+                $asOf->toDateString(),
+                $asOf->copy()->addDays(self::DEADLINE_WINDOW_DAYS)->toDateString(),
+            ])
+            ->with('client:id,name')
+            ->orderBy('deadline')
+            ->orderBy('id')
+            ->limit(self::UPCOMING_DEADLINES)
+            ->get();
+
+        return $projects->map(function (Project $project) use ($asOf): array {
+            $days = (int) $asOf->copy()->startOfDay()
+                ->diffInDays($project->deadline->copy()->startOfDay());
+
+            return [
+                'id' => 'deadline-'.$project->getKey(),
+                'title' => (string) $project->name,
+                'meta' => sprintf(
+                    '%s · %s',
+                    $this->deadlineWhen($days),
+                    // A project without a client is Internal (decision 1-1), said in words
+                    // rather than left blank — a blank reads as missing data.
+                    $project->client?->name ?? 'Internal',
+                ),
+                'href' => '/admin/projects/'.$project->getKey(),
+                // Today and tomorrow are urgent. The medallion is the second encoding of the
+                // words above, never the only one.
+                'tone' => $days <= 1 ? 'urgent' : 'default',
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * How near a deadline is, in words.
+     */
+    private function deadlineWhen(int $days): string
+    {
+        return match (true) {
+            $days <= 0 => 'Due today',
+            $days === 1 => 'Due tomorrow',
+            default => 'Due in '.$days.' days',
+        };
     }
 }

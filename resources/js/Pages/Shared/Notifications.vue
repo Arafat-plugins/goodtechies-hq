@@ -177,7 +177,7 @@ function choose(value: string | number): void {
             -->
             <TabsContent
                 :value="tab"
-                class="min-w-0 rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50"
+                class="min-w-0 rounded-lg focus-visible:ring-3 focus-visible:ring-ring"
                 :aria-busy="pending || undefined"
             >
                 <Card class="min-w-0 gap-0 overflow-hidden p-0">

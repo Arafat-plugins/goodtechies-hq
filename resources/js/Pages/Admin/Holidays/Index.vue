@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
 import { PartyPopper, Pencil, Plus, Trash2 } from '@lucide/vue';
-import { computed, nextTick, ref, useId } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { ColumnDef } from '@/Components/DataTable/types';
 import type { Holiday } from '@/Components/Holidays/holidays';
@@ -26,6 +26,7 @@ import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
 import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { useMenuDialog } from '@/lib/menuFocus';
 
 /**
  * Every page needs one. Two shipped last phase without it and rendered bare — no sidebar, no
@@ -108,17 +109,34 @@ const editing = ref<Holiday | null>(null);
 const today = computed(() => new Date().toISOString().slice(0, 10));
 
 function add(): void {
-    editing.value = null;
-    dialogOpen.value = true;
+    // Through the same door as `edit`, so one watcher below can put focus back whichever control
+    // opened the form. With no menu open, what is captured is the Add button itself.
+    menu.openFromMenu(() => {
+        editing.value = null;
+        dialogOpen.value = true;
+    });
 }
 
+/**
+ * The form closes three ways — saved, cancelled, Esc — and only one of them runs a handler, so the
+ * focus return hangs off the flag instead. Without it a saved edit dropped the keyboard on `<body>`
+ * exactly as the delete confirmation did: the row survives an edit, but the menu ITEM that opened
+ * the dialog does not (decision 5-20).
+ */
+watch(dialogOpen, (open, wasOpen) => {
+    if (wasOpen && ! open) {
+        menu.returnFocus();
+    }
+});
+
 function edit(holiday: Holiday): void {
-    // Deferred for the reason `askRemove` is: the `⋯` menu dismisses on select and restores
-    // focus to its trigger, and opening a dialog in the same tick races that.
-    setTimeout(() => {
+    // `openFromMenu` is both halves of decision 5-20: it captures the `⋯` trigger while the menu
+    // is still open, and it defers the open by a tick so the menu can finish dismissing before the
+    // dialog claims the focus trap.
+    menu.openFromMenu(() => {
         editing.value = holiday;
         dialogOpen.value = true;
-    }, 0);
+    });
 }
 
 /* -------------------------------------------------------------------- removing */
@@ -141,9 +159,9 @@ const pending = ref<Holiday | null>(null);
 const removing = ref(false);
 
 function askRemove(holiday: Holiday): void {
-    setTimeout(() => {
+    menu.openFromMenu(() => {
         pending.value = holiday;
-    }, 0);
+    });
 }
 
 function confirmRemove(): void {
@@ -160,42 +178,24 @@ function confirmRemove(): void {
         onFinish: () => {
             removing.value = false;
             pending.value = null;
-            // The row and its ⋯ button are gone, so there is nothing to give focus back to:
-            // the page's own Add control is the nearest thing that still exists.
-            returnFocus(null);
+            // The row and its ⋯ button are gone, so the captured trigger is off the page and
+            // `returnFocus` falls through to the id below — the page's own Add control, the
+            // nearest thing that still exists.
+            menu.returnFocus();
         },
     });
 }
 
-/** The id the Add control carries so `returnFocus` can find it without a template ref. */
+/** The id the Add control carries, so it can be the fallback without a template ref. */
 const ADD_BUTTON_ID = 'holidays-add';
 
 /**
- * Put focus back where the overlay was opened from.
- *
- * reka's Dialog restores focus to whatever held it when the dialog opened — which here was a
- * menu item that the `⋯` menu has already unmounted, so the restore lands on `<body>` and a
- * keyboard user is dropped at the top of the document. (The same gap is in
- * `Admin/Projects/Index.vue`'s archive confirm; it is the shape of the pattern, not of this
- * screen.) So the row's `⋯` trigger is found by the accessible name `DataTable` gave it and
- * focused explicitly — the VISIBLE one, because the table and the card list each render one
- * and only one of the two is on screen at a given width.
+ * Decision 5-20's pattern, now one helper for the whole application — `lib/menuFocus.ts` has the
+ * story. This screen is where it was first fixed: the `⋯` trigger is captured while the menu is
+ * open, focus goes back to it when the dialog closes, and when the row it belonged to has been
+ * deleted the Add button catches it instead of `<body>`.
  */
-function returnFocus(holiday: Holiday | null): void {
-    void nextTick(() => {
-        const label = holiday
-            ? `Actions for ${holiday.name} on ${formatHolidayDate(holiday.date)}`
-            : null;
-
-        const trigger = label
-            ? [...document.querySelectorAll<HTMLElement>('button[aria-label^="Actions for "]')].find(
-                  (el) => el.getAttribute('aria-label') === label && el.offsetParent !== null,
-              )
-            : undefined;
-
-        (trigger ?? document.getElementById(ADD_BUTTON_ID))?.focus();
-    });
-}
+const menu = useMenuDialog(ADD_BUTTON_ID);
 
 /** How many of the listed rows are still ahead. Zero is an answer, and the header prints it. */
 const stillToCome = computed(() => props.holidays.filter((holiday) => !holiday.is_past).length);
@@ -337,7 +337,7 @@ const summary = computed(() => {
         -->
         <Dialog
             :open="pending !== null"
-            @update:open="(open: boolean) => { if (!open) { const row = pending; pending = null; returnFocus(row); } }"
+            @update:open="(open: boolean) => { if (!open) { pending = null; menu.returnFocus(); } }"
         >
             <DialogContent class="sm:max-w-md">
                 <DialogHeader>
@@ -353,7 +353,7 @@ const summary = computed(() => {
                         type="button"
                         variant="outline"
                         :disabled="removing"
-                        @click="() => { const row = pending; pending = null; returnFocus(row); }"
+                        @click="() => { pending = null; menu.returnFocus(); }"
                     >
                         Keep it
                     </Button>

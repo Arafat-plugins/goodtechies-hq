@@ -16,7 +16,11 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
 #[Fillable(['name', 'email', 'password', 'timezone', 'status'])]
-#[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
+// Decision 10-18: `search_vector` is a STORED GENERATED tsvector of this row's own
+// searchable text. `select *` loads it (~282 B a row on `tasks`, measured with
+// `pg_column_size`), and it belongs in no payload — so it is hidden from every
+// `toArray()`, `toJson()` and `dd()`. Hidden, not dropped: search reads the column.
+#[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes', 'search_vector'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */

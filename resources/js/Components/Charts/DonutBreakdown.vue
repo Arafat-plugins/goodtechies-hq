@@ -31,9 +31,26 @@ const props = withDefaults(
         centerLabel?: string;
         height?: number;
         loading?: boolean;
+        /**
+         * How a value is written out — in the axis, in the tooltip, in the legend and in the
+         * screen-reader table, so all four agree.
+         *
+         * Defaults to grouped digits, which is right for a count. A chart of money or of
+         * durations passes its own: **a chart whose axis reads `432` when the table under it
+         * reads `432h` is a chart the reader has to be told how to read**, and the unit
+         * smuggled into the title is a caption doing a scale's job.
+         *
+         * It takes a number because a mark's geometry is a number; the exact value — a money
+         * string from PostgreSQL, say — stays in the table beside the chart (report contract
+         * §3).
+         */
+        valueFormat?: (value: number) => string;
     }>(),
-    { height: 200, loading: false },
+    { height: 200, loading: false, valueFormat: (value: number): string => value.toLocaleString() },
 );
+/** The caller's formatter, or grouped digits. One indirection so every site below agrees. */
+const fmt = (value: number): string => props.valueFormat(value);
+
 
 const tokens = useChartTokens();
 const cssVars = computed(() => chartCssVars(tokens.value));
@@ -47,7 +64,7 @@ const colourFor = (slice: DonutSlice, index: number): string =>
 const swatches = computed(() => props.data.map((slice, index) => colourFor(slice, index)));
 
 const sum = computed(() => props.data.reduce((running, slice) => running + slice.value, 0));
-const centreValue = computed(() => (props.total ?? sum.value).toLocaleString());
+const centreValue = computed(() => fmt(props.total ?? sum.value));
 
 const value = (slice: DonutSlice): number => slice.value;
 
@@ -69,7 +86,7 @@ const colour = computed(() => {
  */
 const triggers = computed(() => ({
     [Donut.selectors.segment]: (arc: { data: DonutSlice; index: number }) =>
-        chartTooltip(arc.data.label, arc.data.value.toLocaleString(), colourFor(arc.data, arc.index)),
+        chartTooltip(arc.data.label, fmt(arc.data.value), colourFor(arc.data, arc.index)),
 }));
 </script>
 
@@ -128,11 +145,21 @@ const triggers = computed(() => ({
                         aria-hidden="true"
                     />
                     <span class="min-w-0 truncate">{{ slice.label }}</span>
-                    <span class="ml-auto tabular-nums text-foreground">{{ slice.value.toLocaleString() }}</span>
+                    <span class="ml-auto tabular-nums text-foreground">{{ fmt(slice.value) }}</span>
                 </li>
             </ul>
 
-            <table class="sr-only">
+            <!--
+                **The wrapper carries `sr-only`, not the table.** `sr-only` pins `width: 1px`
+                and `overflow: hidden`, which clips an ordinary box and does NOT clip a table:
+                a table is sized by its content whatever its container says, so a long label in
+                this fallback pushes the PAGE wide while staying invisible. Measured on the
+                finance report at 360px, where one project name added 63px of horizontal scroll
+                to a page nobody could see the cause of. A `<div class="sr-only">` around it is
+                a box, and a box clips.
+            -->
+            <div class="sr-only">
+            <table>
                 <caption>{{ centerLabel ?? 'Breakdown' }} — {{ centreValue }} in total</caption>
                 <thead>
                     <tr>
@@ -143,10 +170,11 @@ const triggers = computed(() => ({
                 <tbody>
                     <tr v-for="slice in data" :key="slice.label">
                         <th scope="row">{{ slice.label }}</th>
-                        <td class="tabular-nums">{{ slice.value.toLocaleString() }}</td>
+                        <td class="tabular-nums">{{ fmt(slice.value) }}</td>
                     </tr>
                 </tbody>
             </table>
+            </div>
         </template>
     </div>
 </template>

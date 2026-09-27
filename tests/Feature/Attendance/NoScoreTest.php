@@ -1,8 +1,6 @@
 <?php
 
 use App\Models\User;
-use App\Services\AttendanceService;
-use Illuminate\Support\Carbon;
 
 /*
 |--------------------------------------------------------------------------
@@ -98,10 +96,9 @@ it('sends no score in any attendance payload', function (): void {
     $admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
     $yaseen = User::where('email', 'yaseen@goodtechies.test')->firstOrFail();
 
-    app(AttendanceService::class)->clockIn(
-        $yaseen->employee,
-        Carbon::parse('2026-09-14')->setTime(8, 58),
-    );
+    // The day already has a record: since Phase 10 `WorkSeeder` writes a real month of
+    // attendance and tracked time, so these payloads are scanned full rather than nearly empty.
+    // Clocking Yaseen in here would now be a second clock-in on a day he has already started.
 
     // Key NAMES as well as values: "Efficiency: 82 %" under a different name is the same thing.
     foreach (['/admin/attendance?date=2026-09-14', '/attendance/'.$yaseen->employee->id, '/admin/schedules'] as $path) {

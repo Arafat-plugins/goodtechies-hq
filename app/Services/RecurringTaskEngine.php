@@ -303,9 +303,9 @@ class RecurringTaskEngine
     private function renderTitle(RecurringTask $template, string $period, Carbon $asOf): string
     {
         $title = strtr((string) $template->title_template, [
-            '{period}' => RecurrenceRule::labelForPeriod($period) ?? $period,
-            '{project}' => (string) ($template->project?->name ?? ''),
-            '{date}' => $asOf->toDateString(),
+            RecurringTask::PLACEHOLDER_PERIOD => RecurrenceRule::labelForPeriod($period) ?? $period,
+            RecurringTask::PLACEHOLDER_PROJECT => (string) ($template->project?->name ?? ''),
+            RecurringTask::PLACEHOLDER_DATE => $asOf->toDateString(),
         ]);
 
         $title = trim($title);

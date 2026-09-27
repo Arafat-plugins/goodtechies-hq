@@ -112,4 +112,13 @@ class LeaveStateException extends RuntimeException
     {
         return new self('You cannot rule on your own leave request. Ask the other Admin.');
     }
+
+    /**
+     * Withdrawing is the APPLICANT's move and nobody else's (decision 5-19). An Admin who wants a
+     * request gone rejects it, under their own name, with the reason the Form Request requires.
+     */
+    public static function cannotWithdrawAnothers(): self
+    {
+        return new self('Only the person who asked for leave can withdraw the request.');
+    }
 }

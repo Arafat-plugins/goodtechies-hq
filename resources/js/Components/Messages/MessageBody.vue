@@ -58,16 +58,18 @@ const props = withDefaults(
 /**
  * A link is an underline in both variants; only its colour and weight move.
  *
- * The focus ring has to move too. `ring-ring/50` is `--brand` at 50 %, which over `--primary`
- * composites to 1.19:1 — a ring nobody can see. On accent it becomes an opaque
- * `--primary-foreground` ring, 4.99:1 / 7.31:1. Everywhere else it is untouched.
+ * The focus ring has to move too. `--ring` is `--brand`, two lightness steps off `--primary` on
+ * the same hue, so on a `--primary` fill it is 1.43:1 — a ring nobody can see. (It was 1.20:1 when
+ * the app still painted `ring-ring/50`; Phase 12's polish pass made every ring opaque, which fixed
+ * the other surfaces and could not fix this one.) On accent the ring becomes
+ * `--primary-foreground` instead, 5.01:1 / 7.31:1. Everywhere else it is the app's own `--ring`.
  */
 const linkClass = computed(() =>
     cn(
         'rounded-sm break-all underline underline-offset-2 focus-visible:ring-3 focus-visible:outline-none',
         props.onAccent
             ? 'text-primary-foreground decoration-primary-foreground focus-visible:ring-primary-foreground'
-            : 'focus-visible:ring-ring/50',
+            : 'focus-visible:ring-ring',
     ),
 );
 

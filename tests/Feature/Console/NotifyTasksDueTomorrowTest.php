@@ -49,6 +49,22 @@ beforeEach(function () {
     $this->today = Carbon::parse('2026-10-20');
     $this->project = Project::where('name', 'Buffalo Modular — SEO')->firstOrFail();
 
+    // **The day belongs to this test.**
+    //
+    // Every assertion below counts reminders and expects to recognise each one, so the seeded
+    // demo data must not also have work due tomorrow. It does, on some days of the year and
+    // not others: `TaskSeeder` dates its tasks RELATIVELY (`'due' => 25`) while this file pins
+    // an ABSOLUTE date, so the two collide whenever the calendar happens to line them up — and
+    // they did, on 26 Sep 2026, twenty-five days before 21 Oct. Six tests here failed that
+    // morning having passed every previous one, with nothing in the diff to explain it.
+    //
+    // Picking a date further out would only move the collision to a different week. So the
+    // test clears the day instead: anything else due tomorrow is pushed a year out, where it
+    // is simply "due later" — a case one of these tests already covers deliberately.
+    Task::query()
+        ->whereDate('due_date', $this->today->copy()->addDay())
+        ->update(['due_date' => $this->today->copy()->addDay()->addYear()->toDateString()]);
+
     $this->task = $this->tasks->create($this->admin, [
         'project_id' => $this->project->id,
         'title' => 'Ship the redirect map',

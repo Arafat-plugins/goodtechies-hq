@@ -24,6 +24,7 @@ import {
 import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
 import { Label } from '@/Components/ui/label';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { useMenuDialog } from '@/lib/menuFocus';
 import { pushQuery, resetQuery } from '@/lib/tableState';
 import { useNavigationPending } from '@/lib/useNavigationPending';
 import { cn } from '@/lib/utils';
@@ -140,11 +141,27 @@ const loading = useNavigationPending();
 const pendingProject = ref<Project | null>(null);
 const archiving = ref(false);
 
-/** Let the dropdown finish closing before the dialog takes the focus trap. */
+/**
+ * Decision 5-20, and the screen the decision names: this confirmation is opened from a
+ * `DropdownMenuItem`, so reka restored focus to a menu item the `⋯` menu had already unmounted and
+ * a keyboard user was dropped on `<body>`, mid-table, whichever button they pressed.
+ *
+ * `openFromMenu` captures the row's `⋯` trigger while the menu is still open and defers the dialog
+ * by a tick; `returnFocus` on every way out puts the keyboard back on that button — and the row
+ * survives an archive, so here it is always the `⋯` and never the fallback.
+ */
+const menu = useMenuDialog();
+
 function askToToggleArchive(project: Project): void {
-    setTimeout(() => {
+    menu.openFromMenu(() => {
         pendingProject.value = project;
-    }, 0);
+    });
+}
+
+/** Cancel, Esc, and the write that closed it: one way out for focus. */
+function closeArchive(): void {
+    pendingProject.value = null;
+    menu.returnFocus();
 }
 
 function confirmArchiveToggle(): void {
@@ -163,7 +180,7 @@ function confirmArchiveToggle(): void {
             preserveScroll: true,
             onFinish: () => {
                 archiving.value = false;
-                pendingProject.value = null;
+                closeArchive();
             },
         },
     );
@@ -313,7 +330,7 @@ function confirmArchiveToggle(): void {
 
     <Dialog
         :open="pendingProject !== null"
-        @update:open="(open) => (pendingProject = open ? pendingProject : null)"
+        @update:open="(open) => { if (! open) { closeArchive(); } }"
     >
         <DialogContent>
             <DialogHeader>
@@ -329,7 +346,7 @@ function confirmArchiveToggle(): void {
                 </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-                <Button type="button" variant="outline" :disabled="archiving" @click="pendingProject = null">
+                <Button type="button" variant="outline" :disabled="archiving" @click="closeArchive">
                     Cancel
                 </Button>
                 <Button

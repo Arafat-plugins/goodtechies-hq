@@ -24,8 +24,19 @@ namespace App\Support;
  *     from a status change would be a second write path for facts that are not this table's.
  *     The spec gives no verb for it, so neither does this.
  *
- * There is no `cancelled`. Part D §9's list has four statuses and an employee withdrawing a
- * request is not among them; inventing it would be building ahead of the plan (Part H).
+ *   - **withdrawn** is the applicant taking their own request back, and it is the fifth status
+ *     (decision 5-19). Part D §9 lists four and none of them is this, which is why it was left
+ *     out for five phases — but the four it lists are the four answers an APPROVER can give, and
+ *     the person who booked the wrong week is not asking for an answer. Without it, the only way
+ *     out of a mistake was to ask an Admin to *reject* you: a refusal on your record, in the
+ *     audit log, for a week you never wanted. It is reachable from the two statuses that have
+ *     spent nothing — `pending` and `correction_requested` — and it is terminal for the same
+ *     reason `rejected` is.
+ *
+ * There is still no un-approve. An approval has decremented a balance and written attendance
+ * rows, and reversing that from a status change would be a second write path for facts that are
+ * not this table's — so `approved` has no way out here, and somebody who needs one asks an Admin,
+ * who has the balance and attendance screens to do it properly.
  */
 enum LeaveStatus: string
 {
@@ -33,6 +44,7 @@ enum LeaveStatus: string
     case Approved = 'approved';
     case Rejected = 'rejected';
     case CorrectionRequested = 'correction_requested';
+    case Withdrawn = 'withdrawn';
 
     /**
      * The legal moves. `from value => list of to values`.
@@ -40,10 +52,11 @@ enum LeaveStatus: string
      * @var array<string, list<string>>
      */
     public const TRANSITIONS = [
-        'pending' => ['approved', 'rejected', 'correction_requested'],
-        'correction_requested' => ['pending', 'approved', 'rejected'],
+        'pending' => ['approved', 'rejected', 'correction_requested', 'withdrawn'],
+        'correction_requested' => ['pending', 'approved', 'rejected', 'withdrawn'],
         'approved' => [],
         'rejected' => [],
+        'withdrawn' => [],
     ];
 
     public function canTransitionTo(self $to): bool
@@ -68,9 +81,12 @@ enum LeaveStatus: string
      * Is this status one that still holds a place in the calendar?
      *
      * The overlap rule and the exclusion constraint are written against exactly this set —
-     * Part D §9: "overlapping pending/approved requests are refused". A rejected request and
-     * one sent back for correction hold nothing, so a second request over the same days is
-     * fine, which is the whole point of sending one back.
+     * Part D §9: "overlapping pending/approved requests are refused". A rejected request, one
+     * sent back for correction and one the applicant has withdrawn hold nothing, so a second
+     * request over the same days is fine — which is the whole point of sending one back, and the
+     * whole point of being able to take one back. **Withdrawn is deliberately absent from this
+     * list**: a withdrawal that went on holding the week would be a mistake somebody could not
+     * correct by re-booking, which is the bug 5-19 is about wearing a different hat.
      *
      * @return list<self>
      */
@@ -102,6 +118,7 @@ enum LeaveStatus: string
             self::Approved => 'Approved',
             self::Rejected => 'Rejected',
             self::CorrectionRequested => 'Correction requested',
+            self::Withdrawn => 'Withdrawn',
         };
     }
 
@@ -122,6 +139,11 @@ enum LeaveStatus: string
             self::Approved => 'done',
             self::Rejected => 'cancelled',
             self::CorrectionRequested => 'changes',
+            // The same tone as a rejection, because the outcome is the same one: these days were
+            // not granted and nothing was spent. The WORD is what tells the two apart, which is
+            // exactly what §5.6 requires of every status in this application — nobody has to read
+            // a colour to know whether they withdrew it or somebody turned it down.
+            self::Withdrawn => 'cancelled',
         };
     }
 
@@ -130,6 +152,20 @@ enum LeaveStatus: string
      * dashboard's count.
      */
     public function isOpen(): bool
+    {
+        return $this === self::Pending || $this === self::CorrectionRequested;
+    }
+
+    /**
+     * Can the applicant still take this request back? — decision 5-19.
+     *
+     * The two statuses that have spent nothing. An approval has decremented a balance and written
+     * attendance rows; a rejection and a withdrawal are already finished. Stated here rather than
+     * in `LeaveRequestPolicy::withdraw()` so that the machine, the policy and the payload's
+     * `can_withdraw` are reading one sentence — and so that `TRANSITIONS` above and this cannot
+     * drift: every status this returns true for names `withdrawn` in its transition list.
+     */
+    public function isWithdrawable(): bool
     {
         return $this === self::Pending || $this === self::CorrectionRequested;
     }

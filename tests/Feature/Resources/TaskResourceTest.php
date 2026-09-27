@@ -342,7 +342,14 @@ it('says which template made a task and for which period, on the detail payload'
         ->inertiaPage()['props']['task'];
 
     expect($payload['generated_from'])->not->toBeNull()
-        ->and($payload['generated_from']['template'])->toBe($template->title_template)
+        // Decision 3-13: the template's NAME, not its pattern. The seeded pattern is
+        // "Buffalo Modular Monthly SEO — {period}", and printing that under a title already
+        // rendered from it showed template syntax to somebody with no template to edit. The
+        // placeholder and the em dash that only held it are gone; the pattern itself is
+        // untouched, and `RecurringTaskResource` still sends it verbatim to the editor.
+        ->and($payload['generated_from']['template'])->toBe('Buffalo Modular Monthly SEO')
+        ->and($payload['generated_from']['template'])->not->toContain('{')
+        ->and($template->title_template)->toBe('Buffalo Modular Monthly SEO — {period}')
         ->and($payload['generated_from']['template_id'])->toBe($template->id)
         ->and($payload['generated_from']['project_id'])->toBe($template->project_id)
         ->and($payload['generated_from']['period'])->toBe('2026-10')
@@ -369,11 +376,12 @@ it('tells an assignee which template made their task, but offers them no way in'
         ->inertiaPage()['props']['task'];
 
     // Tapu is the assignee, so he reads the provenance of the task in front of him — the
-    // template's name is the pattern his own title was rendered from. Managing it is Admin's,
+    // template's name, with the placeholders his own title was rendered from taken out
+    // (decision 3-13). Managing it is Admin's,
     // and `can_manage` is the policy's answer rather than a role read in Vue, so the screen
     // draws a sentence and not a link that would 403 him.
     expect($payload['generated_from']['period_label'])->toBe('October 2026')
-        ->and($payload['generated_from']['template'])->toBe($template->title_template)
+        ->and($payload['generated_from']['template'])->toBe('Buffalo Modular Monthly SEO')
         ->and($payload['generated_from']['can_manage'])->toBeFalse();
 
     Carbon::setTestNow();

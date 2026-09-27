@@ -41,7 +41,7 @@ withDefaults(
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4 p-6 shadow-xs">
+    <Card class="min-w-0 gap-4 p-6">
         <div class="flex min-w-0 items-center justify-between gap-4">
             <h2 class="text-sm font-medium">Upcoming holidays</h2>
             <Link

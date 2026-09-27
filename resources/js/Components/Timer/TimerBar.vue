@@ -52,7 +52,16 @@ onMounted(() => {
 
     // The page may have been open since before a watchdog sweep, or reopened from a closed
     // laptop. Ask the server what it thinks before painting a counter.
-    void timer.refresh();
+    //
+    // **Only if this person has a timer at all.** The bar itself is `v-if="canTrack"`, but a
+    // `v-if` hides markup and does not stop a lifecycle hook: this component mounts on every
+    // page of the employee shell, so an office-attendance employee was firing
+    // `GET /employee/time/current` on every navigation and collecting a 403 — the policy
+    // answering correctly, three red lines in the console, and nothing on screen to explain
+    // them. `TimerWidget` has always asked this question first; the bar had not.
+    if (canTrack.value) {
+        void timer.refresh();
+    }
 });
 
 function hide(): void {

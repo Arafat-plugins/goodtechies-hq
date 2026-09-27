@@ -133,7 +133,7 @@ function signOut(id: string): void {
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4 shadow-xs">
+    <Card class="min-w-0 gap-4">
         <CardHeader>
             <CardTitle class="text-sm font-medium">Active sessions</CardTitle>
             <CardDescription>Browsers and devices signed in to your account.</CardDescription>

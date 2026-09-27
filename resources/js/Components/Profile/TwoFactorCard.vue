@@ -88,7 +88,7 @@ function confirm(password: string): void {
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4 shadow-xs">
+    <Card class="min-w-0 gap-4">
         <CardHeader>
             <CardTitle class="text-sm font-medium">Two-factor authentication</CardTitle>
             <CardDescription>A code from your authenticator app at every sign-in.</CardDescription>

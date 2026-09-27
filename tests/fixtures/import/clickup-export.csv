@@ -1,0 +1,20 @@
+Task ID,Task Name,Task Content,Status,Date Created Text,Start Date Text,Due Date Text,Due Date,Parent ID,Assignees,Priority,List,Folder,Space,Time Estimated,Time Logged
+86a001,Buffalo Modular,Retainer client — SEO and maintenance,IN PROGRESS,"Mon, January 12, 2026",,,,,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,0
+86a002,APH,St Albans plumbing and heating,IN PROGRESS,"Mon, January 12, 2026",,,,,"[""Tapu""]",high,PROJECTS,hidden,Marketing,,0
+86a003,Abbey Heating,Not started yet — waiting on their content,DRAFT,"Tue, March 3, 2026",,,,,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,0
+86a004,Woodfordoil,Finished engagement,COMPLETED,"Wed, February 4, 2026",,,,,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,0
+86a005,SEO sheet Global template,An internal template — not a customer,COMPLETED,"Wed, February 4, 2026",,,,,"[""Tapu""]",low,PROJECTS,hidden,Marketing,,0
+86a006,Archived Retainer,Parked work,PENDING SIGN-OFF,"Fri, April 10, 2026",,,,,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,0
+86b001,Optimise the Home Model pages,Rewrite the six model pages and re-submit the sitemap.,IN PROGRESS,"Mon, June 1, 2026","Mon, June 1, 2026","Thu, August 20, 2026",,86a001,"[""Tapu""]",high,PROJECTS,hidden,Marketing,7200000,11400000
+86b002,Fix the sitemap,,COMPLETED,"Mon, June 8, 2026",,"Tue, August 25, 2026",,86a001,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,3600000,5400000
+86b003,Quarterly backlink audit,Check the disavow file too.,REVIEW,"Mon, July 6, 2026",,,1787216400000,86a001,"[""Sadia""]",normal,PROJECTS,hidden,Marketing,,7200000
+86b004,Monthly maintenance report,,DRAFT,"Wed, July 1, 2026",,,,86a002,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,0
+86b005,Update the plugin stack,"Core, plugins and a restore point first.",COMPLETED,"Wed, July 1, 2026",,"Tue, August 25, 2026",,86a002,"[""yaseen@goodtechies.test""]",normal,PROJECTS,hidden,Marketing,,3600000
+86b006,Primary keyword research,,DRAFT,"Tue, March 3, 2026",,,,86a003,"[""Tapu"",""Yaseen""]",low,PROJECTS,hidden,Marketing,,0
+86b007,Site Push Strategy Doc,The push plan they signed off in February.,COMPLETED,"Mon, January 19, 2026",,"Thu, August 20, 2026",,86a004,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,36000000
+86b008,Legacy redirect map,,ARCHIVED,"Mon, January 19, 2026",,,,86a004,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,0
+86b009,Renew the contract,,IN PROGRESS,"Fri, April 10, 2026",,,,86a006,"[""Tapu""]",urgent,PROJECTS,hidden,Marketing,,0
+86b010,Ahrefs demonstration doc,Exported without its parent.,COMPLETED,"Mon, May 4, 2026",,,,86zzzz,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,0
+86b011,,No name at all,IN PROGRESS,"Mon, May 4, 2026",,,,86a001,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,0
+86b002,Fix the sitemap,A duplicated row from a double export.,COMPLETED,"Mon, June 8, 2026",,,,86a001,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,5400000
+86b012,Write the launch checklist,,,"Mon, June 8, 2026",,,,86a001,"[""Tapu""]",normal,PROJECTS,hidden,Marketing,,0

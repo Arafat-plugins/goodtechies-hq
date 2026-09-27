@@ -5,6 +5,7 @@ import FlashMessage from '@/Components/FlashMessage.vue';
 import AppSidebar from '@/Components/Shell/AppSidebar.vue';
 import AppTopBar from '@/Components/Shell/AppTopBar.vue';
 import SkipToContent from '@/Components/Shell/SkipToContent.vue';
+import ShellLive from '@/Components/Shell/ShellLive.vue';
 import TimerBar from '@/Components/Timer/TimerBar.vue';
 import Toaster from '@/Components/Toaster.vue';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,7 @@ const rail = useSidebarRail();
                 tabindex="-1"
                 class="mx-auto w-full max-w-screen-2xl flex-1 p-4 outline-none md:p-6"
             >
+                <ShellLive />
                 <FlashMessage class="mb-4" />
                 <slot />
             </main>

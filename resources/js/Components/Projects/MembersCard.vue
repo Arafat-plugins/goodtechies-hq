@@ -89,7 +89,7 @@ const errors = computed(() => form.errors as unknown as Record<string, string | 
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4 shadow-xs">
+    <Card class="min-w-0 gap-4">
         <CardHeader>
             <CardTitle class="text-sm font-medium">Members</CardTitle>
             <CardDescription>Everyone assigned to this project and what they do on it.</CardDescription>

@@ -57,6 +57,24 @@ use Illuminate\Support\Facades\Gate;
  */
 class MessageService
 {
+    /**
+     * The shortest recording that is a message rather than a slip of the thumb.
+     *
+     * One second. A hold-to-record button releases on a tap, and a zero-second file is a
+     * mis-press — there is nothing in it to play.
+     */
+    public const MIN_VOICE_SECONDS = 1;
+
+    /**
+     * The longest recording this application takes: five minutes.
+     *
+     * A voice note is a message, not a podcast. Something worth five minutes of talking is worth
+     * a file in the Files panel, which has the 25 MB limit and the version history a recording
+     * of that length actually needs. The number is a product rule and not a transport one —
+     * MAX_BYTES still applies underneath it, and a five-minute Opus recording is nowhere near it.
+     */
+    public const MAX_VOICE_SECONDS = 300;
+
     public function __construct(
         private readonly FileService $files,
         private readonly ConversationService $conversations,
@@ -75,7 +93,13 @@ class MessageService
      * @param  AttachmentKind|null  $kind  how the file rides on the bubble; null derives it from
      *                                     the file's own type, which is every case but a voice
      *                                     note — see AttachmentKind
-     * @param  int|null  $duration  a voice note's length in seconds, and null for anything else
+     * @param  int|null  $duration  a voice note's length in seconds, and null for anything else.
+     *                              It is the CLIENT'S measurement and therefore a claim: over
+     *                              HTTP StoreMessageRequest refuses one outside
+     *                              MIN_VOICE_SECONDS…MAX_VOICE_SECONDS with a 422, and
+     *                              `voiceSeconds()` below clamps whatever survives, so no caller
+     *                              — job, command or test — can write a row that says a bubble
+     *                              is nine thousand seconds long
      *
      * @throws AuthorizationException
      * @throws ConversationStateException
@@ -104,8 +128,11 @@ class MessageService
         // transaction would roll the message back anyway, but the caller would have burnt an id
         // and — more to the point — FileService would have written bytes to disk inside a
         // transaction that then disappeared, leaving an orphan file with no row.
+        // The kind decides WHICH allow-list is applied: a recording is measured against
+        // FileService::VOICE_TYPES and an ordinary attachment against FileService::TYPES, which
+        // has no audio in it and gains none. See VOICE_TYPES for why that is two lists.
         if ($upload !== null) {
-            FileService::assertAcceptable($upload);
+            FileService::assertAcceptable($upload, $kind);
         }
 
         $mentioned = $this->resolveMentions($conversation, $actor, $body, $mentionIds);
@@ -126,7 +153,7 @@ class MessageService
             ]);
 
             if ($upload !== null) {
-                $file = $this->files->store($actor, $message, $upload);
+                $file = $this->files->store($actor, $message, $upload, $kind);
 
                 // How the file rides on the bubble. `kind` comes off the file's own MIME type
                 // through the inline list, so an image renders in place, an audio recording
@@ -135,7 +162,7 @@ class MessageService
                 // the bubble has to print before it is played.
                 $message->attachments()->attach($file->getKey(), [
                     'kind' => ($kind ?? AttachmentKind::forFile($file))->value,
-                    'duration_seconds' => $kind === AttachmentKind::Voice ? $duration : null,
+                    'duration_seconds' => self::voiceSeconds($kind, $duration),
                 ]);
             }
 
@@ -166,6 +193,33 @@ class MessageService
 
             return $message->load(ConversationService::MESSAGE_RELATIONS);
         });
+    }
+
+    /**
+     * What `duration_seconds` is allowed to say.
+     *
+     * Two rules, and they are different rules:
+     *
+     *   - **Null for anything that is not a voice note.** A duration on a PDF is meaningless, and
+     *     a column that is sometimes meaningless is a column nobody can read a query against.
+     *   - **Clamped for a voice note.** The number came off a `MediaRecorder` in somebody's
+     *     browser, which means it came off a client and is a claim, not a measurement this server
+     *     made. Over HTTP a claim outside the range is a 422 and never reaches here — but the
+     *     rule a stored row has to satisfy cannot live only in a Form Request, because a job, a
+     *     console command or an importer never meets one. So the last thing before the INSERT
+     *     puts the number inside the range it is allowed to be in.
+     *
+     * Clamping rather than throwing, and only here: the refusal a person should SEE belongs at
+     * the boundary they typed at, with copy against the field. This is the backstop, and a
+     * backstop that throws turns a bad number in a batch job into a failed batch job.
+     */
+    private static function voiceSeconds(?AttachmentKind $kind, ?int $duration): ?int
+    {
+        if ($kind !== AttachmentKind::Voice || $duration === null) {
+            return null;
+        }
+
+        return max(self::MIN_VOICE_SECONDS, min(self::MAX_VOICE_SECONDS, $duration));
     }
 
     /**

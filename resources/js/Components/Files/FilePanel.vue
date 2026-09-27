@@ -573,7 +573,7 @@ function destroy(file: FileSummary): void {
                                         :href="file.url"
                                         :target="file.is_previewable ? '_blank' : undefined"
                                         rel="noopener noreferrer"
-                                        class="rounded-sm text-sm font-medium break-all hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                                        class="rounded-sm text-sm font-medium break-all hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                                     >
                                         {{ file.name }}
                                         <span v-if="file.is_previewable" class="sr-only">
@@ -694,7 +694,7 @@ function destroy(file: FileSummary): void {
                             @update:open="toggleChain(file, $event)"
                         >
                             <CollapsibleTrigger
-                                class="group flex items-center gap-2 rounded-sm text-xs text-muted-foreground hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                                class="group flex items-center gap-2 rounded-sm text-xs text-muted-foreground hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                             >
                                 <History class="size-3 shrink-0" aria-hidden="true" />
                                 <span>Version history of {{ file.name }}</span>
@@ -742,7 +742,7 @@ function destroy(file: FileSummary): void {
                                                     v-if="!chainStale(file.id)"
                                                     :href="version.url"
                                                     rel="noopener noreferrer"
-                                                    class="rounded-sm text-xs break-all hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                                                    class="rounded-sm text-xs break-all hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                                                 >
                                                     Version {{ version.version }} — {{ version.name }}
                                                 </a>
@@ -808,7 +808,7 @@ function destroy(file: FileSummary): void {
                         :disabled="uploading"
                         :aria-describedby="fieldError ? `${errorId} ${hintId}` : hintId"
                         :aria-invalid="fieldError ? true : undefined"
-                        class="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs transition-[color,box-shadow] outline-none file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:font-medium file:text-secondary-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+                        class="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-flat transition-[color,box-shadow] outline-none file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:font-medium file:text-secondary-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring dark:bg-input/30"
                         @change="choose"
                     >
 

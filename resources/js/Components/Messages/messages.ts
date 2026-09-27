@@ -2,6 +2,7 @@ import { router } from '@inertiajs/vue3';
 import type { Errors, FormDataConvertible } from '@inertiajs/core';
 import { ref, type Ref } from 'vue';
 import type { FileSummary } from '@/Components/Files/files';
+import type { StatusKey } from '@/Components/StatusBadge.vue';
 
 /**
  * The messaging client: the one shape of a thread, the endpoints that read and write one, and
@@ -548,10 +549,19 @@ export interface ConversationContextFile extends FileSummary {
     kind: 'file' | 'image' | 'voice' | null;
 }
 
+/**
+ * The status arrives as a key, a word and a tone — all three from the server (decision M-14).
+ *
+ * The panel prints `status_label` inside a `StatusBadge` toned by `status_tone`, so a status here
+ * reads exactly as it does on the project page and on a task card. There is no map from a status
+ * to a colour in this file and there must not be one.
+ */
 export interface ConversationContextProject {
     id: number;
     name: string;
     status: string;
+    status_label: string | null;
+    status_tone: StatusKey | null;
     href: string;
 }
 
@@ -559,6 +569,8 @@ export interface ConversationContextTask {
     id: number;
     title: string;
     status: string;
+    status_label: string | null;
+    status_tone: StatusKey | null;
     href: string;
 }
 

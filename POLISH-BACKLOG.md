@@ -12,10 +12,16 @@
 >
 > `PROGRESS.md` is still what runs the project; this is its debt column. `docs/decisions.md`
 > holds the reasoning behind each numbered item.
+>
+> **Worked end to end on 26 Sep 2026 as Phase 12's UX polish pass.** §A, §B, §E.1, §E.2, §E.3,
+> §E.17 and thirteen of §C.3's rows are closed; three of those thirteen turned out to have been
+> closed already and still listed, which is its own lesson (12-63). What is left in here is
+> **client decisions, follow-ups opened by the pass itself, and M-11** — nothing that is merely
+> waiting for somebody to get to it.
 
 ---
 
-## A. Live sync — the big one (**messaging done 24 Sep 2026**; the rest open)
+## A. Live sync — the big one — ✅ **done 26 Sep 2026** (messaging 24 Sep; the rest in the polish pass)
 
 **What the client reported, 24 Sep 2026:** *"its not auto sync need to reload that page. and not
 only that there lots of thinks are need always sync but you applied after reload."*
@@ -68,20 +74,27 @@ thread is 375 ms.
    for the bell. Every other screen is a server-rendered Inertia page and stays exactly as it
    was rendered until something navigates.
 
-### A.3 What "perfect" means, screen by screen
+### A.3 What "perfect" means, screen by screen — ✅ **every row closed 26 Sep 2026**
 
 This is the acceptance list for the polish phase. Each line is a thing the client will try.
+
+**All of it was verified on the POLLING build, deliberately** — the client's machine is a polling
+build, so a fix that only works over a socket is a fix they never see. `useLiveProps()` in
+`Realtime/reload.ts` is the one pattern (12-44); every screen below updates with **zero document
+loads**. What is still open is written up as 12-46: two people dragging the same board card race,
+last write wins — live sync makes the loser's screen correct within a tick, so the symptom is a
+card that jumps back rather than data that is wrong.
 
 | Screen | Must update without a reload |
 | --- | --- |
 | **Messages — open thread** | A new message appears. The composer does not move, the scroll does not jump if you are reading history, and it scrolls if you were at the bottom  ✅ **done** — 10 s poll / 375 ms socket|
 | **Messages — rail** | The row's last-message line and its unread pill change; the row re-sorts if the order is by activity  ✅ **done** — 15 s poll (no inbox channel, so poll even on a socket)|
-| **Messages — anywhere in the app** | The Messages nav row's unread indicator |
-| **Announcement banner** | A new announcement appears without a reload (and see B/C: it is still Messages-page-only, 6-18) |
-| **Task detail / Discussion panel** | A new comment appears; status changes already broadcast and should paint  ✅ **done for comments** — same composable, same mount. Status still does not paint|
-| **Task board** | A card moved by somebody else moves. Today two people dragging the same board overwrite each other silently |
-| **Dashboards** | Counters and "needs your attention" refresh on a timer at minimum |
-| **Attendance / Time** | The clock widget's live counter already ticks locally; a clock-in from another device should land |
+| **Messages — anywhere in the app** | The Messages nav row's unread indicator  ✅ **done** — `AppSidebarNav.vue`, from the shell's shared live state|
+| **Announcement banner** | A new announcement appears without a reload  ✅ **done, and app-wide** — `ShellLive.vue` renders it from `HandleInertiaRequests`, which closes **6-18** as well|
+| **Task detail / Discussion panel** | A new comment appears; status changes paint  ✅ **done** — comments 24 Sep, status via `LiveTaskStatus.vue` on both task-detail screens|
+| **Task board** | A card moved by somebody else moves  ✅ **done**. Two people dragging the *same* card still race, last write wins — 12-46|
+| **Dashboards** | Counters and "needs your attention" refresh  ✅ **done** — all three shells|
+| **Attendance / Time** | A clock-in from another device lands  ✅ **done** — `Shared/Attendance.vue`, both Time screens|
 | **Notification bell** | Already correct. It is the reference implementation |
 
 ### A.4 The shape it should take
@@ -156,9 +169,9 @@ This is the list the client meant by *"you have not done something that you told
 
 | # | Item | Where it stands |
 | --- | --- | --- |
-| — | **Voice messages** (Phase 6) | Not built. The seams are real: `MessageService::post()` takes a kind and a duration, `MessageResource` prints it, `MessageThread` renders an `<audio>` for `kind === 'voice'`. It needs a recorder in the composer and two arguments at one call site. **GATE D cannot be asked for until this exists** |
-| 6-18 | **The announcement banner app-wide** | Still Messages-page-only. Needs one prop in `HandleInertiaRequests` and the prop-shape tests that come with it (2-42's warning) |
-| A | **Live sync** | Section A above. Described as "the seam is in place", which was true and was not the same as working |
+| — | ~~**Voice messages** (Phase 6)~~ | **Done 24 Sep 2026.** Decisions 6-20…6-32, 37 tests. GATE D is now askable |
+| — | ~~**The announcement banner app-wide** (6-18)~~ | **Done 26 Sep 2026.** One shared prop in `HandleInertiaRequests`, rendered by `ShellLive.vue` on every shell, with the prop-shape tests 2-42 asked for |
+| — | ~~**Live sync**~~ | **Done 26 Sep 2026.** Section A above. Decisions 12-44…12-47 |
 
 ### C.2 Found by the client and deferred
 
@@ -173,24 +186,27 @@ Each of these is written up in full in `docs/decisions.md`; this is the index.
 
 | # | One line |
 | --- | --- |
-| 2-30 | The task detail payload ships an `attachments` array no screen reads — two signed-URL mintings per attachment, per render |
-| 2-48 | A handled review notification stays unread forever; nothing closes a row when its subject is dealt with |
-| 2-49 | The reviewer's reason never reaches the notification, only the activity trail |
-| 2-50 | The Admin dashboard's "Needs your attention" panel and status donut have no feed and show empty states under real counts |
-| 2-51 | The Files tab is not in the URL on project and client detail, so a reload drops to Overview |
+| 2-30 | ~~The task detail payload ships an `attachments` array no screen reads~~ — **done 26 Sep** (12-60). Dropping the key was only half; `files.uploader` stayed in both controllers' `DETAIL_RELATIONS`, so the query still ran |
+| 2-48 | ~~A handled review notification stays unread forever~~ — **was already done** when this index was written (decisions 2-52…2-55). 12-63 |
+| 2-49 | ~~The reviewer's reason never reaches the notification~~ — **was already done**. 12-63 |
+| 2-50 | ~~The Admin dashboard's attention panel and status donut have no feed~~ — **was already done** by Phase 10's reports slice; the `:data="[]"` this row describes now survives only in comments. 12-63 |
+| 2-51 | ~~The Files tab is not in the URL on project and client detail~~ — **done 26 Sep** (12-56), `lib/tabState.ts` |
 | 3-12 | A recurring template can be switched off but never deleted — **client decision** |
-| 3-13 | A template's name still shows its `{period}` placeholder on task detail |
+| 3-13 | ~~A template's name still shows its `{period}` placeholder on task detail~~ — **done 26 Sep** (12-57) |
 | 4-17 | `SurfaceTest` asserts a hard-coded count of audit-event cases; every phase has to bump it |
 | 4-25 | `TimerService::edit()` can undo an Admin's refusal when approval is off — **client decision** |
 | 5-17 | A leave day that is also a company holiday still burns Annual leave — **client decision** |
-| 5-19 | There is no way to withdraw a leave request; you must ask an Admin to reject it |
-| 5-20 | "Menu item opens a confirm dialog" drops focus to `<body>` app-wide; fixed on Holidays only |
-| 6-16 | "May this person be sent a DM" is written twice; wants a `ConversationPolicy::dm()` |
-| 6-17 | In polling mode `POST /broadcasting/auth` says yes to everyone (Laravel's behaviour, leaks nothing) |
+| 5-19 | ~~There is no way to withdraw a leave request~~ — **done 26 Sep** (12-58). **It was filed here as a client decision and it was a bug**: the applicant had to be *rejected* to escape their own mistake |
+| 5-20 | ~~"Menu item opens a confirm dialog" drops focus to `<body>` app-wide~~ — **done 26 Sep** (12-52), `lib/menuFocus.ts`, ten call sites, no exemption list |
+| 6-16 | ~~"May this person be sent a DM" is written twice~~ — **done 26 Sep** (12-61), `ConversationPolicy::dm()` |
+| 6-17 | ~~In polling mode `POST /broadcasting/auth` says yes to everyone~~ — **not a bug, agreed and closed** (12-62). The 200 carries an empty body and no channel grant |
 | M-12 | The Messages workspace height is a `calc()` constant that drifts if the top bar changes |
-| M-14 | The context panel prints a status as a bare word; the endpoint should send `status_label` + `status_tone` |
-| M-15 | Unread state compares second-precision timestamps, so a reply in the same second is already-read |
-| M-16 | `inboxFor()` has an ungrouped `orWhere` — a correctness trap for the next person to add a constraint |
+| M-14 | ~~The context panel prints a status as a bare word~~ — **done 26 Sep** (12-55). Follow-up: `toneForProjectStatus()` still serves eight project screens |
+| M-15 | ~~Unread state compares second-precision timestamps~~ — **done 26 Sep** (12-53). Three things dropped the precision, not one; `timestamp(0)` *rounds*, so it was unfixable above the column |
+| M-16 | ~~`inboxFor()` has an ungrouped `orWhere`~~ — **done 26 Sep** (12-54) |
+| 12-46 | Two people dragging the **same** board card race, last write wins — needs optimistic concurrency on `tasks` (a version column, a 409, and a decision about what the UI does with one) |
+| 12-55 | `toneForProjectStatus()` in `StatusPill.vue` still serves eight project screens beside the new server-side `ProjectStatus::tone()` — converging them is a payload change across all eight |
+| 12-59 | A withdrawal writes no notification and does not resolve the approvers' existing unread row — same shape as 2-55: it needs a rule about the object's state, not the actor |
 | M-11 | Reactions, pinned messages, threaded replies, presence, call/video, rich text, jump-to-search-hit — **none has a table, column or endpoint.** `PROGRESS.md` prices each |
 
 ### C.4 Only the client can do these
@@ -205,7 +221,14 @@ Each of these is written up in full in `docs/decisions.md`; this is the index.
 
 ## E. Found while building, not yet fixed
 
-### E.1 The focus ring is under the 3:1 floor across the whole application — **high**
+### E.1 ~~The focus ring is under the 3:1 floor across the whole application~~ — ✅ **done 26 Sep 2026**
+
+*Decisions 12-48, 12-49, 12-50. Opaque at the ~84 call sites rather than by redefining `--ring`;
+every swept surface measured ≥3:1 afterwards, with `--primary` the one documented exception the
+DM bubble already handled. Two defects were found doing it that nobody had raised: `--elevation-flat:
+none` was deleting the ring outright on every control carrying `shadow-flat`, and menu, command and
+select items had no ring at all. `tests/Unit/{FocusRingContrastTest,DesignVocabularyTest}.php`
+stop all three coming back. The original write-up follows.*
 
 `resources/css/app.css` sets `outline-ring/50`, and every focusable control in this repo writes
 `focus-visible:ring-ring/50`. `DESIGN.md` §2.2 records the ring at **3.45:1** against the
@@ -238,7 +261,7 @@ slice of its own and it should come **before** the accessibility claims are made
 One place already ships the fix locally: a DM's own bubble uses an opaque `ring-primary-foreground`,
 because over `--primary` the `/50` measured **1.19:1** — invisible rather than merely weak.
 
-### E.2 `DESIGN.md` is behind the code
+### E.2 ~~`DESIGN.md` is behind the code~~ — ✅ **done 26 Sep 2026** (§2.2's ring rows now measure what is rendered; §5.13 confirmed correct and the code swept to it — E.17)
 
 - §2 has none of the pairs the chat-colour slice ships (M-23).
 - §5.3 says brand "appears once per screen", which a DM full of brand bubbles is not. The rule's
@@ -266,12 +289,243 @@ job, so it is a decision rather than a quiet fix.
   `markRead()` in the same request, deliberately, so opening a thread still shows you where you
   were. Pre-existing, cosmetic, more visible now the rail refreshes.
 
-### E.3 `shadow-xs` at the project Discussion mount
+### E.6 A sent voice note cannot be scrubbed — **medium**
+
+`FileService::download()` returns a `StreamedResponse` and serves **no byte ranges**:
+`Range: bytes=0-99` comes back 200 with the whole file and no `Accept-Ranges`. Measured — the
+recorder's own preview seeks perfectly (`blob:`), the same clip once sent reports
+`seekable [[0, 0]]` and swallows every `currentTime` write (6-28).
+
+The player degrades honestly rather than lying: it probes whether a seek landed, and when it did
+not it disables the slider and renames it *"(this one cannot be moved through)"*. It re-enables
+itself the day ranges are served, with **no client change** — so this is a pure server fix.
+
+Underneath it, a `MediaRecorder` WebM carries no duration or cues in its header (6-29), which is
+also why `audio.duration` is `Infinity`. Ranges alone improve it; a server-side remux
+(`ffmpeg -c copy`) fixes it properly.
+
+### E.7 Smaller things from the voice slice
+
+- `MessageService::MAX_VOICE_SECONDS` and `voice.ts`'s `VOICE_MAX_SECONDS` are two copies of
+  `300` with nothing enforcing agreement (6-30).
+- `GET /messages/{conversation}` renders raw JSON to a browser navigation **and marks the thread
+  read while doing it** (6-31). Not a privacy hole; a seam.
+- A voice note is served `Content-Disposition: attachment`, because `File::INLINE_TYPES` has no
+  audio. Harmless — a browser ignores it on a subresource, so `<audio src>` plays — but adding
+  audio to `INLINE_TYPES` would make every uploaded media file render inside our own origin,
+  which is a security change across all three file panels and was not what Phase 6 asked for.
+- Dev login throttling cost an agent three test runs. `redis-cli flushall` between browser runs.
+
+### E.3 ~~`shadow-xs` at the project Discussion mount~~ — ✅ **done 26 Sep 2026** (swept with E.17; `DesignVocabularyTest` now fails on any off-scale shadow anywhere)
 
 `Pages/Admin/Projects/Show.vue:274` carries a `shadow-xs` that `DESIGN.md` §5.13 forbids. One
 class.
 
 ---
+
+### E.8 A newly built sidebar group is invisible until somebody clicks it — **medium**
+
+*Found 25 Sep 2026, while verifying the reports slice in a browser.*
+
+`AppSidebarNav`'s `ADMIN_DEFAULT_OPEN` is `my work / company / work`. Every other Admin group —
+**WORKFORCE, REPORTS, FINANCE, ADMIN** — is collapsed for a viewer who has never touched it, and
+the open/closed choice then persists per viewer. So the day a phase lands, the feature it built
+is behind a disclosure nobody has a reason to open, and the honest reading of the sidebar is
+*"that was not built"*.
+
+That list carries its own comment: *"WORK stays open by default while most rows are still
+phase-gated … Revisit once Phases 2-12 have landed."* Nine of the thirteen have.
+
+Not fixed in the reports slice, deliberately: adding `reports` to the list would be
+special-pleading for the newest thing while three equally built groups stay shut. The real
+question is whether the default should be **open, with the rail for people who want it narrow**,
+now that almost every row is live — which is a decision about the whole shell, and Part E puts
+the UX polish pass in **Phase 12**.
+
+Until then, the client is told where Reports is in the slice summary, which is a workaround and
+should not have to be one. (Decision 10-35.)
+
+### E.9 Two gaps in the report contract, raised and not guessed at — **medium**
+
+*Found 25 Sep 2026, by both halves of the reports slice independently.*
+
+1. **A report cell cannot be a link.** `ReportColumn` has no href and a row is scalars, so *"every
+   count that is openable is a link"* — the rule every other screen in this app follows — does
+   not hold on `/admin/reports/*`. A reader sees *"Overdue 7"* and has nowhere to click.
+2. **A chart has no format.** `ReportChart` carries labels and numbers, so a money or minutes
+   chart prints bare figures in its axis, its tooltip and its `sr-only` table. Today the builders
+   put the unit in the chart's title, which works and is not the same thing.
+
+Both want deciding **before** the second slice builds eight more reports on top of them —
+retrofitting a link column across sixteen reports is a different job from designing it into the
+contract now.
+
+### E.10 The demo data has four more holes — **high**
+
+*Found 26 Sep 2026, by building reports that read the tables. Decision 10-51; same family as
+10-19 (no messages, no files) and 10-27 (no attendance, no tracked time).*
+
+Every report opens with real rows, so Part E's *"done when"* holds. But four **dimensions** have
+nothing behind them, which means four report shapes and three screens have never been seen
+filled in by anyone:
+
+| Gap | What is invisible because of it |
+| --- | --- |
+| No seeder creates a **leave request** | The Leave report shows balances and zero days taken. Leave approval, the calendar and the payroll leave-impact path have no demo state. |
+| No seeder records a **meeting note or action item** | Meeting's two *"what came out of it"* columns are empty, and the action-item → task conversion is unseen. |
+| `RecurringTaskSeeder` **generates no instances** (deliberate, per its docblock) | Maintenance and SEO show only *Ad hoc* periods — and the **period is the whole shape of those two reports**. |
+| All seven seeded messages are **task discussions** | The team channel, announcements and DMs are empty, so AC6's *"task/project vs team/DM"* comparison has nothing on its right-hand side. |
+
+This keeps being where the real defects come from: `WorkSeeder` was written because three
+reports opened empty, and writing it exposed `Task::assignees()` having no `ORDER BY` (10-29),
+two different words for one status (10-30), and a chart drawing Late in green (10-32). None of
+those were findable by reading code.
+
+The fix is one more seeder of `WorkSeeder`'s shape, with the same discipline: predicates from
+the services that own them, idempotence keyed on identity rather than on a sentence, and the
+expectation that existing tests assuming an empty table will need their assumptions corrected.
+
+### E.11 Two dashboard cards read oddly on a non-working day — **low**
+
+*Found 26 Sep 2026, on a Saturday.*
+
+*Present today* reads **0 — "Nobody has clocked in yet"** and *Remote time today* reads **Tapu
+0m / 5h** on a day that is an off day on every seeded schedule. Both figures are true; the words
+around them are not, because *"yet"* promises a day that is still coming and a target of 5h is a
+target for a day nobody is working.
+
+`AttendanceService` already knows whether a date is a working day for a given schedule
+(`isWorkingDay()`), so the cards can say *"Off day"* rather than a zero with an excuse. It is
+Phase 4's card rather than Phase 10's, and it is cosmetic — but the client sees it every weekend.
+
+### E.12 `WorkloadService` wants an `openCountsFor()` — **low**
+
+*Found 26 Sep 2026, while wiring the Admin dashboard's Tasks-by-employee chart.*
+
+The chart calls `WorkloadService::forViewer()` rather than writing its own `group by`, so the
+bars **are** `/admin/workload`'s rows — which is the right call and is asserted employee for
+employee. The cost is two `TaskService::count()` per employee. One `openCountsFor()` on the
+service would make it one query, and both callers would get it.
+
+### E.13 ~~The Back-button protection on a shown password degrades silently over plain HTTP~~ — ✅ **closed 26 Sep 2026**
+
+*Found 26 Sep 2026, building the first-sign-in panel. Decision 12-5.*
+
+The generated password is kept out of `history.state` by `Inertia::encryptHistory()` plus
+`clearHistory()`. `encryptData` uses `crypto.subtle`, which browsers expose **only on a secure
+origin** — and when it is missing it falls back to **plaintext with a console warning** rather
+than failing. So the day the VPS is reached over plain `http://`, Back can restore the password
+from history and nothing announces it.
+
+**Closed by Phase 12's security pass** (12-36 … 12-38). Three things together: HSTS via a
+`map $scheme` in `nginx.conf` (empty on http, so the port-80 block does not send a header a UA
+must ignore), `fastcgi_param HTTPS $https if_not_empty` so `isSecure()` does not rest on a distro
+default, and the `SESSION_SECURE_COOKIE=true` that `.env.production.example` already carried —
+which turns out to be the strongest part of it, because no session can exist on a plain-HTTP
+origin in the first place.
+
+### E.14 `FilterBar`'s "Clear all" throws away query keys the page owns — **low**
+
+*Found 26 Sep 2026, on `/admin/employees?view=access`.*
+
+Chip-mode *Clear all* calls `resetQuery()` with no `keep` list, so it takes `?view=access` with
+it and silently moves the reader from **Users & roles** to **Employees** — a different question,
+answered without being asked. The Employees page re-applies it in its own `@clear` handler,
+which works and is a workaround.
+
+The fix is a `keep` list on `FilterBar`, so a page can say which of its query keys are not
+filters. Every screen that grows a non-filter query parameter will need it.
+
+### E.15 `WorkloadService` wants an `openCountsFor()` — see E.12 — **low** (now measured: +20 queries per 10 employees)
+
+Recorded at E.12 during the dashboards slice; repeated here only because the Employees list is
+now a second caller that would benefit.
+
+### E.16 The Audit Log names a record by id, not by name — **low**
+
+*Found 26 Sep 2026, looking at the built screen.*
+
+The **Record** column reads `Employee #4` and `User #1`. The **Who** column already names the
+actor, so this is the one place on the screen where a human being is a number.
+
+It is defensible as built: an audit row points at a `target_type` + `target_id` that may no
+longer exist — that is the nature of a permanent log — and resolving a name means a lookup that
+can fail. But *"Employee #4"* on a compliance screen is a row somebody has to go and decode, and
+`audit.view` is Admin-only so there is no scope question behind it.
+
+The fix is to resolve the name where the row still exists and fall back to the id where it does
+not, with the two visibly different — a name for a record that is still there, `#4` for one that
+is gone. Which is also a more honest screen than one that always shows an id.
+
+### E.17 ~~`shadow-xs` is on every card and `DESIGN.md` §5.13 allows none of it~~ — ✅ **done 26 Sep 2026**
+
+**Settled: `DESIGN.md` was right and the code was stale.** `app.css` never defined `shadow-xs` at
+all — it compiled quietly for eleven phases because `app.css` does not clear Tailwind's own
+`--shadow-*` namespace, so the class *worked* and nothing said it was off-vocabulary. Swept, and
+`tests/Unit/DesignVocabularyTest.php` now greps the source the way a reviewer would. Decision 12-51.
+The original write-up follows.
+
+*Flagged independently by two agents, in two different slices — three by the time it was resolved.*
+
+`DESIGN.md` §5.13 names `shadow-flat` / `shadow-raised` / `shadow-overlay` as the whole
+vocabulary. Every admin card in the repo uses `shadow-xs`, which is shadcn's generated base.
+Both agents matched their neighbours rather than making one screen the odd one out, which was
+the right call in the moment and leaves the contradiction standing.
+
+**One of the two is stale and somebody has to say which.** Either `DESIGN.md` is describing a
+token set the repo never adopted, or the repo has drifted from it — and since `DESIGN.md` is
+generated from `app.css`, checking which of them `app.css` supports settles it. Cheap to
+resolve, and it belongs with the UX polish pass; leaving it means the next agent flags it a
+third time.
+
+### E.20 The Employee dashboard's Notifications card reads as an empty state while the bell says 4 — **low**
+
+*Found 26 Sep 2026 in the browser pass, on the screen the client's own bug report was about.*
+
+`Pages/Employee/Dashboard.vue` renders an `EmptyState` titled *"In the bell, and in the Center"*
+with an **Open the Notification Center** button. The reasoning is sound and written into the
+file — the bell already lists the newest ten from one polled endpoint, and a second reader of it
+here would be the duplicate `DESIGN.md` §5.8 forbids — but `EmptyState` is the component this
+application uses to say *there is nothing*, and it is sitting under a bell badge reading **4**.
+A person reads the screen, not the reasoning.
+
+It is a signpost wearing an empty state's clothes. The fix is a treatment that is not
+`EmptyState` — the count and the button, or a plain panel — and it is one component swap, not a
+second feed. Deliberately **not** built in the polish pass: it was found by looking, it is
+cosmetic, and inventing a third notification treatment at the end of a slice is how the first
+two stopped agreeing.
+
+### E.18 `User::hasPermission()` re-resolves a role's key list per User instance — **medium**
+
+*Measured 26 Sep 2026 by Phase 12's performance pass. Decision 12-41.*
+
+`$permissionKeys` is memoised on the **instance**, so any loop over users costs two queries each
+(`$this->employee`, then the permissions join). Two loops on `/messages` —
+`ConversationService::mentionableIn()` and `MessageController::messageable()` — make that
+**+3.7 queries per employee in the agency**: 36 queries at today's five people, roughly 90 at
+twenty.
+
+A static role→keys map fixes this and `assignableEmployees()` / `reviewersFor()` at the same
+time. **It was deliberately not done in slice 3**, and the reason is the whole difficulty:
+`tests/Permissions/MatrixTest.php` revokes a permission mid-test and expects the next request to
+see it, so a naive static cache breaks the one suite that proves this application's access rules.
+
+The fix therefore needs an invalidation story, not just a cache — flush on `role_permissions`
+write, or a request-scoped binding. Worth doing properly; not worth doing in a hurry.
+
+### E.19 The `tsvector` byte saving from 10-18 is still outstanding — **low**
+
+*Corrected 26 Sep 2026. Decision 12-39.*
+
+10-18 recorded the fix as *"a `$hidden` entry on each affected model"*. That was **wrong**, and
+the attribute has now been added anyway because it closes a real leak: `$hidden` is a
+**serialisation** filter, so it stops a `search_vector` reaching a payload — but it does nothing
+about `SELECT *`, and the ~282 bytes a row (confirmed exactly with `pg_column_size`) still travel
+to PHP.
+
+The byte saving needs explicit column lists on `TaskService::query()` and the report builders.
+Which is a bigger change than it sounds: every `select()` added is a place a future column can be
+forgotten, and a missing column is a null that looks like data.
 
 ## D. How this gets done
 

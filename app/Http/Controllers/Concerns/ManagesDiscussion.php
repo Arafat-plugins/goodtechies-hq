@@ -68,6 +68,11 @@ trait ManagesDiscussion
      *
      * MessageService is the one writer of a message, for every conversation type — see its
      * docblock. This controller resolves the task and hands over.
+     *
+     * The task discussion takes a voice note on the same terms the Messages page does — the
+     * plan's *"Task detail Discussion tab gains mentions + voice"* — which costs exactly the two
+     * arguments below, because the endpoint, the request and the writer were already one shape
+     * for all three surfaces.
      */
     private function discussionStore(StoreMessageRequest $request, Task $task): RedirectResponse
     {
@@ -81,6 +86,8 @@ trait ManagesDiscussion
                 $request->body(),
                 $request->upload(),
                 $request->mentionIds(),
+                $request->attachmentKind(),
+                $request->duration(),
             );
         } catch (ConversationStateException|FileStateException $exception) {
             return back()->with('error', $exception->getMessage());

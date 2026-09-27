@@ -22,25 +22,27 @@ it('names the home route of each surface', function () {
 })->group('phase0');
 
 it('uses dotted audit event values', function () {
-    // 29 since Phase 4's approval queue added `time_entry.approved` and `time_entry.rejected`
-    // — the two acts that decide whether hours somebody claimed are counted at all.
+    // **This asserted a COUNT until Phase 8, and the count was wrong three times** — once per
+    // phase that added an event, each time as a red test in an unrelated file that told whoever
+    // hit it nothing except a number to change. Decision 4-17 said it should assert the SET
+    // instead; this is that, finally done, and the reason it is worth the lines is that a
+    // count only ever catches "somebody added an event", which is not a defect. What IS a
+    // defect is an event that does not look like the others: `AuditEvent` is written into
+    // `audit_logs.event` — an indexed string with no CHECK behind it — and every report,
+    // filter and future retention rule groups on that string's shape.
     //
-    // It was 27 after the three events that move somebody's pay quietly on their own record:
-    // `time_entry.edited`, `attendance.edited` and `schedule.changed`. Part C §4's list does
-    // not name any of them, and that is an omission rather than a decision — each one changes
-    // what Phase 9 will pay, so each is recorded with old and new values. (It was 24 from
-    // Phase 2 slice 4, which added `tag.deleted`.)
-    //
-    // 30 since Phase 5 added `leave.balance_adjusted` — Part C §4 names leave approved and
-    // rejected and stops there, but Part D §9 asks for balance adjustments to be audit-logged
-    // in as many words ("no accrual logic in MVP — Admin adjusts balances, audit-logged"). It
-    // is the same shape of act as `attendance.edited`: one person quietly changing a number on
-    // somebody else's record that decides what they are allowed later.
-    //
-    // Decision 4-17 stands: this asserting a COUNT rather than the set is brittle, and every
-    // phase adding an event has to come here. It is a count away from being a real test.
-    expect(AuditEvent::cases())->toHaveCount(30)
-        ->and(AuditEvent::TwoFactorDisabled->value)->toBe('user.two_factor_disabled')
+    // So: every case is `subject.verb`, lower snake_case on both sides, and no two cases share
+    // a value. Adding an event needs no edit here. Getting one's SHAPE wrong fails here, in
+    // the file that is about shapes.
+    $values = array_map(fn (AuditEvent $case): string => $case->value, AuditEvent::cases());
+
+    expect($values)->not->toBeEmpty()
+        ->and($values)->toEqual(array_unique($values))
+        ->and(array_filter($values, fn (string $value): bool => preg_match('/^[a-z0-9_]+\\.[a-z0-9_]+$/', $value) !== 1))->toBe([]);
+
+    // Three named ones, for the same reason a schema test names a column: these three are
+    // quoted in Part C §4 and in decisions, so a rename has to be a deliberate act here too.
+    expect(AuditEvent::TwoFactorDisabled->value)->toBe('user.two_factor_disabled')
         ->and(AuditEvent::LeaveBalanceAdjusted->value)->toBe('leave.balance_adjusted')
         ->and(AuditEvent::RestrictedAccessAttempt->value)->toBe('access.restricted_attempt');
 })->group('phase0');

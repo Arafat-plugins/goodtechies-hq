@@ -177,6 +177,72 @@ it('refuses two overlapping holding rows at the database, not only in the servic
 
 /*
 |--------------------------------------------------------------------------
+| Withdrawing, at the service — decision 5-19
+|--------------------------------------------------------------------------
+*/
+
+it('refuses to withdraw somebody else request even from the service', function () {
+    $yaseens = $this->leave->apply($this->yaseen, $this->yaseen->employee, $this->annual, LEAVE_SUNDAY, LEAVE_MONDAY, 'Family commitment.');
+
+    // `LeaveRequestPolicy::withdraw` says this first, and the service says it again — the same
+    // belt-and-braces `approve()` keeps for "nobody rules on their own", and for the same reason: a
+    // future command or console call reaches the service and not the policy.
+    expect(fn () => $this->leave->withdraw($this->admin, $yaseens))
+        ->toThrow(LeaveStateException::class, 'Only the person who asked for leave can withdraw');
+
+    expect($yaseens->fresh()->status)->toBe(LeaveStatus::Pending);
+});
+
+it('refuses to withdraw an approved request, and spends nothing when it refuses', function () {
+    $this->leave->setBalance($this->admin, $this->yaseen->employee, $this->annual, 10, 'Opening balance.');
+
+    $request = $this->leave->apply($this->yaseen, $this->yaseen->employee, $this->annual, LEAVE_SUNDAY, LEAVE_MONDAY, 'Family commitment.');
+    $this->leave->approve($this->admin, $request);
+
+    $left = $this->leave->balanceDays($this->yaseen->employee, $this->annual);
+
+    // The machine's own refusal — `approved` has no outgoing transition at all — reached without a
+    // policy in the way. An approval has already spent days and written attendance rows, and
+    // unwinding those from a status change would be a second write path for facts this table does
+    // not own.
+    expect(fn () => $this->leave->withdraw($this->yaseen, $request->fresh()))
+        ->toThrow(LeaveStateException::class, 'cannot go from Approved to Withdrawn');
+
+    expect($this->leave->balanceDays($this->yaseen->employee, $this->annual))->toBe($left);
+});
+
+it('takes a withdrawn request out of the exclusion constraint, so the same days can be asked for again', function () {
+    $first = $this->leave->apply($this->yaseen, $this->yaseen->employee, $this->annual, LEAVE_SUNDAY, LEAVE_MONDAY, 'Wrong week, as it turns out.');
+
+    $this->leave->withdraw($this->yaseen, $first);
+
+    // Straight past the service, so this is the DATABASE agreeing: `leave_requests_no_overlap` is
+    // `WHERE status IN ('pending', 'approved')` — `LeaveStatus::holdingValues()` — and `withdrawn` is
+    // deliberately not in it. A withdrawal that went on holding the week would be a mistake nobody
+    // could correct by re-booking, which is the bug 5-19 is about wearing a different hat.
+    $second = LeaveRequest::factory()
+        ->forEmployee($this->yaseen->employee)
+        ->ofType($this->annual)
+        ->between(LEAVE_SUNDAY, LEAVE_MONDAY)
+        ->create();
+
+    expect($second->status)->toBe(LeaveStatus::Pending)
+        ->and($first->fresh()->status)->toBe(LeaveStatus::Withdrawn);
+});
+
+it('keeps the status guard shut on the fifth status too', function () {
+    $request = $this->leave->apply($this->yaseen, $this->yaseen->employee, $this->annual, LEAVE_SUNDAY, LEAVE_MONDAY, 'Family commitment.');
+
+    // Decision 2-9, a fourth time: `status` is writable on an existing row only through
+    // `applyTransition()`. Adding a case to the enum must not add a second door.
+    $request->status = LeaveStatus::Withdrawn;
+
+    expect(fn () => $request->save())
+        ->toThrow(LeaveStateException::class, 'without going through the transition machine');
+});
+
+/*
+|--------------------------------------------------------------------------
 | Balances
 |--------------------------------------------------------------------------
 */
@@ -258,6 +324,10 @@ it('writes an audit row with old and new values when an Admin edits a balance', 
 */
 
 it('marks each working day of an approved window as Leave in attendance', function () {
+    // The single row counted below is the one this approval writes. Phase 10's `WorkSeeder`
+    // now seeds Yaseen a real month of attendance, so his table is cleared first.
+    AttendanceRecord::where('employee_id', $this->yaseen->employee->id)->delete();
+
     $request = $this->leave->apply($this->yaseen, $this->yaseen->employee, $this->annual, LEAVE_THURSDAY, LEAVE_SATURDAY.'', 'Thursday to Saturday.');
 
     $this->leave->approve($this->admin, $request);

@@ -645,7 +645,7 @@ const handleTitle = computed(() =>
                                     <button
                                         type="button"
                                         draggable="false"
-                                        class="min-w-0 flex-1 truncate rounded-sm text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                                        class="min-w-0 flex-1 truncate rounded-sm text-left outline-none focus-visible:ring-3 focus-visible:ring-ring"
                                         :aria-label="barLabel(segment.task)"
                                         @click="openTask(segment.task)"
                                     >

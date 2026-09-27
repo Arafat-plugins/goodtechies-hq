@@ -91,8 +91,32 @@ it('gives each dashboard exactly its documented props', function (string $email,
     // 5's: the company calendar's next few days, and how many people are on approved leave
     // today. The On leave placeholder that used to sit in this payload is gone — it is a real
     // number now, so it lives inside `attendance` rather than as a key of its own.
-    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats', 'attention', 'taskStatuses', 'attendance', 'upcomingHolidays']],
-    'accountant' => ['accountant@goodtechies.test', '/accountant/dashboard', ['greetingName', 'today']],
+    // `upcomingMeetings` is Phase 7's card: the next few meetings this person is actually on,
+    // capped, scoped by `Meeting::visibleTo()`. Present on both shells and on neither the
+    // Accountant's — they hold no `meetings.use`, so they get no card rather than an empty one.
+    // `finance` is Phase 8's Row 3: this month's income, expense and operating result from
+    // `FinanceService::monthlyRollup()`, plus a null `payroll` carrying the phase that builds
+    // it. Admin only — it is absent entirely, not zeroed, for anybody without `finance.view`,
+    // which is the same rule `attendance` above follows.
+    //
+    // Phase 10 finished Part D §3's Row 2 on the Admin screen. `tasksByEmployee` and
+    // `projectsByType` are its two remaining CHARTS and `upcomingDeadlines` is its LIST — Row 2
+    // names four things and budgets three charts, so the fourth is not one. There is no
+    // fourteenth key: the empty "Attendance, last 14 days" trend that used to sit beside the
+    // donut was never in the payload and is no longer on the page either (Part I puts the
+    // reference's attendance chart in the "leave" column).
+    //
+    // The Accountant's four keys are Phase 10's too, and they are the whole of Part D §3's
+    // *"finance-only summary"*: this month's money, the payroll months still open to them, and
+    // the two rows Part C §1 grants that shell beyond finance — their own leave and their own
+    // payslip. There is no task, project, attendance or headcount key on it, and that is
+    // asserted from the other side in `DashboardCardsTest`.
+    //
+    // `schedule` and `recentActivity` finish the employee list: Part D §3's *My Schedule* and
+    // *Recent Activity*. `recentActivity` is the reader's OWN task changes — `actor_id` on the
+    // server — never a feed of other people, which Part H §1 and spec §22 both forbid.
+    'admin' => ['shahadat@goodtechies.test', '/admin/dashboard', ['greetingName', 'today', 'stats', 'workStats', 'attention', 'taskStatuses', 'tasksByEmployee', 'projectsByType', 'upcomingDeadlines', 'attendance', 'upcomingHolidays', 'upcomingMeetings', 'finance']],
+    'accountant' => ['accountant@goodtechies.test', '/accountant/dashboard', ['greetingName', 'today', 'finance', 'outstanding', 'leave', 'payslip']],
     // `timer` and `attendance` are Phase 4's hero: exactly one of them is non-null, and which
     // one the server decides from `tracking_mode`. Both keys are always present, because a
     // payload whose shape depended on the reader is a payload no screen can be typed against.
@@ -100,7 +124,7 @@ it('gives each dashboard exactly its documented props', function (string $email,
     // present and is null only for somebody with no employee record — the same reason `timer`
     // and `attendance` are both always present: a payload whose SHAPE depended on the reader
     // is a payload no screen can be typed against.
-    'employee' => ['yaseen@goodtechies.test', '/employee/dashboard', ['greetingName', 'today', 'trackingMode', 'taskStats', 'timer', 'attendance', 'upcomingHolidays', 'leave']],
+    'employee' => ['yaseen@goodtechies.test', '/employee/dashboard', ['greetingName', 'today', 'trackingMode', 'taskStats', 'timer', 'attendance', 'upcomingHolidays', 'leave', 'upcomingMeetings', 'schedule', 'recentActivity']],
 ])->group('phase0');
 
 it('passes the greeting name and tracking mode to the employee dashboard', function (string $email, string $name, string $mode) {

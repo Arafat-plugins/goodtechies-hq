@@ -86,9 +86,9 @@ const deltaLabel = computed(() => {
     <component
         :is="href ? Link : 'div'"
         :href="href"
-        :class="cn('block min-w-0', href && 'rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50')"
+        :class="cn('block min-w-0', href && 'rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring')"
     >
-        <Card :class="cn('h-full min-w-0 gap-2 p-4 shadow-xs', href && 'transition-colors hover:bg-accent/40')">
+        <Card :class="cn('h-full min-w-0 gap-2 p-4', href && 'transition-colors hover:bg-accent/40')">
             <div class="flex items-center justify-between gap-2">
                 <p class="truncate text-sm text-muted-foreground">{{ label }}</p>
                 <component :is="icon" v-if="icon" class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

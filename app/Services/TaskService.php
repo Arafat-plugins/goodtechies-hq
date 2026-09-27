@@ -53,7 +53,20 @@ use Illuminate\Support\Facades\Gate;
  */
 class TaskService
 {
-    /** The relations a task payload needs, so a list is not a query per row. */
+    /**
+     * The relations a task payload needs, so a list is not a query per row.
+     *
+     * **The four `User` belongs-tos at the bottom are not optional.** `TaskResource` serialises
+     * `created_by`, `work_summary_by`, `completed_by` and `first_completion.by` on **every**
+     * row, unconditionally — they are not behind `whenLoaded`, because the List's payload shape
+     * is the same on a list and on a detail. Leaving them out of this list did not make them go
+     * away; it made each one a lazy load, which Phase 12's performance pass measured at
+     * **39 of `/admin/tasks`'s 57 queries**, growing by one per task on the page.
+     *
+     * Eager-loading them is four constant queries instead. The alternative — putting them
+     * behind `whenLoaded` — would change the payload shape depending on how the row was
+     * fetched, which is the bug this resource's own docblock is written to prevent.
+     */
     public const RELATIONS = [
         'project.client',
         'project.pm.user',
@@ -61,6 +74,10 @@ class TaskService
         'project.finance',
         'assignees.user',
         'tags',
+        'creator',
+        'workSummaryAuthor',
+        'completer',
+        'firstCompleter',
     ];
 
     /** The group-by variants the List view offers. */
@@ -116,6 +133,14 @@ class TaskService
     private const BIRTH_FIELDS = [
         'recurring_task_id',
         'recurring_period',
+        // Phase 7, and here for exactly the Phase 3 reason above: a task converted from a
+        // meeting's action item carries `source_meeting_id`, that provenance is set in the
+        // INSERT, and no edit form can re-parent the task to a different meeting afterwards
+        // because update() never looks at this list. MeetingService::convertActionItem() is
+        // the only caller that sets it — it goes THROUGH create() rather than round it, so an
+        // action item's task gets its discussion, its board position and its audit row like
+        // any other (decisions 2-9 and 2-36, a third time).
+        'source_meeting_id',
     ];
 
     /**

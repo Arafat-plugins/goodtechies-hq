@@ -21,8 +21,9 @@ import { formatDuration } from '@/Components/Timer/timer';
 import EmptyState from '@/Components/EmptyState.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import { ATTENDANCE_POLL_MS } from '@/Components/Realtime/live';
+import { useLiveProps } from '@/Components/Realtime/reload';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { usePagePoll } from '@/lib/pagePoll';
 
 defineOptions({ layout: AdminLayout });
 
@@ -70,9 +71,6 @@ const props = defineProps<{
     byTask: TimeBreakdownRow[];
 }>();
 
-/** Part 0.5 refresh rule: the approval queue an employee fills while the Admin reads it. */
-usePagePoll(['queue', 'queue_total', 'flagged']);
-
 const rejecting = ref<AdminTimeEntry | null>(null);
 const rejectOpen = ref(false);
 
@@ -88,6 +86,21 @@ const waitingSeconds = computed(() =>
 
 /** True when the queue ran past its limit, which the screen then says out loud. */
 const truncated = computed(() => props.queue_total > props.queue.length);
+
+/* ---------------------------------------------------------------- keeping it current */
+
+/**
+ * The approval queue, current without a reload — the Admin end of §A.3's time line.
+ *
+ * This is a worklist two Admins can be working at once, which makes it the same problem as the
+ * Board: an entry the other one has just approved should stop being on this one's list rather
+ * than being approved twice. Thirty seconds, poll-only, and held while the rejection dialog is
+ * open so the reason somebody is typing is never interrupted.
+ *
+ * `date`, `week` and the three `by*` rollups stay out of the list: the first two are what the
+ * reader chose, and the rollups are the chosen week's arithmetic rather than what is arriving.
+ */
+useLiveProps(['queue', 'queue_total', 'flagged', 'decided'], { intervalMs: ATTENDANCE_POLL_MS });
 </script>
 
 <template>

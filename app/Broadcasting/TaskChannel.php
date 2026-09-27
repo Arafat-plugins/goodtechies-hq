@@ -16,8 +16,8 @@ use Illuminate\Support\Facades\Gate;
  * subscription and Echo re-authorises on every reconnect.
  *
  * Note what that does NOT mean: nothing new becomes visible because it arrived live. Every
- * payload broadcast on this channel is a subset of what `TaskResource` already sends to the
- * same person over HTTP — see `App\Events\Concerns\BroadcastsToTaskChannel`.
+ * frame broadcast on this channel is the task's id and nothing else, and the screen answers it
+ * by re-reading the task over HTTP — see `App\Events\Concerns\BroadcastsTaskStatus`.
  *
  * `{task}` is implicitly bound. A deleted task — `Task` is soft-deleted — resolves to nothing
  * and is refused with 403 before `join()` runs, so a channel does not outlive its subject.

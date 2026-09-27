@@ -49,6 +49,11 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * is editing somebody's balance. See `Admin\LeaveController` and `Admin\LeaveBalanceController`.
  * This controller can only ever act on the requester's own record.
  *
+ * The applicant has exactly two moves and both are here: answering a correction request by
+ * amending and resubmitting, and — from decision 5-19 — withdrawing a request that is still waiting
+ * on somebody. Withdrawing is not an approver's verb: an Admin who wants a request gone rejects it,
+ * under their own name and with a reason.
+ *
  * ## 404, not 403
  *
  * `PUT /leave/{leaveRequest}` takes an id, and it is re-resolved through
@@ -176,6 +181,42 @@ class LeaveController extends Controller
             $updated->leaveType?->name ?? 'Leave',
             $updated->days,
             $updated->days === 1 ? 'day' : 'days',
+        ));
+    }
+
+    /**
+     * Take your own request back — decision 5-19.
+     *
+     * The employee's second move, beside the resubmit above. Same 404 shape as `update()`: the id is
+     * re-resolved through `LeaveRequest::visibleTo()` before the policy is asked, so somebody else's
+     * request is **absent** and the requester never learns whether it existed. `withdraw` is then
+     * `LeaveRequestPolicy`'s answer — own, holding `leave.apply`, and still waiting on somebody —
+     * and `LeaveService` asserts ownership again and moves the status through the machine.
+     *
+     * A refusal from the machine (a request decided while this page was open) is a flash rather than
+     * a status code, for the reason every other refusal in this controller is: the person is looking
+     * at a request that has changed under them and needs the sentence, not a 409.
+     */
+    public function withdraw(Request $request, LeaveRequest $leaveRequest): RedirectResponse
+    {
+        $leaveRequest = $this->visible($request, $leaveRequest);
+
+        Gate::authorize('withdraw', $leaveRequest);
+
+        try {
+            $withdrawn = $this->leave->withdraw($request->user(), $leaveRequest);
+        } catch (LeaveStateException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        // "Those days are free again" is the half of this that matters: `withdrawn` is not a
+        // holding status, so the exclusion constraint has stopped covering the window and the
+        // person can re-book it immediately — which is what they withdrew it for.
+        return back()->with('success', sprintf(
+            'Withdrawn: %s, %d %s. Those days are free again.',
+            $withdrawn->leaveType?->name ?? 'Leave',
+            $withdrawn->days,
+            $withdrawn->days === 1 ? 'day' : 'days',
         ));
     }
 

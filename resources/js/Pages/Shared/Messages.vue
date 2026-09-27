@@ -17,16 +17,14 @@ import EmptyState from '@/Components/EmptyState.vue';
 import ConversationContextPanel from '@/Components/Messages/ConversationContextPanel.vue';
 import MessagesRail from '@/Components/Messages/MessagesRail.vue';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
+import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
 import {
     RAIL_POLL_MS,
     THREAD_POLL_MS,
     conversationChannel,
-    liveTransportIcon,
-    liveTransportLabel,
-    liveTransportWord,
     useLiveRefresh,
     useLiveStatus,
-} from '@/Components/Messages/live';
+} from '@/Components/Realtime/live';
 import type {
     AnnouncementBanner,
     ConversationSummary,
@@ -242,10 +240,6 @@ useLiveRefresh(activeChannel, reloadRail, { poll: false });
  */
 const threadTransport = useLiveStatus(activeChannel);
 
-const liveWord = computed(() => liveTransportWord(threadTransport.value, THREAD_POLL_MS));
-const liveLabel = computed(() => liveTransportLabel(threadTransport.value, THREAD_POLL_MS));
-const liveIcon = computed(() => liveTransportIcon(threadTransport.value));
-
 /* ------------------------------------------------------------------ presentation */
 
 const ICONS: Record<ConversationTypeKey, typeof Hash> = {
@@ -302,7 +296,7 @@ const activeLine = computed(() =>
                 :class="
                     cn(
                         'flex min-w-0 shrink-0 items-start gap-3 rounded-lg border bg-card p-3 shadow-raised',
-                        'hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
+                        'hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
                         announcement.is_unread && 'border-primary',
                     )
                 "
@@ -400,14 +394,11 @@ const activeLine = computed(() =>
                                 when there is genuinely a socket behind it — on the client's
                                 own polling build it says how often it is checking instead.
                             -->
-                            <span
-                                class="inline-flex min-w-0 shrink-0 items-center gap-1 text-xs text-muted-foreground"
-                                :title="liveLabel"
-                            >
-                                <component :is="liveIcon" class="size-3.5 shrink-0" aria-hidden="true" />
-                                <span aria-hidden="true" class="hidden sm:inline">{{ liveWord }}</span>
-                                <span class="sr-only">{{ liveLabel }}</span>
-                            </span>
+                            <LiveIndicator
+                                class="shrink-0"
+                                :transport="threadTransport"
+                                :interval-ms="THREAD_POLL_MS"
+                            />
 
                             <TooltipProvider :delay-duration="150">
                                 <Tooltip>

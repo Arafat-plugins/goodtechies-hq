@@ -10,6 +10,7 @@ use App\Support\ProjectType;
 use App\Support\RoleName;
 use Database\Factories\ProjectFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -33,6 +34,11 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'employee_notes',
     'archived_at',
 ])]
+// Decision 10-18: `search_vector` is a STORED GENERATED tsvector of this row's own
+// searchable text. `select *` loads it (~282 B a row on `tasks`, measured with
+// `pg_column_size`), and it belongs in no payload — so it is hidden from every
+// `toArray()`, `toJson()` and `dd()`. Hidden, not dropped: search reads the column.
+#[Hidden(['search_vector'])]
 class Project extends Model
 {
     /** @use HasFactory<ProjectFactory> */

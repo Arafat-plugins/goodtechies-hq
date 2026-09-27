@@ -13,7 +13,7 @@ use App\Support\Permission;
  *
  * Part C §1 gives this three cells and this file is those three cells:
  *
- *   | Apply for own leave | ✅ every role, the ACCOUNTANT included |
+ *   | Apply for own leave | ✅ every role, the ACCOUNTANT included — and, from decision 5-19, withdrawing it again |
  *   | Approve leave       | ✅ ADMIN · 🟡 MANAGER own team · ❌ everyone else |
  *   | (balances)          | the approve key plus the same scope — never a new key |
  *
@@ -101,6 +101,31 @@ class LeaveRequestPolicy extends Policy
         return $this->isOwn($user, $request)
             && $this->allows($user, Permission::LeaveApply)
             && $request->status === LeaveStatus::CorrectionRequested;
+    }
+
+    /**
+     * Taking your own request back — decision 5-19.
+     *
+     * Three conditions, and they are the mirror image of `decide()`'s: the applicant, the
+     * `leave.apply` key they filed it with, and a status that has spent nothing
+     * (`LeaveStatus::isWithdrawable()` — `pending` or `correction_requested`).
+     *
+     * **Own, and never anybody else's.** An Admin who wants a request gone rejects it, under their
+     * own name and with the reason the Form Request requires; withdrawing it for somebody would put
+     * an act of theirs on the applicant's record. `LeaveService::withdraw()` asserts the same thing
+     * again for the reason `decide()`'s counterpart is asserted twice — a command reaches the
+     * service and not the policy.
+     *
+     * **Approved is not withdrawable**, deliberately: the approval has already decremented a
+     * balance and written attendance rows, and unwinding those from a status change would be a
+     * second write path for facts this table does not own. Somebody who needs that asks an Admin,
+     * who has the balance and attendance screens to do it where it shows.
+     */
+    public function withdraw(User $user, LeaveRequest $request): bool
+    {
+        return $this->isOwn($user, $request)
+            && $this->allows($user, Permission::LeaveApply)
+            && $request->status?->isWithdrawable() === true;
     }
 
     /**

@@ -8,9 +8,20 @@ use App\Models\File;
  * How a file rides on a message: as a plain attachment, as an image the bubble renders inline,
  * or as a voice note.
  *
- * Phase 2 writes `file` and `image`. `voice` is declared and never written — Phase 6 adds
- * recording on these same tables, and having the case here now is what makes that a feature
- * rather than a migration.
+ * Phase 2 wrote `file` and `image` and declared `voice` without ever writing it. Phase 6 writes
+ * it, on the same tables and with no migration — which is what having the case here early was
+ * for.
+ *
+ * ## `voice` is the only one a client may assert
+ *
+ * `file` and `image` are derived by `forFile()` below, and a client that could claim one would
+ * be a client deciding whether its own upload renders inline in everybody else's thread.
+ * `voice` cannot be derived — see the next paragraph — so it is the one value the composer
+ * sends, and `StoreMessageRequest` accepts that one word and no other.
+ *
+ * A file carrying this kind is also checked against a different, narrow allow-list
+ * (`FileService::VOICE_TYPES`) instead of the application-wide `FileService::TYPES`. That is the
+ * whole reach of the word: audio is uploadable as a voice note and nowhere else.
  *
  * ## Why the column exists at all when two of its three values are derivable
  *

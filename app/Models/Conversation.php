@@ -232,4 +232,40 @@ class Conversation extends Model
                 ->orWhere('dm_two_id', $user->getKey()),
         );
     }
+
+    /**
+     * The cheap, list-shaped half of "which conversations could this person's inbox hold":
+     * the three company-or-project channels, OR a DM they are named on.
+     *
+     * **The whole OR is one group, and that is the point of this scope existing**
+     * (decision M-16). Written inline in the service, the `whereIn('type', …)->orWhere(fn …)`
+     * this replaces compiled to `type IN (…) OR (type = 'dm' AND …)` — true only because
+     * `dmsFor()` restates its own type, and false the moment anybody appended a constraint: the
+     * next `->where(…)` joined one arm of the `OR` and the other arm let every DM in the table
+     * walk past it. `MessageServiceTest` reproduces exactly that leak beside this scope's
+     * answer.
+     *
+     * Two things close the group now, and the belt is as deliberate as the braces: the closure
+     * here, and `Eloquent\Builder::callScope()`, which wraps whatever a named scope adds in a
+     * nested group of its own for this exact reason. The closure is what keeps the shape correct
+     * if the body is ever read, copied or called through `getQuery()`; the scope is what keeps
+     * the question in ONE place instead of inline in a service where the next constraint lands
+     * next to it.
+     *
+     * It is a candidate list and not the rule. Every row it returns still goes through
+     * `ConversationPolicy::view` one at a time — see `ConversationService::inboxFor()`.
+     *
+     * @param  Builder<Conversation>  $query
+     * @return Builder<Conversation>
+     */
+    public function scopeInboxCandidatesFor(Builder $query, User $user): Builder
+    {
+        return $query->where(fn (Builder $inner) => $inner
+            ->whereIn('type', [
+                ConversationType::Team->value,
+                ConversationType::Announcement->value,
+                ConversationType::Project->value,
+            ])
+            ->orWhere(fn (Builder $dms) => $dms->dmsFor($user)));
+    }
 }

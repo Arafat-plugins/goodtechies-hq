@@ -189,7 +189,7 @@ function choose(person: MessagePerson | undefined): void {
 
         <div
             v-if="open"
-            class="absolute bottom-full left-0 z-20 mb-2 flex w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-md border bg-popover p-2 text-popover-foreground shadow-md"
+            class="absolute bottom-full left-0 z-20 mb-2 flex w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-md border bg-popover p-2 text-popover-foreground shadow-overlay"
             @keydown.esc.prevent.stop="hide()"
         >
             <label :for="inputId" class="sr-only">Find somebody to mention</label>
@@ -205,7 +205,7 @@ function choose(person: MessagePerson | undefined): void {
                 :aria-activedescendant="activeId"
                 :aria-describedby="statusId"
                 placeholder="Type a name"
-                class="w-full min-w-0 rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                class="w-full min-w-0 rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-flat outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
                 @keydown.down.prevent="move(1)"
                 @keydown.up.prevent="move(-1)"
                 @keydown.home.prevent="jump(0)"

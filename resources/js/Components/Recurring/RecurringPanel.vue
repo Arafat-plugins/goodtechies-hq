@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { router } from '@inertiajs/vue3';
 import { History, Pencil, Play, Plus, Repeat, ShieldAlert, TriangleAlert } from '@lucide/vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { ColumnDef } from '@/Components/DataTable/types';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import EmptyState from '@/Components/EmptyState.vue';
@@ -15,6 +15,7 @@ import { Card } from '@/Components/ui/card';
 import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
 import { Skeleton } from '@/Components/ui/skeleton';
 import { useFlashAsToast } from '@/lib/flashChannel';
+import { useMenuDialog } from '@/lib/menuFocus';
 
 /**
  * The Recurring tab on admin project detail: this project's retainers.
@@ -105,26 +106,60 @@ const columns = computed<ColumnDef<RecurringTemplate>[]>(() => [
 
 /* ------------------------------------------------------------------ the dialogs */
 
+/**
+ * Both dialogs here are opened from a `DropdownMenuItem`, and this panel had **neither half** of
+ * decision 5-20: no deferral, so the dialog raced the menu's own dismissal for the focus trap, and
+ * no focus return, so the restore landed on `<body>` — mid-way down a project page, on the Recurring
+ * tab, with every Tab the reader had spent getting there gone.
+ *
+ * `useMenuDialog` is both halves (see `lib/menuFocus.ts`): the row's `⋯` trigger is captured while
+ * the menu is still open, the open is deferred by a tick, and focus goes back to that button when
+ * the dialog closes. A template survives being edited, so the fallback is only reached if the panel
+ * itself has been re-rendered under the dialog — the *New template* button, which is always there
+ * for anybody who could have opened either dialog.
+ */
+const ADD_BUTTON_ID = 'recurring-add';
+
+const menu = useMenuDialog(ADD_BUTTON_ID);
+
 const editorOpen = ref(false);
 const editing = ref<RecurringTemplate | null>(null);
 
 function create(): void {
-    editing.value = null;
-    editorOpen.value = true;
+    // Through the same door, so one watcher returns focus whichever control opened the form. With
+    // no menu open, what is captured is this button.
+    menu.openFromMenu(() => {
+        editing.value = null;
+        editorOpen.value = true;
+    });
 }
 
 function edit(template: RecurringTemplate): void {
-    editing.value = template;
-    editorOpen.value = true;
+    menu.openFromMenu(() => {
+        editing.value = template;
+        editorOpen.value = true;
+    });
 }
 
 const logOpen = ref(false);
 const logging = ref<RecurringTemplate | null>(null);
 
 function openLog(template: RecurringTemplate): void {
-    logging.value = template;
-    logOpen.value = true;
+    menu.openFromMenu(() => {
+        logging.value = template;
+        logOpen.value = true;
+    });
 }
+
+/**
+ * Either dialog closing puts the keyboard back. A watcher rather than a close handler for the reason
+ * the ledger pages use one: a save closes the editor by *navigating*, so no handler runs.
+ */
+watch([editorOpen, logOpen], ([editor, log], [wasEditor, wasLog]) => {
+    if ((wasEditor && ! editor) || (wasLog && ! log)) {
+        menu.returnFocus();
+    }
+});
 
 /* ---------------------------------------------------------------- generate now */
 
@@ -170,7 +205,7 @@ function generate(template: RecurringTemplate): void {
                         plate, with its checklist already on it.
                     </p>
                 </div>
-                <Button v-if="canManage" type="button" size="sm" @click="create">
+                <Button v-if="canManage" :id="ADD_BUTTON_ID" type="button" size="sm" @click="create">
                     <Plus aria-hidden="true" />
                     New template
                 </Button>
@@ -265,7 +300,7 @@ function generate(template: RecurringTemplate): void {
                     <button
                         v-if="row.last_run"
                         type="button"
-                        class="flex min-w-0 flex-col items-start gap-1 rounded-sm text-left focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                        class="flex min-w-0 flex-col items-start gap-1 rounded-sm text-left focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                         @click="openLog(row)"
                     >
                         <StatusBadge

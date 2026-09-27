@@ -1,19 +1,28 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
 import { CalendarOff, Inbox } from '@lucide/vue';
-import { computed, nextTick, ref } from 'vue';
+import { computed, ref } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import ApplyLeaveForm from '@/Components/Leave/ApplyLeaveForm.vue';
 import LeaveRequestCard from '@/Components/Leave/LeaveRequestCard.vue';
 import type { LeaveBalanceRow, LeaveRequestRow, LeaveTypeOption } from '@/Components/Leave/leave';
-import { formatBalance } from '@/Components/Leave/leave';
+import { formatBalance, formatWindow, LEAVE_OPEN_STATUSES, leaveRoutes } from '@/Components/Leave/leave';
 import PageShell from '@/Components/PageShell.vue';
+import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/Components/ui/dialog';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
+import { useMenuDialog } from '@/lib/menuFocus';
 import type { SharedProps } from '@/types';
-import { usePagePoll } from '@/lib/pagePoll';
 
 /**
  * My Leave: this person's balances, the apply form, and their own history.
@@ -57,9 +66,6 @@ const props = defineProps<{
     permissions: { can_apply: boolean };
 }>();
 
-/** Part 0.5 refresh rule: an approver's decision, and the balance it spends. */
-usePagePoll(['requests', 'balances']);
-
 /** The request being amended after a correction request, if any. */
 const amending = ref<LeaveRequestRow | null>(null);
 
@@ -69,32 +75,69 @@ const amending = ref<LeaveRequestRow | null>(null);
  * A request that has been sent back for a correction is waiting on the READER and is the one
  * thing on this page they have to do something about, so it leads. A pending one is waiting on
  * an approver and is next. Everything settled is history underneath.
+ *
+ * The split is the two OPEN statuses rather than "not approved and not rejected", which is what it
+ * used to be: that reading put a withdrawn request under *Waiting* (decision 5-19), where nothing is
+ * waiting for anything. `LEAVE_OPEN_STATUSES` is `LeaveStatus::isOpen()` spelled for the client, so a
+ * sixth status would land in History by default rather than in a queue it does not belong in.
  */
-const open = computed(() => props.requests.filter((request) => request.status !== 'approved' && request.status !== 'rejected'));
-const settled = computed(() => props.requests.filter((request) => request.status === 'approved' || request.status === 'rejected'));
+const open = computed(() => props.requests.filter((request) => LEAVE_OPEN_STATUSES.includes(request.status)));
+const settled = computed(() => props.requests.filter((request) => ! LEAVE_OPEN_STATUSES.includes(request.status)));
 
-const applySection = ref<HTMLElement | null>(null);
-const applyForm = ref<InstanceType<typeof ApplyLeaveForm> | null>(null);
+function amend(request: LeaveRequestRow): void {
+    amending.value = request;
+}
+
+/* ----------------------------------------------------------------- withdrawing */
 
 /**
- * Answer a correction request: seed the form, then take the reader to it.
+ * Taking a request back — decision 5-19.
  *
- * The button is in the Waiting list and the form is above the balances, so on anything shorter
- * than a tall desktop the only effect of the click happened off screen and the page looked
- * broken. Moving the reader is the whole fix — `nextTick` first because the form only renders
- * its amend copy once `amending` is set, and focus last so a screen reader lands on the field
- * rather than being told the page scrolled.
+ * **It asks first.** A booked week disappearing off the leave calendar is not something to do on one
+ * misplaced click, and the question names the type and the dates, because somebody with three
+ * requests waiting cannot answer "Are you sure?".
+ *
+ * Focus comes back through `useMenuDialog` (`lib/menuFocus.ts`), which captures the *Withdraw* button
+ * as the dialog opens. That button is gone once the request is withdrawn — `can_withdraw` turns false
+ * — so this is decision 5-20's shape reached from the other direction. With the button gone the helper
+ * falls back to the `<main>` region, which is a real focus stop every layout maintains for the skip
+ * link; a heading would not be, and `.focus()` on something with no `tabindex` does nothing at all.
  */
-async function amend(request: LeaveRequestRow): Promise<void> {
-    amending.value = request;
+const withdrawing = ref<LeaveRequestRow | null>(null);
+const sending = ref(false);
+const menu = useMenuDialog();
 
-    await nextTick();
+function askToWithdraw(request: LeaveRequestRow): void {
+    menu.openFromMenu(() => {
+        withdrawing.value = request;
+    });
+}
 
-    const reduced =
-        typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function closeWithdraw(): void {
+    withdrawing.value = null;
+    menu.returnFocus();
+}
 
-    applySection.value?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
-    applyForm.value?.focus();
+function confirmWithdraw(): void {
+    const request = withdrawing.value;
+
+    if (request === null || sending.value) {
+        return;
+    }
+
+    sending.value = true;
+
+    router.post(
+        leaveRoutes.withdraw(request.id),
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                sending.value = false;
+                closeWithdraw();
+            },
+        },
+    );
 }
 </script>
 
@@ -134,15 +177,9 @@ async function amend(request: LeaveRequestRow): Promise<void> {
                 </p>
             </section>
 
-            <section
-                v-if="permissions.can_apply"
-                ref="applySection"
-                aria-labelledby="apply-leave"
-                class="flex min-w-0 flex-col gap-3 scroll-mt-20"
-            >
+            <section v-if="permissions.can_apply" aria-labelledby="apply-leave" class="flex min-w-0 flex-col gap-3">
                 <h2 id="apply-leave" class="sr-only">Apply for leave</h2>
                 <ApplyLeaveForm
-                    ref="applyForm"
                     :types="types"
                     :balances="balances"
                     :editing="amending"
@@ -155,7 +192,7 @@ async function amend(request: LeaveRequestRow): Promise<void> {
 
                 <ul v-if="open.length" class="flex flex-col gap-3">
                     <li v-for="request in open" :key="request.id">
-                        <LeaveRequestCard :request="request" @amend="amend" />
+                        <LeaveRequestCard :request="request" @amend="amend" @withdraw="askToWithdraw" />
                     </li>
                 </ul>
 
@@ -187,4 +224,33 @@ async function amend(request: LeaveRequestRow): Promise<void> {
             </section>
         </div>
     </PageShell>
+
+    <!--
+        The withdrawal confirmation (decision 5-19). It NAMES the type and the dates, because "Are
+        you sure?" is not a question somebody with three requests waiting can answer — the same rule
+        the Holidays delete dialog states. And it says what withdrawing does to the days, since
+        freeing them again is the whole reason anybody presses it.
+    -->
+    <Dialog :open="withdrawing !== null" @update:open="(open) => { if (! open) { closeWithdraw(); } }">
+        <DialogContent>
+            <DialogHeader>
+                <DialogTitle>
+                    Withdraw {{ withdrawing?.type?.name ?? 'leave' }} for
+                    {{ withdrawing ? formatWindow(withdrawing.start_date, withdrawing.end_date) : '' }}?
+                </DialogTitle>
+                <DialogDescription>
+                    The request stays on your record marked Withdrawn, nobody has to rule on it, and those
+                    days are free to book again. It cannot be un-withdrawn — ask again if you still need them.
+                </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+                <Button type="button" variant="outline" :disabled="sending" @click="closeWithdraw">
+                    Keep it
+                </Button>
+                <Button type="button" :disabled="sending" @click="confirmWithdraw">
+                    {{ sending ? 'Withdrawing…' : 'Withdraw request' }}
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
 </template>

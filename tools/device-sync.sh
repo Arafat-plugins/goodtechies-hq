@@ -21,7 +21,18 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 MARKER=".device-synced"
-STAGE="/mnt/user-data/outputs/devicesync"
+# A FRESH staging directory every run, named after the moment.
+#
+# Not a fixed path, and this is not tidiness. The device bridge appears to cache the bytes it
+# has already sent for a given staged path: re-writing `<STAGE>/.device-synced` with new content
+# and committing it again returns "written" and leaves the OLD content on the machine. It cost
+# two slices' markers before it was pinned down — the commit reports success, the file's mtime
+# on the device updates, and the content does not change. Staging the same bytes from a path the
+# bridge has not seen before writes them correctly, every time.
+#
+# `.device-synced` hit this on every single run, because it is the one file whose content
+# changes while its path never does.
+STAGE="/mnt/user-data/outputs/devicesync-$(date +%s)"
 DEVICE_ROOT='D:\goodtechies-hq'
 BATCH=45   # device_commit_files takes 50; leave headroom
 

@@ -123,13 +123,18 @@ class TaskResource extends JsonResource
             // grow three relations per row it never draws.
             'checklist' => $this->whenLoaded('checklistItems', fn (): array => $this->checklist()),
             'links' => $this->whenLoaded('links', fn (): array => $this->links()),
-            // The attachment panel's rows, each through FileResource — which is what mints the
-            // signed URL. Behind whenLoaded like the rest: a board of two hundred cards must
-            // not sign two hundred links to draw a paperclip.
-            'attachments' => $this->whenLoaded(
-                'files',
-                fn (): array => FileResource::collection($this->resource->files)->toArray($request),
-            ),
+            // **There is no `attachments` array, and that is decision 2-30 closed.** It shipped a
+            // full `FileResource` collection on every detail render — two signed-URL mintings and
+            // two `FilePolicy` passes per attachment — and no screen read it: `FilePanel` fetches
+            // its own list from `GET {surface}/tasks/{task}/files`, because it also has to
+            // re-fetch after an upload, a replace and a delete. So the payload signed links for
+            // nobody and re-signed them on every reload.
+            //
+            // `attachment_count` above stays: the paperclip on a card and the panel's heading
+            // read it, and it is a `withCount` rather than a relation.
+            //
+            // The relation is no longer eager-loaded either — see `DETAIL_RELATIONS` in both task
+            // controllers. Dropping the key alone would have left the query behind it.
             'dependencies' => $this->whenLoaded('dependencies', fn (): array => $this->taskStubs($this->resource->dependencies)),
             'dependents' => $this->whenLoaded('dependents', fn (): array => $this->taskStubs($this->resource->dependents)),
 
@@ -269,10 +274,14 @@ class TaskResource extends JsonResource
      *     → `RecurrenceRule::labelForPeriod()`, and never from the template's current rule. A
      *     template edited from monthly to weekly must not relabel every task it has ever made,
      *     and a task whose template is gone still knows which month it was for.
-     *   - **The template's name is shown on both surfaces.** It is the pattern the task's own
-     *     title was rendered from — "abc.com Monthly Maintenance — {period}" — so it tells the
-     *     assignee nothing the title in front of them does not already say. What is Admin-only
-     *     is *managing* it, and that is `can_manage`.
+     *   - **The template's name is shown on both surfaces**, and it is the template's
+     *     `displayName()` rather than its raw pattern (decision 3-13). The pattern is what the
+     *     task's own title was rendered from, so printing it verbatim put *"— {period}"* in a
+     *     sentence about the task directly under *"— October 2026"*: a piece of template syntax
+     *     shown to an assignee who has no template to edit. The placeholders come out and the
+     *     punctuation that held them comes out with them; `RecurringTaskResource` still sends the
+     *     pattern verbatim to the screen that edits it. What is Admin-only is *managing* it, and
+     *     that is `can_manage`.
      *   - **`can_manage` is the policy's answer, per record**, not a role read in Vue: it is what
      *     decides whether the line is a link to the project's Recurring tab or just a sentence.
      *     `RecurringTaskPolicy::view` is Admin-plus-project-scope, so an assignee sees the
@@ -290,7 +299,7 @@ class TaskResource extends JsonResource
 
         return [
             'template_id' => $template?->getKey(),
-            'template' => $template?->title_template,
+            'template' => $template?->displayName(),
             'project_id' => $template === null ? null : (int) $template->project_id,
             'period' => $this->resource->recurring_period,
             'period_label' => $this->resource->recurringPeriodLabel(),

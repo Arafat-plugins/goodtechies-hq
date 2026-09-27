@@ -69,7 +69,7 @@ const when = computed(() => props.row.updated_at ?? props.row.created_at);
                     'min-w-0 flex-1 rounded-md outline-none',
                     row.link === null
                         ? ''
-                        : 'cursor-pointer focus-visible:ring-3 focus-visible:ring-ring/50',
+                        : 'cursor-pointer focus-visible:ring-3 focus-visible:ring-ring',
                 )
             "
             @click="openNotification(row, $event)"
@@ -103,7 +103,7 @@ const when = computed(() => props.row.updated_at ?? props.row.created_at);
             v-if="!row.is_read"
             type="button"
             :aria-label="`Mark read: ${row.summary}`"
-            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring"
             @click="markRead(row.id)"
         >
             <Check class="size-4" aria-hidden="true" />

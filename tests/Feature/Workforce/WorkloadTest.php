@@ -142,17 +142,23 @@ it('reports the estimate and the tracked hours as two separate figures', functio
 });
 
 it('reads tracked hours from time_entries and not from the tasks cache', function (): void {
-    $tapu = $this->tapu->employee;
-    $task = workloadTask($tapu, Project::query()->firstOrFail(), ['title' => 'Fabricated cache']);
+    // Somebody with NO entries of their own, so the only number that could reach the row is
+    // the fabricated cache and the right answer is exactly zero. It used to be Tapu, asserted
+    // as "less than 99999" — which Phase 10's `WorkSeeder` broke by giving him two real months
+    // of tracked time that are legitimately larger than the fabricated figure. Reading it off a
+    // person with nothing tracked is the sharper statement and does not care what is seeded.
+    $newcomer = Employee::factory()->forRole(RoleName::REMOTE_EMPLOYEE)->create();
+    $task = workloadTask($newcomer, Project::query()->firstOrFail(), ['title' => 'Fabricated cache']);
 
     // Phase 2's seeder wrote figures like this onto about twenty tasks (decision 4-8). A
     // capacity screen reading the cache would quote hours nobody worked.
     DB::table('tasks')->where('id', $task->id)->update(['tracked_seconds' => 99999]);
 
     $row = collect(app(WorkloadService::class)->forViewer($this->admin)['employees'])
-        ->firstWhere('id', $tapu->id);
+        ->firstWhere('id', $newcomer->id);
 
-    expect($row['tracked_seconds'])->toBeLessThan(99999);
+    expect($row['open_count'])->toBe(1)
+        ->and($row['tracked_seconds'])->toBe(0);
 });
 
 /* ============================================================ counts only */

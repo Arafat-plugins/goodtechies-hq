@@ -6,6 +6,10 @@ use App\Events\LeaveApproved;
 use App\Events\LeaveCorrectionRequested;
 use App\Events\LeaveRejected;
 use App\Events\LeaveRequested;
+use App\Events\MeetingCancelled;
+use App\Events\MeetingReminderDue;
+use App\Events\MeetingScheduled;
+use App\Events\MeetingUpdated;
 use App\Events\MessagePosted;
 use App\Events\ProjectCancelled;
 use App\Events\TaskAssigned;
@@ -20,6 +24,7 @@ use App\Events\TaskSubmittedForReview;
 use App\Models\Conversation;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
+use App\Models\Meeting;
 use App\Models\Message;
 use App\Models\Project;
 use App\Models\Task;
@@ -102,6 +107,12 @@ class NotificationDispatcher
 
             // Phase 6. One event for every message in every conversation type.
             MessagePosted::class => 'onMessagePosted',
+
+            // Phase 7. Four events, one recipient list, and one of them is a clock.
+            MeetingScheduled::class => 'onMeetingScheduled',
+            MeetingUpdated::class => 'onMeetingUpdated',
+            MeetingCancelled::class => 'onMeetingCancelled',
+            MeetingReminderDue::class => 'onMeetingReminderDue',
         ];
     }
 
@@ -896,6 +907,163 @@ class NotificationDispatcher
             'title' => (string) $task->title,
             'context' => array_filter(
                 $context + ['project_id' => $task->project_id],
+                fn (mixed $value): bool => $value !== null,
+            ),
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Meetings (Phase 7, master prompt Part D §12)
+    |--------------------------------------------------------------------------
+    |
+    | One recipient list for all four — **the people in the room** — and three deliberate
+    | differences between them:
+    |
+    |   - the ORGANISER is dropped from three of the four, not by a rule here but because they
+    |     are the actor and `NotificationService::eligible()` drops the actor from every type.
+    |     The reminder has no actor (nobody caused a clock to pass a mark), so the organiser is
+    |     reminded along with everybody else — which is Part D §12's *"participants and the
+    |     organizer"* falling out of the engine rather than being arranged here.
+    |   - an UPDATE notifies only when the time moved. The diff is `MeetingUpdated::$timeChanged`,
+    |     computed in MeetingService where both values are in hand. A typo in the agenda is not
+    |     news, and a bell that rang for one is a bell nobody reads by Tuesday.
+    |   - the CANCEL driver's "cancel the Meet by hand" sentence is NOT in any of these. It is
+    |     the organiser's job and it is on the meeting's activity trail; eleven people do not
+    |     need to be told that somebody else has a browser tab to close.
+    |
+    | The payload carries the TITLE and the TIMES and nothing about the linked project or task —
+    | see meetingPayload().
+    */
+
+    /**
+     * Called: everybody invited, except the person who did the inviting.
+     */
+    public function onMeetingScheduled(MeetingScheduled $event): void
+    {
+        $this->notifications->notify(
+            NotificationType::MeetingScheduled,
+            $event->meeting,
+            $this->canSeeMeeting($event->meeting, $this->roomOf($event->meeting)),
+            $this->meetingPayload($event->meeting),
+            $event->actor,
+        );
+    }
+
+    /**
+     * Moved: everybody invited, **and only when it actually moved**.
+     */
+    public function onMeetingUpdated(MeetingUpdated $event): void
+    {
+        if (! $event->timeChanged) {
+            return;
+        }
+
+        $this->notifications->notify(
+            NotificationType::MeetingUpdated,
+            $event->meeting,
+            $this->canSeeMeeting($event->meeting, $this->roomOf($event->meeting)),
+            $this->meetingPayload($event->meeting, [
+                'previous_start_at' => $event->previousStartAt?->toIso8601String(),
+            ]),
+            $event->actor,
+        );
+    }
+
+    /**
+     * Called off: everybody invited. Their linked tasks are untouched and nothing here says so,
+     * because nothing here touches them.
+     */
+    public function onMeetingCancelled(MeetingCancelled $event): void
+    {
+        $this->notifications->notify(
+            NotificationType::MeetingCancelled,
+            $event->meeting,
+            $this->canSeeMeeting($event->meeting, $this->roomOf($event->meeting)),
+            $this->meetingPayload($event->meeting),
+            $event->actor,
+        );
+    }
+
+    /**
+     * Fifteen minutes out: everybody in the room, **the organiser included**.
+     *
+     * No actor is passed, and that is the whole mechanism: `eligible()` only drops somebody
+     * when there is an actor to drop, so a null actor is what makes Part D's *"participants and
+     * the organizer"* come out right with no special case for the organiser anywhere.
+     *
+     * Exactly once per meeting is not this method's doing — `SendMeetingReminders` asks
+     * `NotificationService::alreadySentFor()` and fires the event only for the meetings that
+     * have never had one.
+     */
+    public function onMeetingReminderDue(MeetingReminderDue $event): void
+    {
+        $this->notifications->notify(
+            NotificationType::MeetingReminder,
+            $event->meeting,
+            $this->canSeeMeeting($event->meeting, $this->roomOf($event->meeting)),
+            $this->meetingPayload($event->meeting),
+        );
+    }
+
+    /**
+     * Everybody in the room, the organiser included — `MeetingService::schedule()` always gives
+     * them a seat, so this one query is the whole audience and there is no union.
+     *
+     * @return Collection<int, User>
+     */
+    private function roomOf(Meeting $meeting): Collection
+    {
+        return new Collection($meeting->participants()->get()->all());
+    }
+
+    /**
+     * Keep the candidates who can see this meeting — the object-shaped half of the rule, the
+     * same shape `canSee()` applies to a task and `canSeeLeave()` to a leave request.
+     *
+     * For a meeting it is close to a tautology today (`MeetingPolicy::view()` asks the
+     * participant list, and everybody here is on it), and it is still run: a participant who
+     * has since been DEACTIVATED fails the policy's first line, and so does anybody whose role
+     * lost `meetings.use` between the invitation and the reminder. Neither of those touches the
+     * participant row, so nothing else would have caught them.
+     *
+     * @param  Collection<int, User>  $candidates
+     * @return Collection<int, User>
+     */
+    private function canSeeMeeting(Meeting $meeting, Collection $candidates): Collection
+    {
+        return $candidates
+            ->filter(fn (User $user): bool => Gate::forUser($user)->allows('view', $meeting))
+            ->values();
+    }
+
+    /**
+     * What a meeting notification stores: the title and the times, and nothing else.
+     *
+     * **The linked project and task are deliberately absent**, and this is the one payload in
+     * the file where that is a privacy decision rather than a size one. A participant may be in
+     * a meeting about a project they are not on (see `MeetingService::linkedContextFor()`), so
+     * a `project_name` written into a payload here would be exactly the field Part C says must
+     * be absent — written once, at dispatch, for a reader whose right to see it was never
+     * checked and could change before they read it. The bell says *what* and *when*; opening
+     * the meeting is where the policy is asked.
+     *
+     * Even the project ID is left out, for the same reason it is left out of a leave payload:
+     * an id is a fact about somebody else's work, and the summary sentence has no use for one.
+     *
+     * @param  array<string, mixed>  $context
+     * @return array{title: string, context: array<string, mixed>}
+     */
+    private function meetingPayload(Meeting $meeting, array $context = []): array
+    {
+        return [
+            'title' => (string) $meeting->title,
+            'context' => array_filter(
+                $context + [
+                    'meeting_id' => (int) $meeting->getKey(),
+                    'start_at' => $meeting->start_at?->toIso8601String(),
+                    'end_at' => $meeting->end_at?->toIso8601String(),
+                ],
                 fn (mixed $value): bool => $value !== null,
             ),
         ];

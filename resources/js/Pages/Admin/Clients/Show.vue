@@ -20,6 +20,7 @@ import {
 } from '@/Components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { useUrlTab } from '@/lib/tabState';
 
 defineOptions({ layout: AdminLayout });
 
@@ -134,7 +135,11 @@ const files = computed(() => fileRoutes('admin', 'clients', client.value.id));
  */
 const canAttach = computed(() => client.value.permissions?.can_update === true);
 
-const tab = ref('overview');
+/**
+ * Which tab is open, in the URL — decision 2-51: a reload used to drop back to Overview, and a
+ * client's Files could not be linked to. See `lib/tabState.ts`.
+ */
+const tab = useUrlTab(['overview', 'files', 'activity'], 'overview');
 
 const confirmOpen = ref(false);
 const deactivating = ref(false);
@@ -200,9 +205,9 @@ function confirmDeactivate(): void {
                 the stop painted nothing. The ring goes on here rather than in the generated
                 component, exactly as `Pages/Shared/Notifications.vue` does it.
             -->
-            <TabsContent value="overview" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+            <TabsContent value="overview" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
                 <div class="grid min-w-0 items-start gap-4 lg:grid-cols-3">
-                    <Card class="min-w-0 gap-2 shadow-xs lg:col-span-2">
+                    <Card class="min-w-0 gap-2 lg:col-span-2">
                         <CardHeader>
                             <CardTitle class="text-sm font-medium">Projects</CardTitle>
                         </CardHeader>
@@ -251,7 +256,7 @@ function confirmDeactivate(): void {
                     </Card>
 
                     <div class="flex min-w-0 flex-col gap-4">
-                        <Card class="min-w-0 gap-2 shadow-xs">
+                        <Card class="min-w-0 gap-2">
                             <CardHeader>
                                 <CardTitle class="text-sm font-medium">Contacts</CardTitle>
                             </CardHeader>
@@ -284,7 +289,7 @@ function confirmDeactivate(): void {
                             </CardContent>
                         </Card>
 
-                        <Card class="min-w-0 gap-2 shadow-xs">
+                        <Card class="min-w-0 gap-2">
                             <CardHeader>
                                 <CardTitle class="text-sm font-medium">Internal notes</CardTitle>
                             </CardHeader>
@@ -300,7 +305,7 @@ function confirmDeactivate(): void {
                 </div>
             </TabsContent>
 
-            <TabsContent value="files" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+            <TabsContent value="files" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
                 <FilePanel
                     :routes="files"
                     :can-upload="canAttach"
@@ -309,8 +314,8 @@ function confirmDeactivate(): void {
                 />
             </TabsContent>
 
-            <TabsContent value="activity" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
-                <Card class="min-w-0 gap-2 shadow-xs">
+            <TabsContent value="activity" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
+                <Card class="min-w-0 gap-2">
                     <CardHeader>
                         <CardTitle class="text-sm font-medium">Activity</CardTitle>
                     </CardHeader>

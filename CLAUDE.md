@@ -45,6 +45,15 @@ So: **after every slice that changes a tracked file, sync before saying it is do
     # call device_commit_files once per batch
     # verify with device_list_dir — a "written" reply has lied before
     tools/device-sync.sh --mark   # then commit .device-synced
+    # stage .device-synced back and read it: it is the one file that silently fails
+
+**Why that last line.** The bridge caches the bytes it has already sent **for a given staged
+path**. Re-writing a file at the same staged path and committing it again returns `written`, and
+updates the file's mtime on the machine, and leaves the OLD content there. `.device-synced` hit
+this on every run, because it is the one file whose content changes while its path never does —
+two slices' markers were a commit behind before it was pinned down, and each time the tool said
+it had worked. `device-sync.sh` now stages into a fresh timestamped directory per run, which
+fixes it; the read-back is the check that it stayed fixed.
 
 `.device-synced` is tracked, so a session that loses its context can still work out
 what the machine is missing. If a phase added migrations, tell the user to restart

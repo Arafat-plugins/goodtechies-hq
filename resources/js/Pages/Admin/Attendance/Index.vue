@@ -20,8 +20,19 @@ import PageShell from '@/Components/PageShell.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import { ATTENDANCE_POLL_MS } from '@/Components/Realtime/live';
+import { useLiveProps } from '@/Components/Realtime/reload';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { usePagePoll } from '@/lib/pagePoll';
+
+/**
+ * Shipped without a layout: this page and the schedule editor were the only two under
+ * `Pages/**` with no `defineOptions({ layout })`, so both rendered bare — no sidebar, no top
+ * bar, no skip link. Every accessibility measurement on them passed, because a page with no
+ * shell has nothing to overflow and almost nothing to tab through. Found by reading, not by
+ * measuring.
+ */
+defineOptions({ layout: AdminLayout });
+
 
 /**
  * Admin → Workforce → Attendance: the morning roster.
@@ -46,17 +57,12 @@ import { usePagePoll } from '@/lib/pagePoll';
  * which DESIGN.md §5.11 forbids on its own. Each row is a link to that person's month.
  */
 
-defineOptions({ layout: AdminLayout });
-
 const props = defineProps<{
     date: { value: string; label: string; previous: string; next: string; today: string };
     rows: AttendanceRosterRow[];
     summary: AttendanceSummaryRow[];
     statuses: AttendanceStatusOption[];
 }>();
-
-/** Part 0.5 refresh rule: the roster and the status counts — somebody clocks in all morning. */
-usePagePoll(['rows', 'summary']);
 
 const editing = ref<{ day: AttendanceDay; employeeId: number; employeeName: string } | null>(null);
 const editOpen = ref(false);
@@ -69,6 +75,18 @@ function edit(row: AttendanceRosterRow): void {
 function label(row: AttendanceRosterRow): string {
     return row.status_label ?? noStatusLabel(row);
 }
+
+/* ---------------------------------------------------------------- keeping it current */
+
+/**
+ * Today's board, thirty seconds behind at worst — §A.3's attendance line seen from the other
+ * side. This is the screen an Admin leaves open at 09:00 while people arrive, and every arrival
+ * is somebody else's device writing a row. `date` and `statuses` stay out of the list: the first
+ * is what the reader chose and re-reading it would fight the date picker, the second is an enum.
+ *
+ * Held while the edit dialog is open, so a day being corrected by hand is not replaced mid-edit.
+ */
+useLiveProps(['rows', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
 </script>
 
 <template>

@@ -93,7 +93,7 @@ const notesLine = computed(() => {
 
 <template>
     <Link :href="`/employee/projects/${project.id}`" class="block min-w-0 rounded-xl">
-        <Card class="h-full min-w-0 gap-3 p-4 shadow-xs transition-colors hover:bg-accent/40">
+        <Card class="h-full min-w-0 gap-3 p-4 transition-colors hover:bg-accent/40">
             <div class="flex min-w-0 flex-col gap-1">
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
                     <h2 class="min-w-0 text-sm font-medium break-all">{{ title }}</h2>

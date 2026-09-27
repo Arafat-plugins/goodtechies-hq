@@ -79,6 +79,10 @@ class LeaveRequestResource extends JsonResource
             'permissions' => [
                 'can_decide' => $user !== null && Gate::forUser($user)->allows('decide', $this->resource),
                 'can_resubmit' => $user !== null && Gate::forUser($user)->allows('resubmit', $this->resource),
+                // Decision 5-19. The applicant's own second move, resolved per record like the
+                // other two — so the Admin queue never draws a Withdraw button on somebody else's
+                // request and My Leave never draws one on a request that has already been decided.
+                'can_withdraw' => $user !== null && Gate::forUser($user)->allows('withdraw', $this->resource),
             ],
         ];
     }

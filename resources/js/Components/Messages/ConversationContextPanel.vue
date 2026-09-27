@@ -4,6 +4,7 @@ import { CircleAlert, FolderOpen, ListChecks, RefreshCw, Users } from '@lucide/v
 import { computed, onMounted } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import AttachmentCard from '@/Components/Messages/AttachmentCard.vue';
+import StatusBadge, { type StatusKey } from '@/Components/StatusBadge.vue';
 import { initialsOf, conversationContextState, loadConversationContext } from '@/Components/Messages/messages';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
 import { Button } from '@/Components/ui/button';
@@ -58,16 +59,21 @@ function retry(): void {
 }
 
 /**
- * A status as the endpoint sends it — a raw key — printed as words.
+ * The status, as this repo prints every status: the server's word inside the server's tone.
  *
- * Deliberately not mapped to one of the eight status colours: the contract carries a bare
- * string with no tone and no label, and this repo's rule is that the screen never maps a status
- * to a colour. Words are what the payload supports, so words are what it gets.
+ * It used to de-underscore the raw key here, because the contract carried a bare string with
+ * neither (decision M-14). The endpoint now sends `status_label` and `status_tone` — resolved by
+ * `TaskStatus` and `ProjectStatus`, the way `TaskResource` has always done it — so the panel
+ * spells *Waiting / Blocked* and *Done* the way the board and the reports do, and nothing here
+ * maps a status to anything. A row whose status is somehow missing gets no badge rather than an
+ * invented one; its title and link still read.
  */
-function statusWords(status: string): string {
-    const words = status.replace(/[_-]+/g, ' ').trim();
-
-    return words === '' ? '—' : words.charAt(0).toUpperCase() + words.slice(1);
+function badge(
+    subject: { status_label: string | null; status_tone: StatusKey | null },
+): { label: string; tone: StatusKey } | null {
+    return subject.status_label !== null && subject.status_tone !== null
+        ? { label: subject.status_label, tone: subject.status_tone }
+        : null;
 }
 </script>
 
@@ -150,12 +156,16 @@ function statusWords(status: string): string {
 
                 <Link
                     :href="context.project.href"
-                    class="flex min-w-0 flex-col gap-0.5 rounded-md border p-2 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                    class="flex min-w-0 flex-col gap-0.5 rounded-md border p-2 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                 >
                     <span class="min-w-0 truncate text-sm font-medium">{{ context.project.name }}</span>
-                    <span class="text-xs text-muted-foreground">
-                        {{ statusWords(context.project.status) }}
-                    </span>
+                    <StatusBadge
+                        v-if="badge(context.project)"
+                        :status="badge(context.project)!.tone"
+                        :label="badge(context.project)!.label"
+                        size="sm"
+                        class="self-start"
+                    />
                 </Link>
             </div>
 
@@ -170,12 +180,16 @@ function statusWords(status: string): string {
                     <li v-for="task in context.tasks" :key="task.id" class="min-w-0">
                         <Link
                             :href="task.href"
-                            class="flex min-w-0 flex-col gap-0.5 rounded-md border p-2 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                            class="flex min-w-0 flex-col gap-0.5 rounded-md border p-2 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                         >
                             <span class="min-w-0 truncate text-sm">{{ task.title }}</span>
-                            <span class="text-xs text-muted-foreground">
-                                {{ statusWords(task.status) }}
-                            </span>
+                            <StatusBadge
+                                v-if="badge(task)"
+                                :status="badge(task)!.tone"
+                                :label="badge(task)!.label"
+                                size="sm"
+                                class="self-start"
+                            />
                         </Link>
                     </li>
                 </ul>

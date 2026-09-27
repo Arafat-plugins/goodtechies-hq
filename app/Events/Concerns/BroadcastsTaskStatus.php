@@ -22,23 +22,38 @@ use Illuminate\Queue\SerializesModels;
  * `transition()` to remember and a day when it remembered it for two of the three moves — the
  * shape this repo already refuses for status writes (`Task::applyTransition()`).
  *
- * ## What it sends, and why that is not a privacy decision
+ * ## The frame is a doorbell, not a payload
  *
- * The id, the new status, its label and its tone. Every one of those is in the `TaskResource`
- * payload the same person already receives over HTTP, and the channel's callback is
- * `TaskPolicy::view` — the same policy that put the task in their list. Realtime is a delivery
- * mechanism, not a permission model: nothing is visible here that was not visible before, and
- * nothing is sent that a reader would have to be told again.
+ * One id. The screen answers a ping by re-reading the task over HTTP, so what it paints is what
+ * `TaskPolicy` and `TaskResource` built for this reader — never something assembled from a
+ * socket frame. That is the same rule `App\Events\ConversationActivity` states at length and
+ * for the same reason: **there is one place that decides what a person may see, and it is not
+ * the frame.**
  *
- * Deliberately absent: the title, the actor and the reason. Not because they are secret — they
- * are on the task — but because a socket payload that carries prose is a second place for the
- * status vocabulary to be written, and the screens read `status_label` from the enum exactly
- * as every list does.
+ * Until Phase 12's polish pass this carried `status`, `status_label`, `tone` and `at`, and the
+ * task detail page read the label straight out of it to compose a sentence. Every one of those
+ * four was also in the `TaskResource` payload the same reader already had, so nothing leaked —
+ * but the frame was a second place where the status vocabulary was written, and a screen that
+ * paints out of a frame is a screen whose correctness depends on the frame staying as narrow
+ * as the policy. `task_id` cannot be wrong that way: a reader who should not see the task asks
+ * for it and is told no.
  *
- * ## Queued, like every broadcast here
+ * It also makes the two transports say the same thing. A polling build re-reads the task; a
+ * socket build re-reads it sooner. Nothing is delivered live that was not deliverable cold.
+ *
+ * ## Queued, and only after the write is real
  *
  * `ShouldBroadcast`, so a stopped Reverb costs a retried job rather than a 500 on the drag
  * that moved the card. See App\Events\NotificationFeedChanged for the whole argument.
+ *
+ * `ShouldDispatchAfterCommit` is the other half, and all three events that wear this trait
+ * declare it. `TaskService::transition()` fires them INSIDE its write transaction, and
+ * `config/queue.php` sets `after_commit => false` on every connection (POLISH-BACKLOG §E.4) —
+ * so without it the BroadcastEvent job is pushed the instant the event is dispatched, and a
+ * transition that throws `TaskStateException::workSummaryRequired()` two lines later has
+ * already told every open board that the card moved. `Event::fake()` cannot see this: a fake
+ * records a dispatch the moment it happens and knows nothing about the commit it was waiting
+ * for, so the test of it in `tests/Feature/Realtime/TaskBroadcastTest.php` listens for real.
  */
 trait BroadcastsTaskStatus
 {
@@ -62,18 +77,13 @@ trait BroadcastsTaskStatus
     }
 
     /**
-     * @return array<string, mixed>
+     * Exactly one key. `TaskBroadcastTest` asserts the KEY SET, not just the value, so adding a
+     * second is a failing test rather than a quiet privacy decision.
+     *
+     * @return array{task_id: int}
      */
     public function broadcastWith(): array
     {
-        $status = $this->task->status;
-
-        return [
-            'task_id' => (int) $this->task->getKey(),
-            'status' => $status?->value,
-            'status_label' => $status?->label(),
-            'tone' => $status?->tone(),
-            'at' => now()->toIso8601String(),
-        ];
+        return ['task_id' => (int) $this->task->getKey()];
     }
 }

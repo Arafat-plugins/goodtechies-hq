@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AttendanceRecord;
 use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\Permission;
@@ -45,6 +46,14 @@ beforeEach(function (): void {
     // is redirected to enrolment and every assertion here would have read 302.
     $this->seed();
 
+    // Phase 10's `WorkSeeder` fills the seeded database with two real months of tracked time
+    // and attendance — what every Phase 4 screen needed, and what no total in this file can
+    // include: every figure here is one a human added up from the entries the test writes, and
+    // the queue's ordering is asserted by id. So the two tables start empty; the seeded rows
+    // are asserted in `tests/Feature/Database/WorkSeederTest.php`.
+    TimeEntry::query()->delete();
+    AttendanceRecord::query()->delete();
+
     $this->admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
     $this->tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail()->employee;
     $this->task = Task::factory()->create();
@@ -53,6 +62,45 @@ beforeEach(function (): void {
 afterEach(function (): void {
     Carbon::setTestNow();
 });
+
+/**
+ * The payload reduced to the APPLICATION's own words: every key, and every string value except
+ * the ones a person typed.
+ *
+ * A seeded task really is called *"Monthly rankings report — Buffalo Modular"* — SEO rankings,
+ * the client's deliverable — and since Phase 10's `WorkSeeder` puts tracked time on Tapu's SEO
+ * tasks, that title now travels in this payload. A forbidden-word scan over the raw JSON would
+ * fail on the client's own vocabulary, and would fail on the live database for the same reason
+ * the moment somebody tracked an hour against that task. What Part H §1 forbids is the
+ * application inventing a score, so the scan is over what the application writes — keys, labels
+ * and states — and never over somebody's title, reason or note.
+ *
+ * @return list<string>
+ */
+function timeAppVocabulary(mixed $node, ?string $key = null): array
+{
+    $typedByAPerson = ['title', 'name', 'reason', 'note', 'rejection_reason', 'flag_reason'];
+
+    if (is_array($node)) {
+        $words = [];
+
+        foreach ($node as $childKey => $value) {
+            if (is_string($childKey)) {
+                $words[] = $childKey;
+            }
+
+            $words = [...$words, ...timeAppVocabulary($value, is_string($childKey) ? $childKey : $key)];
+        }
+
+        return $words;
+    }
+
+    if (is_string($node) && ! in_array($key, $typedByAPerson, true)) {
+        return [$node];
+    }
+
+    return [];
+}
 
 /** The one question a total asks, asked the way every screen asks it (decision 4-7). */
 function countedSecondsFor(Employee $employee, string $date): int
@@ -486,9 +534,9 @@ it('has no score and no productivity figure in the Admin Time sources or payload
     pendingEntry($this->tapu, $this->task);
 
     $props = $this->actingAs($this->admin)->get('/admin/time')->assertOk()->viewData('page')['props'];
-    $json = json_encode($props, JSON_THROW_ON_ERROR);
+    $vocabulary = implode(' ', timeAppVocabulary($props));
 
     foreach ($words as $word) {
-        expect(stripos($json, $word))->toBeFalse('the Admin Time payload contains "'.$word.'"');
+        expect(stripos($vocabulary, $word))->toBeFalse('the Admin Time payload contains "'.$word.'"');
     }
 });

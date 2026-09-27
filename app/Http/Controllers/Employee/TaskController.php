@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Employee;
 
 use App\Exceptions\TaskStateException;
 use App\Http\Controllers\Concerns\BuildsDiscussionPayload;
+use App\Http\Controllers\Concerns\BuildsGanttPayload;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Task\ChangeTaskStatusRequest;
 use App\Http\Requests\Task\HandOffTaskRequest;
@@ -13,6 +14,7 @@ use App\Http\Requests\Task\StoreTaskLinkRequest;
 use App\Http\Requests\Task\UpdateChecklistItemRequest;
 use App\Http\Requests\Task\UpdateTaskRequest;
 use App\Http\Requests\Task\ViewTaskCalendarRequest;
+use App\Http\Requests\Task\ViewTaskGanttRequest;
 use App\Http\Resources\TaskResource;
 use App\Models\ActivityLog;
 use App\Models\Employee;
@@ -25,6 +27,7 @@ use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\ConversationService;
 use App\Services\TaskService;
+use App\Support\GanttZoom;
 use App\Support\TaskBucket;
 use App\Support\TaskPriority;
 use App\Support\TaskStatus;
@@ -66,6 +69,11 @@ class TaskController extends Controller
     // `…/discussion` endpoint sends, so the panel paints with its thread already in hand.
     use BuildsDiscussionPayload;
 
+    // One Gantt payload for both surfaces. The scoping is not this trait's doing: it builds
+    // from TaskService::query(), which funnels through Task::visibleTo(), so an employee's
+    // timeline holds the tasks they are assigned to for the same reason their List does.
+    use BuildsGanttPayload;
+
     /** The variants that mean anything on a list that is one person's work. */
     private const GROUP_BY = ['status', 'project', 'priority'];
 
@@ -82,9 +90,11 @@ class TaskController extends Controller
         'completer',
         'firstCompleter',
         'workSummaryAuthor',
-        // The attachment panel. Current versions only — the relation says so — each one's
-        // uploader eager-loaded so FileResource does not query per row.
-        'files.uploader',
+        // **The attachments are deliberately NOT here** (decision 2-30). The panel that draws
+        // them fetches its own list from the files endpoint — it has to, because it re-fetches
+        // after every upload, replace and delete — so loading the relation here only fed a
+        // `TaskResource` key nobody read, at two signed-URL mintings and two policy passes per
+        // file per render. `attachment_count` is a `withCount` in `visible()` and is untouched.
         // Phase 3: "Generated from: <template> · period <Month YYYY>". A belongsTo that is null
         // on every hand-made task, which is most of them — eager-loaded rather than read lazily
         // so the detail payload is one query here too.
@@ -184,6 +194,34 @@ class TaskController extends Controller
             // dashboards' cards link in, so a card's count and the list it opens are the
             // same predicate. Unset, the chip is invisible: FilterBar only draws a chip for
             // a filter that has a value.
+            'buckets' => $this->options(TaskBucket::cases()),
+            'projects' => $this->projects($request),
+            'tags' => $this->filterTags($request),
+            'canManageTags' => $this->mayManageTags(),
+        ]);
+    }
+
+    /**
+     * The Gantt, scoped exactly as everything else on this surface is.
+     *
+     * `can_plan` is false for an Employee and true for the Manager who shares this surface —
+     * `TaskService::mayPlan()`, the one definition — so the handles being inert here and the
+     * write being refused by `UpdateTaskRequest` cannot come apart. The rows still carry
+     * `permissions.can_update` per task, because the role half is only half of it.
+     */
+    public function gantt(ViewTaskGanttRequest $request): Response
+    {
+        Gate::authorize('viewAny', Task::class);
+
+        $filters = $this->tasks->filters($request->query());
+
+        return Inertia::render('Employee/Tasks/Gantt', [
+            'gantt' => $this->ganttPayload($request, $filters),
+            'filters' => $this->presentFilters($filters),
+            'can_plan' => TaskService::mayPlan($request->user()),
+            'zooms' => $this->zooms(),
+            'statuses' => $this->options(TaskStatus::boardOrder()),
+            'priorities' => $this->options(TaskPriority::cases()),
             'buckets' => $this->options(TaskBucket::cases()),
             'projects' => $this->projects($request),
             'tags' => $this->filterTags($request),
@@ -571,6 +609,20 @@ class TaskController extends Controller
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * The Gantt's zoom control, labelled on the server like every other option list here.
+     *
+     * @return list<array{value: string, label: string, description: string}>
+     */
+    private function zooms(): array
+    {
+        return array_map(fn (GanttZoom $zoom): array => [
+            'value' => $zoom->value,
+            'label' => $zoom->label(),
+            'description' => $zoom->description(),
+        ], GanttZoom::all());
     }
 
     /**

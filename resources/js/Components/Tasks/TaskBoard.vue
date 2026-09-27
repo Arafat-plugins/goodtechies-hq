@@ -2,6 +2,9 @@
 import { KanbanSquare } from '@lucide/vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
+import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
+import { BOARD_POLL_MS } from '@/Components/Realtime/live';
+import { useLiveProps } from '@/Components/Realtime/reload';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import TaskBoardCard from '@/Components/Tasks/TaskBoardCard.vue';
 import TaskFilterBar, { taskFiltersActive } from '@/Components/Tasks/TaskFilterBar.vue';
@@ -189,6 +192,7 @@ function reorder(cardId: number, afterId: number | null): void {
             },
             onFinish: () => {
                 busyId.value = null;
+                live.resume();
             },
         },
     );
@@ -245,11 +249,13 @@ function onOutcome(accepted: boolean): void {
     }
 
     restoreFocus();
+    live.resume();
 }
 
 function onDismissed(): void {
     undo();
     restoreFocus();
+    live.resume();
 }
 
 /* ----------------------------------------------------------- giving focus back */
@@ -310,6 +316,10 @@ function onDragStart(card: BoardCard, columnKey: string, event: DragEvent): void
 function onDragEnd(): void {
     drag.value = null;
     over.value = null;
+
+    // Whatever a colleague did while this card was in the air lands now — unless the drop left a
+    // write in flight, in which case `onOutcome` picks it up instead.
+    live.resume();
 }
 
 /** Where in the list the pointer is, by the midpoint of each card it has passed. */
@@ -418,6 +428,48 @@ function jumpTo(key: string): void {
     column?.scrollIntoView({ block: 'nearest', inline: 'start', behavior: 'smooth' });
     column?.querySelector<HTMLElement>('[data-column-heading]')?.focus();
 }
+
+/* ------------------------------------------------------------- somebody else's move */
+
+/**
+ * A card moved by somebody else moves here too — POLISH-BACKLOG §A.3, whose note on this line is
+ * *"today two people dragging the same board overwrite each other silently"*.
+ *
+ * ## Why this is a poll on BOTH builds, and not a channel
+ *
+ * There is no board channel, and there is no honest way to add one. A channel needs an audience a
+ * policy can answer for, and a board's audience is *"everyone whose `Task::visibleTo()` plus these
+ * filter parameters include this card"* — which is a query per reader, not a room. The nearest
+ * real thing is `task.{id}` per visible card: forty subscriptions for one screen, re-authorised on
+ * every reconnect, and it still would not deliver the case that matters, because a card moving
+ * INTO this board was never on it to be subscribed to. So the board re-asks the server, every
+ * twenty seconds, on a socket build and on a polling one alike. That is not the fallback here; it
+ * is the design, and it is the third rule of §A.4 answered rather than worked around.
+ *
+ * Twenty seconds is the answer to *how long may a card sit in the wrong column* — long enough
+ * that the board is not a chat, short enough that two people planning a sprint together are
+ * looking at the same board.
+ *
+ * ## It never lands mid-gesture
+ *
+ * `board` is a prop and `local` is a copy of it, so a fresh payload REPLACES the columns — which
+ * is exactly right after somebody else's move and exactly wrong while a card is in the air or a
+ * write is unanswered. So the refresh is refused while `drag` holds a card, while `busyId` has a
+ * write out, and while `restorePoint` is holding the board it would have to restore to on a
+ * refusal. A refusal is not dropped: `useLiveRefresh` remembers it, the indicator says *Update
+ * waiting*, and `resume()` delivers it the moment the gesture or the write finishes.
+ *
+ * ## What is still not solved, and cannot be from here
+ *
+ * This ends *silent* overwriting, not simultaneous editing. Two people who drop the same card in
+ * the same second still race, and the second write wins — `POST …/status` has no version check to
+ * lose on. Closing that needs an `If-Unmodified-Since`-shaped precondition on the task, which is
+ * a server change with its own refusal to draw and is not this slice.
+ */
+const live = useLiveProps(['board'], {
+    intervalMs: BOARD_POLL_MS,
+    canRefresh: () => drag.value === null && busyId.value === null && restorePoint.value === null,
+});
 </script>
 
 <template>
@@ -448,13 +500,25 @@ function jumpTo(key: string): void {
                 </template>
             </p>
 
+            <!--
+                How this board is keeping itself current. It says `Every 20s` on the client's
+                build and `Live` on nothing, because there is no board channel — see `live`
+                above — and it says `Update waiting` while a drag is holding a refresh off.
+            -->
+            <LiveIndicator
+                :transport="live.transport.value"
+                :interval-ms="BOARD_POLL_MS"
+                :pending="live.pending.value"
+                subject="cards other people move"
+            />
+
             <!-- Every column, named and counted, without scrolling to it first. -->
             <nav aria-label="Jump to a column" class="flex min-w-0 flex-wrap items-center gap-1">
                 <button
                     v-for="column in local"
                     :key="column.key"
                     type="button"
-                    class="rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                    class="rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring"
                     @click="jumpTo(column.key)"
                 >
                     <StatusBadge
@@ -517,7 +581,7 @@ function jumpTo(key: string): void {
                             :id="`${surface}-col-${column.key}`"
                             data-column-heading
                             tabindex="-1"
-                            class="min-w-0 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                            class="min-w-0 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring"
                         >
                             <StatusBadge :status="column.tone ?? 'todo'" :label="column.label" />
                         </h2>

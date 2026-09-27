@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CalendarClock, Check, MessageSquareWarning, Pencil, X } from '@lucide/vue';
+import { CalendarClock, Check, MessageSquareWarning, Pencil, Undo2, X } from '@lucide/vue';
 import type { LeaveRequestRow } from '@/Components/Leave/leave';
 import { formatDays, formatWindow } from '@/Components/Leave/leave';
 import StatusBadge from '@/Components/StatusBadge.vue';
@@ -23,10 +23,12 @@ import { cn } from '@/lib/utils';
  *
  * ## Nothing here decides what may be done
  *
- * `permissions.can_decide` and `.can_resubmit` arrive resolved by `LeaveRequestPolicy` per
- * record, and every endpoint checks again (decisions 2-28, 2-31). An Admin reading their own
- * request in the queue is sent `can_decide: false` — nobody rules on their own — so the buttons
- * are not drawn rather than drawn and refused.
+ * `permissions.can_decide`, `.can_resubmit` and `.can_withdraw` arrive resolved by
+ * `LeaveRequestPolicy` per record, and every endpoint checks again (decisions 2-28, 2-31). An Admin
+ * reading their own request in the queue is sent `can_decide: false` — nobody rules on their own —
+ * so the buttons are not drawn rather than drawn and refused. The same answer makes *Withdraw* the
+ * applicant's button and nobody else's, and only while the request is still waiting: `can_withdraw`
+ * is false the moment it has been approved or turned down (decision 5-19).
  */
 
 const props = defineProps<{
@@ -40,6 +42,8 @@ const emit = defineEmits<{
     reject: [request: LeaveRequestRow];
     correction: [request: LeaveRequestRow];
     amend: [request: LeaveRequestRow];
+    /** The applicant taking their own request back — decision 5-19. */
+    withdraw: [request: LeaveRequestRow];
 }>();
 </script>
 
@@ -111,10 +115,23 @@ const emit = defineEmits<{
             </Button>
         </div>
 
-        <div v-if="request.permissions.can_resubmit" class="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="outline" @click="emit('amend', request)">
+        <div
+            v-if="request.permissions.can_resubmit || request.permissions.can_withdraw"
+            class="flex flex-wrap items-center gap-2"
+        >
+            <Button v-if="request.permissions.can_resubmit" size="sm" variant="outline" @click="emit('amend', request)">
                 <Pencil class="size-4" aria-hidden="true" />
                 Amend and send back
+            </Button>
+            <!--
+                Withdraw is the applicant's way out of their own mistake (decision 5-19). `outline`
+                rather than `destructive`: nothing is destroyed — the request stays on record with
+                "Withdrawn" on it — and the days simply stop being held. The page it sits on asks for
+                confirmation, because a booked week disappearing is not an undo anybody can press twice.
+            -->
+            <Button v-if="request.permissions.can_withdraw" size="sm" variant="outline" @click="emit('withdraw', request)">
+                <Undo2 class="size-4" aria-hidden="true" />
+                Withdraw
             </Button>
         </div>
     </article>

@@ -30,7 +30,7 @@ const gridClass = computed(() => COLUMN_CLASS[props.columns]);
         <div
             v-for="card in cardCount"
             :key="`card-${card}`"
-            class="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs"
+            class="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-raised"
         >
             <div class="flex items-center justify-between gap-2">
                 <Skeleton class="bg-muted-foreground/20 h-4 w-1/2" />

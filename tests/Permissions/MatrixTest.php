@@ -3,11 +3,18 @@
 use App\Models\Client;
 use App\Models\Conversation;
 use App\Models\Employee;
+use App\Models\Expense;
 use App\Models\File;
+use App\Models\FinanceCategory;
 use App\Models\Holiday;
+use App\Models\Income;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
+use App\Models\Meeting;
 use App\Models\Notification;
+use App\Models\PayrollItem;
+use App\Models\PayrollPeriod;
+use App\Models\Permission;
 use App\Models\Project;
 use App\Models\RecurringTask;
 use App\Models\Tag;
@@ -16,6 +23,7 @@ use App\Models\TaskChecklistItem;
 use App\Models\TaskLink;
 use App\Models\TimeEntry;
 use App\Models\User;
+use App\Models\UserProjectPermission;
 use App\Support\RoleName;
 use Illuminate\Routing\Route as RoutingRoute;
 use Illuminate\Support\Facades\Cache;
@@ -62,6 +70,13 @@ const MATRIX_IGNORED_ROUTES = [
  */
 const MATRIX_PARAMETERS = [
     '{session}' => 'not-a-session-of-this-user',
+
+    // `/admin/reports/{report}` binds a ReportKey, which is an enum and not a row — so the
+    // value is a case, and the case is the first of the eight (Part D §15's Task report).
+    // A value that is NOT a case is a 404 from the router before any permission is asked,
+    // which is asserted in tests/Feature/Reports rather than here: this file's job is which
+    // roles reach a route that exists.
+    '{report}' => 'task',
 ];
 
 /**
@@ -120,6 +135,25 @@ function matrixParameters(): array
         '{employee?}' => matrixEmployeeId('tapu@goodtechies.test'),
         '{employee}' => matrixEmployeeId('tapu@goodtechies.test'),
 
+        // A throwaway employee for the rows that CHANGE somebody's status.
+        //
+        // The deactivate row really deactivates whoever it is pointed at, and the matrix walks
+        // six roles down every row in order. Aimed at the default `{employee}` — Tapu — the
+        // ADMIN cell would end Tapu's account, and the REMOTE_EMPLOYEE cell of that row, and
+        // of every row after it, would answer `302 /login` instead of 403. The row would stop
+        // being about permission and start being about the order the table is written in.
+        //
+        // So these two point at somebody nobody else's row names (`employee:spare`), and they
+        // are kept ADJACENT with deactivate first — the same arrangement the project
+        // archive/unarchive pair uses, so reactivate puts back what deactivate took.
+        // A real `user_project_permissions` row for the revoke route to consume.
+        //
+        // `SubstituteBindings` runs before `can:roles.manage`, so an id that does not exist
+        // answers 404 to every role and the row tests the router instead of the gate. Nothing
+        // seeds this table — `ProjectPolicy` reads it and, until this phase, nothing wrote it —
+        // so the row has to be made here.
+        '{grant}' => matrixGrantId(),
+
         // The day the attendance edit row aims at. In the past, because a day that has not
         // happened cannot be recorded — though the row is body-less and stops at the Form
         // Request long before that check.
@@ -145,6 +179,40 @@ function matrixParameters(): array
         // else, and "somebody else's conversation is 404" is asserted where it belongs, in
         // tests/Feature/Privacy/MessagePrivacyTest.php.
         '{conversation}' => matrixTeamConversationId(),
+
+        // Meetings (Phase 7). The WEEKLY STAND-UP, which is the one meeting every role holding
+        // `meetings.use` is actually in — so the `view`-shaped rows read as the capability rule
+        // and nothing else. Its organiser is Faruk (MANAGER), which is what makes the
+        // organiser-or-Admin rows below say something: ADMIN and MANAGER pass them, EMPLOYEE
+        // and REMOTE_EMPLOYEE are refused while still being able to SEE the meeting — a 403,
+        // because the act is refused and not the record. "A meeting you are not on is 404" is
+        // asserted where it belongs, in tests/Feature/Meetings/MeetingDetailEndpointsTest.php.
+        '{meeting}' => (string) Meeting::where('title', 'Weekly team stand-up')->firstOrFail()->id,
+
+        // Finance (Phase 8). September's rows, which are the ones Part D §13's acceptance
+        // sentence is about — so a row here that consumed one would move a number the rollup
+        // tests assert. See the DELETE note beside the finance rows.
+        '{income}' => (string) Income::query()->orderBy('id')->firstOrFail()->id,
+        '{expense}' => (string) Expense::query()->orderBy('id')->firstOrFail()->id,
+        // An IN-USE category, deliberately: the delete row against it asserts the refusal
+        // rather than consuming the list out from under the two rows above.
+        '{category}' => (string) FinanceCategory::query()
+            ->whereHas('income')
+            ->orderBy('id')
+            ->firstOrFail()->id,
+
+        // Payroll (Phase 9). September's period — the month `PayrollSeeder` drafts and
+        // `FinanceSeeder` fills, so both halves of the finance/payroll seam point at one month.
+        '{period}' => (string) PayrollPeriod::query()->orderBy('month')->firstOrFail()->id,
+
+        // **Yaseen's** payroll item, which makes the payslip rows say two things at once: the
+        // EMPLOYEE cell is 200 because it is theirs, and the MANAGER and REMOTE_EMPLOYEE cells
+        // are **404** because it is not — absent, not refused (Part B §3 rule 1). ADMIN and
+        // ACCOUNTANT hold `payroll.view_others` and see every line.
+        '{item}' => (string) PayrollItem::query()
+            ->whereHas('employee.user', fn ($query) => $query->where('email', 'yaseen@goodtechies.test'))
+            ->orderBy('id')
+            ->firstOrFail()->id,
 
         // Tapu's USER (not his employee record, which is `{employee}`), so the direct-message
         // row states two rules in one line: anybody who may use messaging can open a DM with
@@ -242,6 +310,42 @@ function matrixTeamConversationId(): string
     return (string) Conversation::query()->where('type', 'team')->firstOrFail()->id;
 }
 
+/**
+ * The spare employee the deactivate/reactivate pair points at. See the substitution map.
+ */
+function matrixSpareEmployeeId(): string
+{
+    static $id = null;
+
+    if ($id === null || ! Employee::whereKey($id)->exists()) {
+        $id = (string) Employee::factory()->forRole(RoleName::EMPLOYEE)->create()->id;
+    }
+
+    return $id;
+}
+
+/**
+ * A project-permission grant for the revoke row to consume, on the same Buffalo project every
+ * other project row names, and held by the spare employee rather than by anybody the rest of
+ * the table depends on.
+ */
+function matrixGrantId(): string
+{
+    static $id = null;
+
+    if ($id === null || ! UserProjectPermission::whereKey($id)->exists()) {
+        $employee = Employee::whereKey(matrixSpareEmployeeId())->firstOrFail();
+
+        $id = (string) UserProjectPermission::query()->create([
+            'user_id' => $employee->user_id,
+            'project_id' => Project::where('name', 'Buffalo Modular — SEO')->firstOrFail()->id,
+            'permission_id' => Permission::where('key', 'projects.view_finance')->firstOrFail()->id,
+        ])->id;
+    }
+
+    return $id;
+}
+
 function matrixNotificationId(): string
 {
     static $id = null;
@@ -259,12 +363,18 @@ function matrixNotificationId(): string
 }
 
 /**
- * The four dates the leave rows use, one window per row.
+ * The dates the leave rows use, one window per row.
  *
- * They are Sundays and Mondays in October 2026 — working days on the seeded Sunday-to-Thursday
- * week — and they do not touch each other, because `leave_requests_no_overlap` refuses two
+ * They are Sundays and Mondays on the seeded Sunday-to-Thursday week — working days, no seeded
+ * holiday — and they do not touch each other, because `leave_requests_no_overlap` refuses two
  * pending or approved requests of the same person over overlapping dates. One row approving its
  * request must not make the next row's unfileable.
+ *
+ * `withdraw` runs on into November for the same reason the other four are a week apart, and it
+ * is the one window that frees itself: `withdrawn` is not a holding status, so the exclusion
+ * constraint stops covering those two days the moment the row succeeds. It is still given its
+ * own window rather than sharing one — a row that only works because another row ran first is a
+ * row that fails when the file is filtered.
  *
  * @var array<string, array{0: string, 1: string}>
  */
@@ -273,6 +383,7 @@ const MATRIX_LEAVE_WINDOWS = [
     'reject' => ['2026-10-11', '2026-10-12'],
     'correction' => ['2026-10-18', '2026-10-19'],
     'resubmit' => ['2026-10-25', '2026-10-26'],
+    'withdraw' => ['2026-11-01', '2026-11-02'],
 ];
 
 /**
@@ -349,6 +460,9 @@ function matrixResolve(string $token): string
         'holiday' => (string) Holiday::query()->where('name', $value)->firstOrFail()->id,
         // A leave request per row that acts on one. See matrixLeaveRequestId().
         'leave' => matrixLeaveRequestId($value),
+        // The throwaway employee the deactivate/reactivate pair acts on, rather than anybody
+        // the rest of the table depends on. See the substitution map.
+        'employee' => matrixSpareEmployeeId(),
         default => $value,
     };
 }
@@ -384,6 +498,59 @@ function permissionMatrix(): array
     // gets these cells by holding the key, with no edit here.
     $messaging = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => 403];
 
+    // Meetings (Phase 7). `meetings.use` goes to the same four roles and the Accountant holds
+    // none — Part D §12's *"the Accountant has no meetings"*, said as a capability.
+    $meetings = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => 403];
+
+    // Finance (Phase 8). Shared screens, not one copy per shell: whose money it is belongs to
+    // the agency and not to the shell somebody is looking at — the same reasoning that put
+    // Messages, Leave and Meetings in `routes/shared.php`. `finance.view` is held by the ADMIN
+    // and the ACCOUNTANT and by nobody else, which is the phase's own security line:
+    // *"Employees/Remote get 403 on every finance route."* The MANAGER is in that sentence too.
+    $finance = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => $status];
+
+    // Payroll (Phase 9). The workbench is `payroll.draft`, which ADMIN and ACCOUNTANT hold and
+    // nobody else does — the phase's own line, *"Employees/Remote get 403"*, with the MANAGER in
+    // it too. Salary settings and every Admin-side transition are `payroll.approve`, ADMIN only:
+    // Part D §14 puts *"salary settings per employee"* under Admin → Payroll, and *"Accountant
+    // cannot approve/lock"* is that same key refusing them.
+    $payroll = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => $status];
+    $payrollAdmin = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403];
+
+    // **My Payslip is every role's**, including the Accountant's — Part C §1 gives *view own
+    // payslip* to all five and the Accountant reads theirs in their own shell.
+    $payslip = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => $status];
+
+    // The category LIST is the Accountant's to read and the Admin's to change — Part D calls it
+    // *Admin-editable* and decision 8-12 spells out why that is `settings.manage` rather than
+    // `finance.manage`: giving the Accountant the key would hand them a power Part D reserves,
+    // and a `finance.manage_categories` key is what Part C §1 forbids in as many words.
+    $financeAdmin = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403];
+
+    // **The MANAGER cell is 404 on every row that names a meeting, and that is the point of
+    // these rows rather than a gap in them.** `matrixUsers()` builds the MANAGER from a factory
+    // rather than from the seed, so they are on no meeting at all — and a meeting you are not
+    // on is ABSENT, not refused, even to somebody holding the key and outranking half the
+    // people in it. A 403 there would tell them a meeting with that id exists and that they
+    // were not invited, which is exactly the sentence Part C forbids.
+    $meetingSeen = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => 404, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => 403];
+
+    // *"The organiser or any Admin"* — asked against the stand-up, which Yaseen and Tapu are in
+    // and neither organises. So they see it perfectly well and are refused the ACT: **403, not
+    // 404**, because the record is not hidden from them.
+    $meetingOwner = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => 404, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403];
+
+    // The write rows whose Form Request has a REQUIRED field. A body-less request fails
+    // validation and redirects **before** the controller resolves the meeting, so these rows
+    // prove the route gate — `meetings.use`, and the Accountant's 403 — and nothing finer.
+    // That is a weaker claim than the rows above and it is made deliberately: who may act on a
+    // meeting is asserted directly, with real bodies, in tests/Feature/Meetings/. The
+    // alternative — moving the policy into `authorize()` — was considered and rejected, because
+    // a Form Request cannot do the `Meeting::visibleTo()` lookup whose 404 IS the privacy rule,
+    // and there is no oracle here to fix: an invisible meeting and a badly-formed body both
+    // answer 302, and once the body is valid they answer 404 and 403 correctly.
+    $meetingValidated = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => 403];
+
     // A DELETE row destroys the record it points at, and route-model binding runs before the
     // surface middleware — so every cell after the one that is allowed sees 404 where it would
     // otherwise have seen 403. The surface guard on these routes is asserted directly instead,
@@ -414,6 +581,28 @@ function permissionMatrix(): array
         // Admin surface
         ['GET', 'admin/dashboard', $admin],
         ['GET', 'admin/settings', $admin],
+        // Writing them. Body-less, so the Form Request refuses before the policy is reached —
+        // the row shows who gets as far as validating, which is the question this table answers.
+        // `SettingsService::set()` is the only writer and it checks `settings.manage` itself, so
+        // there are two refusals stacked here and they agree.
+        ['PUT', 'admin/settings', $adminAction],
+
+        // Admin → Notifications defaults (Phase 12). `notification_preferences` decides whether
+        // the engine writes a row at all, so this is a configuration screen and wears
+        // `settings.manage` rather than a permission of its own — Part C §1's permission list is
+        // closed and a new key would have needed a recorded decision.
+        ['GET', 'admin/notifications', $admin],
+        ['PUT', 'admin/notifications', $adminAction],
+
+        // Admin → Audit Log (Phase 12). **Read-only, and there is no write row here because
+        // there is no write ROUTE** — `audit_logs` is append-only enforced by PostgreSQL grants
+        // (Part B §3 rule 3), which `tests/Feature/Database/AuditLogAppendOnlyTest.php` proves
+        // by running raw UPDATE / DELETE / TRUNCATE as `hq_app` and expecting 42501.
+        //
+        // The Accountant cell is the one worth reading: they hold `payroll.view_others` and can
+        // open a payslip, and they are still 403 here. The log is a different question from the
+        // data it describes.
+        ['GET', 'admin/audit-log', $admin],
         // An Admin's own plate. One route for all seven buckets — Due Today and Overdue are
         // `?bucket=` on this, not routes of their own, so there is one row here and not three.
         // The Accountant holds no tasks.* permission, so `viewAny` refuses them before the
@@ -487,6 +676,9 @@ function permissionMatrix(): array
         // even before the surface middleware would.
         ['GET', 'admin/tasks/board', $admin],
         ['GET', 'admin/tasks/calendar', $admin],
+        // Phase 10's fourth view. Same cells as the other three: a view is a real address and
+        // not a capability of its own — what differs between them is geometry, not access.
+        ['GET', 'admin/tasks/gantt', $admin],
         ['POST', 'admin/tasks', $adminAction],
         ['GET', 'admin/tasks/{task}', $admin],
         ['PUT', 'admin/tasks/{task}', $adminAction],
@@ -652,6 +844,55 @@ function permissionMatrix(): array
         // no 404 to have. An employee the viewer may not see is missing from the list.
         ['GET', 'admin/workload', $admin],
 
+        // Admin surface — Reports (Phase 10). Both rows are $admin for the ordinary reason:
+        // `surface:admin` refuses the other four roles before a report is named, which is why
+        // the Accountant is 403 here and does their finance reporting on /finance/report.
+        //
+        // The row that MATTERS for this phase is not visible in this table, because this table
+        // can only show the surface. Neither route carries a `can:` — a report requires the
+        // permission of the data it reads, so which key applies depends on which report was
+        // asked for, and a single middleware key could only be the wrong one for fifteen of
+        // the sixteen. That per-report refusal, and the catalogue listing exactly the cards
+        // whose key the viewer holds, are asserted in tests/Feature/Reports/ReportCatalogueTest.
+        ['GET', 'admin/reports', $admin],
+        ['GET', 'admin/reports/{report}', $admin],
+
+        // Admin surface — Employees / Users & Roles (Phase 12). Part D §2 calls them one screen
+        // family, and these nine rows are that family's whole surface.
+        //
+        // All nine carry `can:roles.manage` behind `surface:admin`, so there are two refusals
+        // stacked and they happen to agree today: the four non-Admin roles are stopped by the
+        // surface before the permission is asked. That matters the day a MANAGER is given the
+        // employee shell — the permission is what would still refuse them, not the shell.
+        //
+        // **Nothing here deletes.** An employee leaves by becoming inactive and their record is
+        // kept forever (Part B §3 rule 11), so there is no DELETE row for a person — only for a
+        // project-permission grant, which is a grant and not a human being.
+        ['GET', 'admin/employees', $admin],
+        ['GET', 'admin/employees/{employee}', $admin],
+        // Body-less, so the Form Request refuses before the policy is reached — the row shows
+        // who gets as far as validating, which is the question this table can answer.
+        ['POST', 'admin/employees', $adminAction],
+        ['PUT', 'admin/employees/{employee}/role', $adminAction],
+        ['PUT', 'admin/employees/{employee}/tracking-mode', $adminAction],
+
+        // These two CHANGE somebody's status, so they point at `{spareEmployee}` and are kept
+        // adjacent with deactivate first — see the substitution map for what aiming them at
+        // Tapu would have done to every row below them.
+        ['POST', 'admin/employees/{employee}/deactivate', $adminAction, ['{employee}' => 'employee:spare']],
+        ['POST', 'admin/employees/{employee}/reactivate', $adminAction, ['{employee}' => 'employee:spare']],
+
+        // Re-issuing a password. Pointed at the spare for the same reason the two above are:
+        // the ADMIN cell really mints a new one and ends that person's sessions, and aimed at
+        // Tapu it would have signed him out of the rows below.
+        ['POST', 'admin/employees/{employee}/reset-password', $adminAction, ['{employee}' => 'employee:spare']],
+
+        // Project-level grants. The POST is body-less and stops at validation; the DELETE is
+        // pointed at a real grant and consumes it, which is why it is `$consumed` and why the
+        // substitution map has to create one — nothing seeds that table.
+        ['POST', 'admin/employees/{employee}/permissions', $adminAction, ['{employee}' => 'employee:spare']],
+        ['DELETE', 'admin/employees/{employee}/permissions/{grant}', $consumed, ['{employee}' => 'employee:spare']],
+
         // Admin surface — one file. The history GET has no Form Request in front of it, so it
         // reads the visibility rule out loud: an Admin sees the chain of a file on any task,
         // and everybody else is stopped by the surface before the question arises. It consumes
@@ -682,6 +923,7 @@ function permissionMatrix(): array
         // empty view is not a refusal.
         ['GET', 'employee/tasks/board', $employee],
         ['GET', 'employee/tasks/calendar', $employee],
+        ['GET', 'employee/tasks/gantt', $employee],
 
         // Employee surface — one task. The Manager lives on THIS surface, so the moves the plan
         // gives to ADMIN/MANAGER are routed here too and refused to an employee by TaskPolicy.
@@ -772,6 +1014,18 @@ function permissionMatrix(): array
         // it is asserted directly in tests/Feature/Workforce/TimesheetTest.php.
         ['GET', 'employee/timesheet/{employee?}', $timer],
 
+        // Employee surface — My Reports (Phase 10). The one row in this file that is 200 for
+        // all three employee-surface roles and 403 for the Admin, which looks backwards until
+        // you read it as a surface: this is the EMPLOYEE shell, an Admin's own plate is
+        // /admin/my-tasks, and `surface:employee` is what says so.
+        //
+        // There is no `can:` on it and no parameter of any kind. The Time block is the only
+        // privileged part, and for somebody the timer does not track it is ABSENT from the
+        // payload rather than refused (Part C §1) — a gate would have had to turn the whole
+        // screen into a 403 to hide one block. That absence is asserted, both ways round, in
+        // tests/Feature/Reports/EmployeeReportsTest.php.
+        ['GET', 'employee/reports', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 200, 'EMPLOYEE' => 200, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
+
         // Employee surface — tag management, which is here because this is where a MANAGER is.
         // The GET and the DELETE carry no body, so both read the policy out loud: the Manager
         // manages tags and an employee does not, as a 403 about their role rather than a 404
@@ -802,8 +1056,116 @@ function permissionMatrix(): array
         //   ACCOUNTANT       404 — the file is gone by the time the last cell runs
         ['DELETE', 'employee/files/{file}', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 404]],
 
+        // Finance (Phase 8). Ten ledger routes and two reporting ones, all shared and all behind
+        // `can:finance.view`.
+        //
+        // **No DELETE row points at a seeded record.** The cells are walked role by role against
+        // one row, so an allowed DELETE would consume it and every cell after would refuse for
+        // the wrong reason — the hazard the DELETE note above describes. The ACCOUNTANT cell is
+        // the one that would fire first here, and deleting September's income underneath the
+        // rollup tests is not a thing to do for a coverage row. Each destroy is asserted
+        // directly, with its audit row, in tests/Feature/Finance/.
+        ['GET', 'finance', $finance(200)],
+        ['GET', 'finance/report', $finance(200)],
+        ['GET', 'finance/income', $finance(200)],
+        ['GET', 'finance/income/create', $finance(200)],
+        ['GET', 'finance/income/{income}/edit', $finance(200)],
+        ['GET', 'finance/expenses', $finance(200)],
+        ['GET', 'finance/expenses/create', $finance(200)],
+        ['GET', 'finance/expenses/{expense}/edit', $finance(200)],
+        ['GET', 'finance/categories', $finance(200)],
+        // Body-less, so they stop at the validation redirect — proof they got past the gate.
+        ['POST', 'finance/income', $finance(302)],
+        ['POST', 'finance/expenses', $finance(302)],
+        ['PUT', 'finance/income/{income}', $finance(302)],
+        ['PUT', 'finance/expenses/{expense}', $finance(302)],
+        // The two category writes are body-less, so they stop at the validation redirect and
+        // the ACCOUNTANT cell reads 302 — **which is not the claim that they may write the
+        // list.** `FinanceCategoryPolicy` refuses them and the controller asks it per act; that
+        // refusal is asserted with a real body in FinanceCategoryEndpointsTest. The route
+        // deliberately carries no second `can:settings.manage` middleware, because a rule
+        // spelled in two places is a rule that can be changed in one of them (8-12, and 7-28's
+        // shape).
+        ['POST', 'finance/categories', $finance(302)],
+        ['PUT', 'finance/categories/{category}', $finance(302)],
+        // The destroys CONSUME. The ADMIN cell deletes the row and every cell after it meets a
+        // row that is gone — **404, not 403**, because route-model binding runs before the
+        // gate, which is the behaviour `$consumed` above already documents for the DELETE rows.
+        // A hard delete leaves nothing to find (8-5), so these cells cannot say anything about
+        // the key; that is asserted directly, on a live row, in tests/Feature/Finance/.
+        ['DELETE', 'finance/income/{income}', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404]],
+        ['DELETE', 'finance/expenses/{expense}', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404]],
+        // A category that is IN USE cannot be deleted at all — `ON DELETE RESTRICT`, which is
+        // why this row is safe to walk: nothing consumes anything. The ADMIN's 302 is the
+        // refusal arriving as a flash rather than a 500, which is the behaviour worth pinning.
+        ['DELETE', 'finance/categories/{category}', $financeAdmin(302)],
+
+        // Payroll (Phase 9). **These rows walk September through its own state machine**, in
+        // file order, because the cells are walked against one period and a transition is not a
+        // read. That is deliberate rather than tolerated: the walk is the acceptance sentence
+        // (*"September payroll runs through all states"*) said as a permission test. Every
+        // transition's allowed/forbidden matrix per role **per state** is asserted properly in
+        // tests/Feature/Payroll/PayrollEndpointsTest.php; these rows prove the gate.
+        ['GET', 'payroll', $payroll(200)],
+        ['GET', 'payroll/{period}', $payroll(200)],
+        ['PUT', 'payroll/{period}/items/{item}', $payroll(302)],
+        ['POST', 'payroll/{period}/calculate', $payroll(302)],
+
+        ['GET', 'payslip', $payslip(200)],
+        ['GET', 'payslip/{item}', ['guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 404, 'EMPLOYEE' => 200, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 200]],
+        ['GET', 'payslip/{item}/pdf', ['guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 404, 'EMPLOYEE' => 200, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 200]],
+
+        ['GET', 'salaries', $payrollAdmin(200)],
+        ['PUT', 'salaries/{employee}', $payrollAdmin(302)],
+
+        // The Admin side. Each consumes the state it arrives in, so the ACCOUNTANT cell that
+        // follows the ADMIN one is refused for two reasons at once — no key, and the wrong
+        // state — which is why none of these rows is the place to read the rule.
+        ['POST', 'payroll/{period}/review', $payrollAdmin(302)],
+        ['POST', 'payroll/{period}/approve', $payrollAdmin(302)],
+        ['POST', 'payroll/{period}/lock', $payrollAdmin(302)],
+        // **The one row whose ACCOUNTANT cell is 302, and it is not a claim that they may
+        // reverse a lock.** `ReverseLockRequest` requires a reason, so a body-less request
+        // fails validation and redirects before the policy is asked — they pass the group's
+        // `payroll.draft` gate and never reach `payroll.approve`. The other three roles are
+        // 403 from the gate itself, which runs first. Their real refusal, with a real reason in
+        // the body, is asserted in PayrollEndpointsTest. Third time this shape has come up:
+        // decisions 7-28 and 8-28.
+        ['POST', 'payroll/{period}/reverse-lock', $payroll(302)],
+        ['POST', 'payroll/{period}/paid', $payrollAdmin(302)],
+        // Last: September already has a period, so this is the refusal path rather than a
+        // creation — and putting it here keeps it from making a second period the rows above
+        // would then be ambiguous about.
+        ['POST', 'payroll', $payroll(302)],
+
         // Accountant surface
         ['GET', 'accountant/dashboard', $accountant],
+        // **The finance-only project window** (Phase 8, Part D §13). The sharpest privacy
+        // boundary in the application, and this row states both halves of it:
+        //
+        //   ACCOUNTANT  200 — the matrix says ❌ projects and ❌ clients but 🟡 *project
+        //                     finance, read-only*, and this endpoint is that yellow cell. It
+        //                     carries four keys — id, name, domain, finance — and no client, no
+        //                     contact, no task, no note. The key set itself is pinned in
+        //                     tests/Feature/Finance/AccountantProjectEndpointTest.php with a
+        //                     recursive forbidden-key walk; a row here could only ever count.
+        //   ADMIN       403 — `surface:accountant`. Not a statement that an Admin may not see
+        //                     project money: they see it on the ordinary project routes, with
+        //                     the client attached, because they may have the client too.
+        //   the rest    403 — they hold no `projects.view_finance`.
+        //
+        // The Accountant's 403 on every ORDINARY project route is unchanged and still asserted
+        // by Phase 1's own test — this endpoint is a second door, not a wider one.
+        ['GET', 'accountant/projects', $accountant],
+
+        // Global search (Phase 10). **`$everyone(200)` is the whole point of this row**: every
+        // signed-in role may look, because what differs is *what they find* and not whether
+        // they may ask. The Accountant gets a 200 carrying finance records and no task, no
+        // message and no client — a capability falling out of the keys they hold rather than a
+        // shell refusing them at the door. The scoping itself cannot be stated in a matrix
+        // cell; it is asserted in tests/Feature/Search/SearchScopingTest.php, including that a
+        // term matching only a restricted record answers `total: 0` rather than a refusal.
+        ['GET', 'search', $everyone(200)],
 
         // Shared profile
         ['GET', 'profile', $everyone(200)],
@@ -856,6 +1218,24 @@ function permissionMatrix(): array
         // got a 404 one line later. The 404 for somebody else's request, and the refusal to
         // resubmit one that was not sent back, are asserted directly in that same file.
         ['PUT', 'leave/{leaveRequest}', $everyone(302), ['{leaveRequest}' => 'leave:resubmit']],
+        // Taking your own request back (decision 5-19). **The only 403 on a shared `leave/*`
+        // route**, and the only row in this file where an ADMIN is refused a leave request they
+        // are looking at — which is the whole reason it is written down.
+        //
+        // The request is Yaseen's, so the cells are three different answers to three different
+        // questions:
+        //
+        //   EMPLOYEE          302 — it is his. `LeaveService::withdraw()` ran and flashed
+        //   ADMIN             403 — the queue shows him this request and `visibleTo()` resolves
+        //                           it, so the id is NOT absent to an Admin; the policy then
+        //                           says no, because withdrawing is the applicant's act and an
+        //                           Admin who wants it gone REJECTS it, under their own name.
+        //                           Hiding it as a 404 would be a lie about a record they can
+        //                           read on the next screen
+        //   MANAGER           404 — Yaseen is not in their managed scope, so the row never
+        //   REMOTE_EMPLOYEE   404   resolves for them at all, and Part C's rule stands: a record
+        //   ACCOUNTANT        404   you may not see is absent, never refused
+        ['POST', 'leave/{leaveRequest}/withdraw', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 404, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404], ['{leaveRequest}' => 'leave:withdraw']],
 
         // Shared — the bell and the Notification Center. No surface, like the file download
         // above: a person's own mail is a fact about the person, not about the shell they are
@@ -896,6 +1276,30 @@ function permissionMatrix(): array
             'guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302,
             'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 403,
         ]],
+
+        // Meetings (Phase 7). Shared, like Messages and Leave, and gated on `meetings.use`, so
+        // *"the Accountant has no meetings"* is a capability refusing them rather than a role
+        // named in a policy. Every `{meeting}` here is the weekly stand-up.
+        ['GET', 'meetings', $meetings(200)],
+        ['GET', 'meetings/create', $meetings(200)],
+        // Body-less, so it stops at the validation redirect — proof it got past the gate.
+        ['POST', 'meetings', $meetings(302)],
+        ['GET', 'meetings/{meeting}', $meetingSeen(200)],
+        ['GET', 'meetings/{meeting}/edit', $meetingOwner(200)],
+        // Its two fields are nullable, so a body-less request VALIDATES and reaches the
+        // controller — which is why this row says something the two below it cannot.
+        ['PUT', 'meetings/{meeting}/notes', $meetingOwner(302)],
+        ['PUT', 'meetings/{meeting}', $meetingValidated(302)],
+        ['POST', 'meetings/{meeting}/rsvp', $meetingValidated(302)],
+        ['POST', 'meetings/{meeting}/action-items', $meetingValidated(302)],
+        // **Last of the meeting rows, because it consumes the record it points at.** The cells
+        // are walked role by role against one meeting, so the ADMIN cell cancels the stand-up
+        // and every cell after it meets a meeting that is already cancelled — MANAGER still
+        // cannot see it (404), and the two who can are refused the act on a cancelled meeting
+        // (403). That is the same hazard the DELETE note above describes, and the same shape
+        // `$consumed` has; it is spelled out rather than shared because the reason the later
+        // cells refuse is different — the meeting is still there, it is just over.
+        ['POST', 'meetings/{meeting}/cancel', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
 
         ['GET', 'notifications', $notifications(200)],
         ['GET', 'notifications/recent', $notifications(200)],

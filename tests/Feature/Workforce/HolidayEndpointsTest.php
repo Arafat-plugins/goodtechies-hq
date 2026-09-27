@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AttendanceRecord;
 use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\Holiday;
@@ -264,6 +265,12 @@ it('changes what the roster says for a day, from an HTTP write', function (): vo
     // A Wednesday in the past, a working day in the seeded Sun–Thu week, with no seeded
     // holiday on it.
     $wednesday = '2026-09-16';
+
+    // A day nobody recorded anything on, which is what this test is about: `dayFor()` gives a
+    // stored record precedence over a derived Holiday on purpose — somebody who clocked in on a
+    // day later declared a holiday still reads Present, with the holiday's NAME beside it — so
+    // a day Phase 10's `WorkSeeder` filled in would be asserting the other branch.
+    AttendanceRecord::query()->whereDate('date', $wednesday)->delete();
 
     $before = $this->actingAs($this->admin)->get('/admin/attendance?date='.$wednesday);
     $before->assertOk();

@@ -19,13 +19,13 @@ import { Skeleton } from '@/Components/ui/skeleton';
 
         <div class="grid min-w-0 gap-4 md:grid-cols-3">
             <div class="flex flex-col gap-4 md:col-span-2">
-                <div class="flex flex-col gap-3 rounded-xl border bg-card p-6 shadow-xs">
+                <div class="flex flex-col gap-3 rounded-xl border bg-card p-6 shadow-raised">
                     <Skeleton class="bg-muted-foreground/20 h-4 w-32" />
                     <Skeleton class="bg-muted-foreground/20 h-3 w-full" />
                     <Skeleton class="bg-muted-foreground/20 h-3 w-5/6" />
                     <Skeleton class="bg-muted-foreground/20 h-3 w-2/3" />
                 </div>
-                <div class="flex flex-col gap-3 rounded-xl border bg-card p-6 shadow-xs">
+                <div class="flex flex-col gap-3 rounded-xl border bg-card p-6 shadow-raised">
                     <Skeleton class="bg-muted-foreground/20 h-4 w-40" />
                     <Skeleton class="bg-muted-foreground/20 h-3 w-full" />
                     <Skeleton class="bg-muted-foreground/20 h-3 w-3/4" />
@@ -33,12 +33,12 @@ import { Skeleton } from '@/Components/ui/skeleton';
             </div>
 
             <div class="flex flex-col gap-4">
-                <div class="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs">
+                <div class="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-raised">
                     <Skeleton class="bg-muted-foreground/20 h-4 w-24" />
                     <Skeleton class="bg-muted-foreground/20 h-3 w-full" />
                     <Skeleton class="bg-muted-foreground/20 h-3 w-2/3" />
                 </div>
-                <div class="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs">
+                <div class="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-raised">
                     <Skeleton class="bg-muted-foreground/20 h-4 w-20" />
                     <Skeleton class="bg-muted-foreground/20 h-3 w-3/4" />
                 </div>

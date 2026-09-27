@@ -2,6 +2,7 @@
 import { Head } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import PageShell from '@/Components/PageShell.vue';
+import GanttNarrowNotice from '@/Components/Tasks/Gantt/GanttNarrowNotice.vue';
 import TaskDetailDrawer from '@/Components/Tasks/TaskDetailDrawer.vue';
 import type {
     Task,
@@ -15,7 +16,6 @@ import TaskList, { taskColumns } from '@/Components/Tasks/TaskList.vue';
 import TaskViewSwitcher from '@/Components/Tasks/TaskViewSwitcher.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
-import { usePagePoll } from '@/lib/pagePoll';
 import { queryParam } from '@/lib/tableState';
 
 defineOptions({ layout: EmployeeLayout });
@@ -33,9 +33,6 @@ defineProps<{
     /** `TagPolicy::create`, answered by the controller — whether the tag manager is offered. */
     canManageTags: boolean;
 }>();
-
-/** Part 0.5 refresh rule: somebody else moves or closes a task in a column you are reading. */
-usePagePoll(['tasks']);
 
 /** The drawer's writes are this screen's writes; the toaster announces them. */
 useFlashAsToast();
@@ -86,6 +83,8 @@ function openTask(task: Task): void {
         <template #tabs>
             <TaskViewSwitcher surface="employee" current="list" />
         </template>
+
+        <GanttNarrowNotice />
 
         <TaskList
             table-id="employee-tasks"

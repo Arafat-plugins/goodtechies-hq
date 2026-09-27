@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use App\Models\File;
 use App\Models\Message;
 use App\Models\User;
+use App\Support\UnreadLine;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -43,7 +44,11 @@ class MessageResource extends JsonResource
             'is_mine' => $user !== null
                 && $this->author_id !== null
                 && (int) $this->author_id === (int) $user->getKey(),
-            'created_at' => $this->created_at?->toIso8601String(),
+            // Milliseconds, not `toIso8601String()`'s whole seconds: the thread compares this
+            // to `last_read_at` to draw the new-messages line, and at second precision a reply
+            // posted in the same second as a read arrived in the browser EQUAL to it and was
+            // drawn as already-read (decision M-15 — see App\Support\UnreadLine).
+            'created_at' => UnreadLine::iso($this->created_at),
             'attachments' => $this->attachments($request),
 
             // Who this message named. The thread highlights them, and `mentions_me` is
@@ -96,8 +101,9 @@ class MessageResource extends JsonResource
 
         return $this->resource->attachments
             ->map(fn (File $file): array => (new FileResource($file))->resolve($request) + [
-                // How this file is shown: `image` renders inline, `file` is a download,
-                // `voice` is Phase 6 and never written here.
+                // How this file is shown: `image` renders inline, `file` is a download, and
+                // `voice` gets the player — the one kind the composer asserts rather than the
+                // server deriving it, because no MIME type tells a recording from an upload.
                 'kind' => $file->pivot?->kind,
                 'duration_seconds' => $file->pivot?->duration_seconds === null
                     ? null

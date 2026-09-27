@@ -27,6 +27,7 @@ import {
 } from '@/Components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { useUrlTab } from '@/lib/tabState';
 
 defineOptions({ layout: AdminLayout });
 
@@ -96,7 +97,29 @@ const recentActivity = computed(() => props.activity.slice(0, 20));
  */
 const files = computed(() => fileRoutes('admin', 'projects', project.value.id));
 
-const tab = ref('overview');
+/**
+ * Which tab is open, in the URL — decision 2-51.
+ *
+ * `ref('overview')` meant a reload dropped back to Overview and a project's Files could not be
+ * linked to. Every write on this page redirects `back()`, so uploading a file also bounced the
+ * reader out of the tab they uploaded it into.
+ *
+ * Finance is in the list only when the payload says this reader may see it, so `?tab=finance`
+ * from somebody who may not opens Overview rather than selecting a panel that is not rendered.
+ */
+const tab = useUrlTab(
+    [
+        'overview',
+        ...(permissions.value.can_view_finance === true ? ['finance'] : []),
+        'members',
+        'discussion',
+        'activity',
+        'tasks',
+        'recurring',
+        'files',
+    ],
+    'overview',
+);
 
 const archiveOpen = ref(false);
 const archiving = ref(false);
@@ -174,11 +197,11 @@ function confirmArchiveToggle(): void {
                 the stop painted nothing. The ring goes on here rather than in the generated
                 component, exactly as `Pages/Shared/Notifications.vue` does it.
             -->
-            <TabsContent value="overview" class="flex flex-col gap-4 rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+            <TabsContent value="overview" class="flex flex-col gap-4 rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
                 <ProjectMetaList :project="project" />
 
                 <div class="grid items-start gap-4 lg:grid-cols-2">
-                    <Card class="min-w-0 gap-2 shadow-xs">
+                    <Card class="min-w-0 gap-2">
                         <CardHeader>
                             <CardTitle class="text-sm font-medium">Employee notes</CardTitle>
                         </CardHeader>
@@ -192,7 +215,7 @@ function confirmArchiveToggle(): void {
                     </Card>
 
                     <!-- The key is absent (not null) for a role that may not see it. -->
-                    <Card v-if="project.internal_notes !== undefined" class="min-w-0 gap-2 shadow-xs">
+                    <Card v-if="project.internal_notes !== undefined" class="min-w-0 gap-2">
                         <CardHeader>
                             <CardTitle class="text-sm font-medium">Internal notes</CardTitle>
                         </CardHeader>
@@ -207,7 +230,7 @@ function confirmArchiveToggle(): void {
                 </div>
             </TabsContent>
 
-            <TabsContent v-if="permissions.can_view_finance" value="finance" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+            <TabsContent v-if="permissions.can_view_finance" value="finance" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
                 <FinanceCard
                     :project="project"
                     :billing-frequencies="billingFrequencies"
@@ -215,7 +238,7 @@ function confirmArchiveToggle(): void {
                 />
             </TabsContent>
 
-            <TabsContent value="members" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+            <TabsContent value="members" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
                 <MembersCard
                     :project="project"
                     :assignable-employees="assignableEmployees"
@@ -230,8 +253,8 @@ function confirmArchiveToggle(): void {
                 bespoke table DESIGN.md §5.8 forbids. So the tab hands the reader over to the
                 real one, pre-filtered, and says so.
             -->
-            <TabsContent value="tasks" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
-                <Card class="min-w-0 gap-4 p-6 shadow-xs">
+            <TabsContent value="tasks" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
+                <Card class="min-w-0 gap-4 p-6">
                     <h2 class="text-sm font-medium">Tasks</h2>
                     <EmptyState
                         :icon="ListTodo"
@@ -254,7 +277,7 @@ function confirmArchiveToggle(): void {
                 the panel fetches its own list as JSON and writes with ordinary Inertia visits —
                 so the tab costs the project payload nothing until somebody opens it.
             -->
-            <TabsContent value="recurring" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+            <TabsContent value="recurring" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
                 <RecurringPanel
                     :project-id="project.id"
                     :can-manage="permissions.can_update === true"
@@ -270,8 +293,8 @@ function confirmArchiveToggle(): void {
                 which asks `ProjectPolicy::view` about this project: a member speaks in it
                 because they are a member, with no list synced anywhere.
             -->
-            <TabsContent value="discussion" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
-                <Card class="min-w-0 shadow-xs">
+            <TabsContent value="discussion" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
+                <Card class="min-w-0">
                     <CardContent class="min-w-0">
                         <MessageThread
                             v-if="tab === 'discussion'"
@@ -285,7 +308,7 @@ function confirmArchiveToggle(): void {
                 </Card>
             </TabsContent>
 
-            <TabsContent value="files" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
+            <TabsContent value="files" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
                 <FilePanel
                     :routes="files"
                     :can-upload="permissions.can_update === true"
@@ -294,8 +317,8 @@ function confirmArchiveToggle(): void {
                 />
             </TabsContent>
 
-            <TabsContent value="activity" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50">
-                <Card class="min-w-0 gap-2 shadow-xs">
+            <TabsContent value="activity" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
+                <Card class="min-w-0 gap-2">
                     <CardHeader>
                         <CardTitle class="text-sm font-medium">Activity</CardTitle>
                     </CardHeader>

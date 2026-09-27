@@ -4,6 +4,7 @@ use App\Exceptions\AttendanceStateException;
 use App\Models\AttendanceRecord;
 use App\Models\AuditLog;
 use App\Models\Employee;
+use App\Models\TimeEntry;
 use App\Models\User;
 use App\Services\AttendanceService;
 use App\Support\AttendanceStatus;
@@ -35,6 +36,15 @@ const ENDPOINT_FRIDAY = '2026-09-18';
 
 beforeEach(function () {
     $this->seed();
+
+    // Phase 10's `WorkSeeder` fills the seeded database with a real month of attendance and
+    // tracked time — which every screen needed and none of these tests do. Each one here is
+    // about the FIRST thing that happens on a day: a clock-in that must be the first of the
+    // day, an Admin creating a day that had no row, a refusal that must write nothing. They
+    // build the day they are about, so they start from an empty pair of tables; the seeded
+    // month is asserted in `tests/Feature/Database/WorkSeederTest.php`.
+    TimeEntry::query()->delete();
+    AttendanceRecord::query()->delete();
 
     $this->admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
     $this->yaseen = User::where('email', 'yaseen@goodtechies.test')->firstOrFail();

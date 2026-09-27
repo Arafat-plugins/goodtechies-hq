@@ -79,7 +79,7 @@ function unreadLabel(row: ConversationSummary): string {
                         :class="
                             cn(
                                 'flex min-w-0 items-center gap-2 rounded-md border-l-2 py-1 pr-2 pl-1.5 text-sm',
-                                'focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
+                                'focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
                                 row.id === activeId
                                     ? 'border-brand bg-brand-tint font-medium hover:bg-brand-tint-strong'
                                     : 'border-transparent hover:bg-accent',

@@ -194,7 +194,7 @@ function confirmDelete(): void {
                 <Link
                     v-if="task.generated_from.can_manage && task.generated_from.project_id"
                     :href="`/admin/projects/${task.generated_from.project_id}`"
-                    class="rounded-sm font-medium text-foreground underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                    class="rounded-sm font-medium text-foreground underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                 >
                     {{ task.generated_from.template }}
                 </Link>

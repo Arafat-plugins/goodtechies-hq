@@ -161,7 +161,7 @@ function iconFor(entry: RecurringLogEntry) {
                             <Link
                                 v-if="entry.task"
                                 :href="`/admin/tasks/${entry.task.id}`"
-                                class="rounded-sm text-xs font-medium underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                                class="rounded-sm text-xs font-medium underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                             >
                                 Open the task it made
                             </Link>
@@ -172,7 +172,7 @@ function iconFor(entry: RecurringLogEntry) {
                             <Link
                                 v-if="entry.previous_open_task"
                                 :href="`/admin/tasks/${entry.previous_open_task.id}`"
-                                class="rounded-sm text-xs font-medium underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                                class="rounded-sm text-xs font-medium underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                             >
                                 Last period is still open
                             </Link>

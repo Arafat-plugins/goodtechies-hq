@@ -208,7 +208,7 @@ const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || prop
         <Link
             :href="href"
             draggable="false"
-            class="min-w-0 rounded-sm text-sm font-medium break-words outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+            class="min-w-0 rounded-sm text-sm font-medium break-words outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring"
         >
             {{ card.title }}
         </Link>

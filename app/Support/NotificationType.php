@@ -106,6 +106,46 @@ enum NotificationType: string
     /** A holder of `announcements.send` broadcast something to everybody. */
     case AnnouncementPosted = 'announcement.posted';
 
+    /* Meetings tab (Phase 7, master prompt Part D §12) ------------------------------------ */
+
+    /**
+     * A meeting was called and you are in it.
+     *
+     * Part D §12: *"participants notified"*. The organiser is not among them — they are the
+     * actor, and `NotificationService::eligible()` drops the actor from every type's recipient
+     * list, so nobody had to remember it here.
+     */
+    case MeetingScheduled = 'meeting.scheduled';
+
+    /**
+     * A meeting you are in **moved**.
+     *
+     * The word is load-bearing. `MeetingService::update()` fires its event on every edit, but
+     * the dispatcher only notifies when `start_at` or `end_at` actually changed: a typo fixed
+     * in the agenda is not news, and a bell that rang for one would be a bell people learn to
+     * ignore before the first sprint is out. The decision lives in `MeetingUpdated::$timeChanged`
+     * — computed where the old and new values are both in hand — rather than in a diff done
+     * twice.
+     */
+    case MeetingUpdated = 'meeting.updated';
+
+    /** A meeting you are in was called off. Linked tasks survive it (Part D §12). */
+    case MeetingCancelled = 'meeting.cancelled';
+
+    /**
+     * It starts in fifteen minutes (Part D §12: *"reminder 15 min before"*).
+     *
+     * The only meeting type that goes to the **organiser as well**, because it is the only one
+     * that is not news about somebody else's decision — it is a clock. `hq:remind-meetings`
+     * fires it with no actor, so nobody is dropped from the list.
+     *
+     * "Exactly once, however often the scheduler runs" is not this enum's doing and not the
+     * schedule's: it is `NotificationService::alreadySentFor()`, asked against these very rows.
+     * The notifications table is the memory, the same way it is for `task.overdue` and
+     * `task.due_tomorrow`. See `SendMeetingReminders`.
+     */
+    case MeetingReminder = 'meeting.reminder';
+
     public function tab(): NotificationTab
     {
         return match ($this) {
@@ -114,6 +154,11 @@ enum NotificationType: string
             self::LeaveCorrectionRequested => NotificationTab::Leave,
             self::MessageReceived, self::MessageMentioned,
             self::AnnouncementPosted => NotificationTab::Messages,
+            // Phase 7 fills the fourth of §11's seven tabs, by adding four cases and mapping
+            // them here. `NotificationTab::Meetings` has existed and been empty since Phase 2,
+            // exactly so that filling it moved nothing either side of it.
+            self::MeetingScheduled, self::MeetingUpdated, self::MeetingCancelled,
+            self::MeetingReminder => NotificationTab::Meetings,
             default => NotificationTab::Tasks,
         };
     }
@@ -137,6 +182,18 @@ enum NotificationType: string
             // the same shape as a review request pointed at a sentence instead of a task, and it
             // is what a reader is buying when they type somebody's name instead of just talking.
             self::MessageMentioned => NotificationPriority::High,
+
+            // Phase 7. Three of the four meeting types are about the next fifteen minutes or
+            // about a plan that has just stopped being true, and all three cost the reader real
+            // time if they are read late: turning up to a cancelled call, missing a moved one,
+            // or missing the start. High is what stops them sinking below a status change in
+            // a bell that is sorted by nothing else.
+            self::MeetingUpdated, self::MeetingCancelled, self::MeetingReminder => NotificationPriority::High,
+
+            // The invitation itself is news about a future day. It belongs in the bell and it
+            // does not belong above the thing somebody is blocked on this afternoon — the same
+            // rank, and the same reasoning, as `task.due_tomorrow`.
+            self::MeetingScheduled => NotificationPriority::Normal,
 
             // Addressed to you, and nothing is blocked until you answer it — the same rank a
             // leave decision gets. An announcement is news for everybody at once; its loudness
@@ -218,6 +275,16 @@ enum NotificationType: string
             // Everything else is news, not a question. There is nothing you can do that means
             // "assignment dealt with" or "comment dealt with" other than reading it, and
             // reading is already a state this table keeps.
+            //
+            // **The four meeting types answer `[]` too, and the invitation is the interesting
+            // one.** An RSVP genuinely does answer `meeting.scheduled` — but this list is
+            // written in the vocabulary of *types the engine writes*, because that is what
+            // `resolveFor()` matches against, and nobody is notified when somebody replies to
+            // an invitation. Inventing a `meeting.rsvp` type nobody receives, purely so that
+            // this line had something to name, would be a notification type that exists to
+            // close another notification: a mechanism with no reader. If Part D ever asks for
+            // the organiser to be told who is coming, that type arrives and this list gains one
+            // entry.
             default => [],
         };
     }
@@ -285,6 +352,19 @@ enum NotificationType: string
             // rule is that none of them says "Accountant".
             self::MessageReceived, self::MessageMentioned,
             self::AnnouncementPosted => Permission::MessagesUse,
+
+            // ## Phase 7, and the same move a third time
+            //
+            // `meetings.use` — the key Phase 7 adds, held by every role but ACCOUNTANT, because
+            // Part D §12 says *"the Accountant has no meetings"* and this repo has refused to
+            // spell a rule like that as a role name three times now (decisions 2-13, 2-31, and
+            // `messages.use` in Phase 6).
+            //
+            // It is the type-shaped half only. The object-shaped half is the `view` gate in
+            // NotificationDispatcher, and for a meeting that gate reads the participant rows —
+            // so a person who holds the key but is not in the room is still told nothing.
+            self::MeetingScheduled, self::MeetingUpdated, self::MeetingCancelled,
+            self::MeetingReminder => Permission::MeetingsUse,
 
             default => Permission::TasksView,
         };
@@ -399,7 +479,51 @@ enum NotificationType: string
             self::AnnouncementPosted => $grouped
                 ? sprintf('%d new announcements', $count)
                 : sprintf('New announcement from %s', self::actor($payload)),
+
+            // Meetings (Phase 7). The time is IN the sentence for the three that are about a
+            // clock, because the first thing a reader wants from any of them is "when", and a
+            // bell row that makes them open the meeting to find out has failed at the one job
+            // it had. It is composed here for the reason every other sentence here is: a screen
+            // that formatted `start_at` itself would be a second place deciding what a meeting
+            // time reads like.
+            self::MeetingScheduled => sprintf('"%s" is scheduled for %s', $title, self::meetingTime($context)),
+
+            // Grouped means the organiser moved it more than once inside the window — two
+            // sentences naming two different times would be a row that contradicts itself, so
+            // the grouped form names the LATEST time and says how many moves it took to get
+            // there. `deliver()` overwrites the payload on every grow, so `$context` is always
+            // the newest one.
+            self::MeetingUpdated => $grouped
+                ? sprintf('"%s" was rescheduled %d times; it now starts %s', $title, $count, self::meetingTime($context))
+                : sprintf('"%s" has moved to %s', $title, self::meetingTime($context)),
+
+            self::MeetingCancelled => sprintf('"%s" was cancelled', $title),
+
+            self::MeetingReminder => sprintf('"%s" starts at %s', $title, self::meetingTime($context)),
         };
+    }
+
+    /**
+     * When a meeting starts, as one phrase: `Thu 1 Oct, 14:30`.
+     *
+     * Rendered in the **application** timezone rather than the reader's, and that is a
+     * deliberate limit rather than an oversight: `users.timezone` exists (Part D §20) but
+     * nothing in the application reads it yet, and a notification that guessed would be the
+     * first thing in the codebase to have an opinion about per-user time. One agency, one
+     * office, one timezone in `settings`. The day the app becomes timezone-aware, this is one
+     * of the places that changes, and it is one place.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private static function meetingTime(array $context): string
+    {
+        $start = trim((string) ($context['start_at'] ?? ''));
+
+        if ($start === '') {
+            return 'a time that is no longer recorded';
+        }
+
+        return Carbon::parse($start)->timezone(config('app.timezone'))->isoFormat('ddd D MMM, HH:mm');
     }
 
     /**

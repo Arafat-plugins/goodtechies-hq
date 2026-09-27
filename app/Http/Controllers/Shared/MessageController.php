@@ -16,7 +16,6 @@ use App\Models\User;
 use App\Services\ConversationService;
 use App\Services\MessageService;
 use App\Support\ConversationType;
-use App\Support\Permission;
 use App\Support\Surface;
 use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Collection;
@@ -225,10 +224,19 @@ class MessageController extends Controller
                 ->all(),
             // Through FileResource unchanged — the same signed expiring URL and the same
             // `permissions` block the bubble and the Files tab get — with the pivot's `kind`
-            // laid beside it, the way MessageResource already does it.
+            // and `duration_seconds` laid beside it, the way MessageResource already does it.
+            //
+            // The length is here for the reason it is on a bubble: a WebM written by
+            // MediaRecorder carries no duration in its header, so `audio.duration` is Infinity
+            // and this column is the only thing that can say how long a recording is before
+            // somebody plays it. A voice note listed here without it would be the one file in
+            // the panel whose size tells the reader nothing useful.
             'files' => $this->conversations->attachmentsIn($conversation)
                 ->map(fn (File $file): array => (new FileResource($file))->resolve($request) + [
                     'kind' => $file->pivot?->kind,
+                    'duration_seconds' => $file->pivot?->duration_seconds === null
+                        ? null
+                        : (int) $file->pivot->duration_seconds,
                 ])
                 ->values()
                 ->all(),
@@ -243,10 +251,20 @@ class MessageController extends Controller
         $base = $this->surfaceBase($user);
 
         return response()->json($payload + [
+            // The status travels as a key, a WORD and a tone (decision M-14). The key was all
+            // this contract carried, so the panel lower-cased and de-underscored it into
+            // something that was neither the status vocabulary the rest of the app prints nor a
+            // colour it was allowed to choose — `in_review` read as "In review" by luck and
+            // `changes_requested` as "Changes requested" by accident. Resolved here through
+            // `label()` and `tone()`, the way TaskResource has always done it, so the panel is a
+            // `StatusBadge` like every other status in the application and no Vue file holds a
+            // second copy of the map.
             'project' => [
                 'id' => (int) $project->getKey(),
                 'name' => (string) $project->name,
                 'status' => $project->status?->value,
+                'status_label' => $project->status?->label(),
+                'status_tone' => $project->status?->tone(),
                 'href' => $base.'/projects/'.$project->getKey(),
             ],
             'tasks' => $this->conversations->projectTasksFor($user, $project)
@@ -254,6 +272,8 @@ class MessageController extends Controller
                     'id' => (int) $task->getKey(),
                     'title' => (string) $task->title,
                     'status' => $task->status?->value,
+                    'status_label' => $task->status?->label(),
+                    'status_tone' => $task->status?->tone(),
                     'href' => $base.'/tasks/'.$task->getKey(),
                 ])
                 ->values()
@@ -269,6 +289,10 @@ class MessageController extends Controller
      * question of posting arises; then MessageService asks `ConversationPolicy::post`, which is
      * what makes the announcements channel read-only for everybody but a holder of
      * `announcements.send` — a 403, because nothing about it is hidden.
+     *
+     * `kind` and `duration` are the composer's mic button: absent for every ordinary post, and
+     * `voice` plus a length in seconds for a recording. The request validates both and this
+     * hands them over unread — see StoreMessageRequest.
      */
     public function store(StoreMessageRequest $request, Conversation $conversation): RedirectResponse
     {
@@ -281,6 +305,8 @@ class MessageController extends Controller
                 $request->body(),
                 $request->upload(),
                 $request->mentionIds(),
+                $request->attachmentKind(),
+                $request->duration(),
             );
         } catch (ConversationStateException|FileStateException $exception) {
             return back()->with('error', $exception->getMessage());
@@ -311,8 +337,8 @@ class MessageController extends Controller
     /**
      * Open the DM with this person, creating it the first time.
      *
-     * The target is resolved through `messageable()`, so somebody who is deactivated or who may
-     * not use messaging is **404** — not a greyed-out button, and not a 403 that would confirm
+     * The target is resolved through `ConversationPolicy::dm`, so somebody who is deactivated or
+     * who may not use messaging is **404** — not a greyed-out button, and not a 403 that would confirm
      * the account exists. That is where *"DMs are 1:1 between any two non-Accountant active
      * users"* is enforced, and it names no role: the Accountant falls out by holding no
      * `messages.use`.
@@ -322,7 +348,10 @@ class MessageController extends Controller
         /** @var User $actor */
         $actor = $request->user();
 
-        abort_unless($this->messageable($user) && (int) $user->getKey() !== (int) $actor->getKey(), 404);
+        // `ConversationPolicy::dm` — both ends active and holding the messaging key, and not
+        // yourself (decision 6-16). 404 rather than 403 for the reason the docblock gives: a
+        // refusal that confirmed the account exists would be the leak.
+        abort_unless($this->mayDm($actor, $user), 404);
 
         $conversation = $this->conversations->dmBetween($actor, $user);
 
@@ -517,21 +546,27 @@ class MessageController extends Controller
             ->where('status', UserStatus::Active->value)
             ->orderBy('name')
             ->get()
-            ->filter(fn (User $user): bool => $this->messageable($user))
-            ->reject(fn (User $user): bool => (int) $user->getKey() === (int) $actor->getKey())
+            ->filter(fn (User $user): bool => $this->mayDm($actor, $user))
             ->map(fn (User $user): array => ['id' => (int) $user->getKey(), 'name' => (string) $user->name])
             ->values()
             ->all();
     }
 
     /**
-     * May this person be sent a direct message at all?
+     * May these two be put in a DM together?
      *
-     * Active, and holding the messaging key. Asked as a permission so the Accountant is absent
-     * from every picker without their role appearing in this file (decisions 2-13, 2-31).
+     * `ConversationPolicy::dm` (decision 6-16), which is the one statement of *"active, and
+     * holding the messaging key — both ends, and not yourself"*. It used to be two private
+     * copies, one here and one in `TeamMemberResource::dmUrl()`, so the picker and the button
+     * could have disagreed about who is reachable.
+     *
+     * The class leads the arguments because the conversation does not exist yet: Laravel resolves
+     * the policy from `Conversation::class` and drops it, so the ability arrives as
+     * `dm($actor, $subject)`. Nothing here restates the rule — the picker's option list and the
+     * endpoint's refusal are the same call.
      */
-    private function messageable(User $user): bool
+    private function mayDm(User $actor, User $subject): bool
     {
-        return $user->isActive() && $user->hasPermission(Permission::MessagesUse);
+        return Gate::forUser($actor)->allows('dm', [Conversation::class, $subject]);
     }
 }

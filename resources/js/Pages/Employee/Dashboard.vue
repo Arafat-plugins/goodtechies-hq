@@ -1,18 +1,23 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { Bell, CalendarClock, CalendarOff, History, MessageSquareWarning, Video } from '@lucide/vue';
+import { Bell, CalendarClock, CalendarDays, CalendarOff, History, MessageSquareWarning } from '@lucide/vue';
 import type { AttendanceDay } from '@/Components/Attendance/attendance';
 import ClockWidget from '@/Components/Attendance/ClockWidget.vue';
+import AttentionList, { type AttentionItem } from '@/Components/Dashboard/AttentionList.vue';
 import TimerHeroCard from '@/Components/Dashboard/TimerHeroCard.vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import type { Holiday } from '@/Components/Holidays/holidays';
 import UpcomingHolidaysCard from '@/Components/Holidays/UpcomingHolidaysCard.vue';
+import type { Meeting } from '@/Components/Meetings/meetings';
+import UpcomingMeetingsCard from '@/Components/Meetings/UpcomingMeetingsCard.vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatCard from '@/Components/StatCard.vue';
 import type { MyTaskBucket } from '@/Components/Tasks/MyTasks.vue';
 import { bucketIcon, bucketSubline } from '@/Components/Tasks/MyTasks.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import { DASHBOARD_POLL_MS } from '@/Components/Realtime/live';
+import { useLiveProps } from '@/Components/Realtime/reload';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import type { TrackingMode } from '@/types';
 import { computed } from 'vue';
@@ -47,6 +52,15 @@ const props = defineProps<{
      */
     upcomingHolidays: Holiday[];
     /**
+     * The next few meetings this person is in, soonest first — one query scoped by
+     * `Meeting::visibleTo()` and capped at five on the server, never the whole table filtered
+     * here. `MeetingResource` rows, so the Join control on this card is the same component,
+     * with the same rules, as the one on the Meetings list and on a meeting's own page.
+     *
+     * Empty is an answer ("nothing in the diary"), not a placeholder.
+     */
+    upcomingMeetings: Meeting[];
+    /**
      * This person's own leave, in three numbers (Part D §9's My Leave card).
      *
      * Null for somebody with no employee record, who has no leave to have. Everything in it is
@@ -59,6 +73,36 @@ const props = defineProps<{
         correction_requested: number;
         href: string;
     } | null;
+    /**
+     * "My Schedule" (Part D §3) — the reader's own week, from `ScheduleService::rowFor()`.
+     *
+     * The same four facts the Admin's schedule editor writes and `/attendance` prints, so the
+     * week cannot be described one way here and another way there. The weekday labels and the
+     * word for office-or-remote both arrive resolved: nothing here maps a `sun` or picks between
+     * "Office" and "Remote", because a second copy of either mapping is a second thing to drift.
+     *
+     * `null` for somebody with no employee record, and for an employee nobody has given a
+     * schedule — the card says which in words rather than drawing a zero-hour week.
+     */
+    schedule: {
+        days: string[];
+        hours_per_day: number;
+        start_time: string | null;
+        location: string;
+        href: string;
+    } | null;
+    /**
+     * "Recent activity" (Part D §3, Part I's spec §23 row) — **the reader's own** task changes.
+     *
+     * `actor_id = the requester` on the server, so there is no shape of this payload that could
+     * carry a colleague's movements: an activity feed of other people is the surveillance Part H
+     * §1 forbids and spec §22 keeps off the Company dashboard. Each row's task is re-checked
+     * against `Task::visibleTo()` before it is sent, because a task can be handed off after
+     * somebody worked on it.
+     *
+     * Empty is an answer — nothing has been touched yet — not a placeholder.
+     */
+    recentActivity: { id: number; title: string; meta: string; href: string }[];
 }>();
 
 /**
@@ -77,23 +121,66 @@ const largestBalance = computed(() =>
 );
 
 /**
- * The panels this page is still waiting on, each naming the phase that brings it.
+ * The week, in one line: `Sun, Mon, Tue, Wed, Thu · 8 h/day · starts 09:00`.
  *
- * **A marker has to name a phase that has not happened.** Two of these said "Arrives in
- * Phase 2" while Phase 2 was shipping the very things they described, which is a placeholder
- * that has stopped being one. Notifications are live, so that panel now points at them
- * (below, outside this list). "Recent activity" is still unbuilt: the master prompt's Part I
- * table maps the employee "Recent activity" list to *Phase 2 / 7*, and Phase 2 closes without
- * it, so 7 is the number the plan itself leaves.
+ * The same sentence `Pages/Admin/Schedules/Index.vue` prints under a person's name, so the week
+ * an Admin set and the week the employee reads are worded identically. Every part of it arrives
+ * resolved from the server — this joins, it does not decide.
  */
-const panels = [
-    { title: 'Upcoming meetings', phase: 7, icon: Video, description: 'Meetings you are invited to will show here.' },
-    // "Upcoming holidays" has left this list: Phase 5 built it, and a marker has to name a
-    // phase that has not happened. It is `UpcomingHolidaysCard` below, reading the same
-    // `HolidayService` the Company dashboard and the attendance grid read — so a holiday says
-    // the same thing on every screen in the application.
-    { title: 'Recent activity', phase: 7, icon: History, description: 'Your latest task changes will show here.' },
-];
+const scheduleSummary = computed(() => {
+    if (!props.schedule) {
+        return null;
+    }
+
+    const days = props.schedule.days.join(', ') || 'No working days set';
+    const start = props.schedule.start_time ? `starts ${props.schedule.start_time}` : 'no start time';
+
+    return `${days} · ${props.schedule.hours_per_day} h/day · ${start}`;
+});
+
+/**
+ * "Recent activity" as `AttentionList` rows — the shared card of linked rows, not a second one
+ * (DESIGN.md §5.8). The icon is chosen here because an icon is a component and cannot travel as
+ * JSON; the sentence, the meta line and the destination are all the server's.
+ */
+const activityItems = computed<AttentionItem[]>(() =>
+    props.recentActivity.map((row) => ({
+        id: row.id,
+        icon: History,
+        title: row.title,
+        meta: row.meta,
+        href: row.href,
+    })),
+);
+
+/* ---------------------------------------------------------------- keeping it current */
+
+/**
+ * The counters and the *Needs your attention* feed re-read themselves — POLISH-BACKLOG §A.3's
+ * dashboard line, *"counters and 'needs your attention' refresh on a timer at minimum"*.
+ *
+ * **A timer, and only a timer, on both builds.** A dashboard has no channel and should not get
+ * one: its props are a dozen aggregate queries over everything this reader may see, so a
+ * "something changed" frame for it would have to be rung by every write in the application and
+ * would say nothing useful when it arrived. §A.4's third rule is answered by saying that out
+ * loud rather than by inventing a `dashboard.{user}` room.
+ *
+ * **Sixty seconds**, because nobody reads a dashboard as a clock and this is the heaviest
+ * controller in the application — a partial reload runs it in full whether it answers thirteen
+ * props or four (see `reload.ts`). Anything faster spends the client's machine on a number that
+ * is the same number. The one figure on this screen that IS read as a clock, the running timer,
+ * does not wait for this: it has its own heartbeat in `Components/Timer/timer.ts`.
+ *
+ * Named props rather than a bare reload: the dates, the holidays and the meetings on this screen
+ * are not what changes minute to minute, and a full reload would replace every prop on the page
+ * including ones a card holds local state against.
+ *
+ * `attendance` is in the list for §A.3's other line: a clock-in from the phone at the door lands
+ * on the dashboard the laptop is showing, within a minute, without a reload.
+ */
+useLiveProps(['taskStats', 'timer', 'attendance', 'leave', 'recentActivity'], {
+    intervalMs: DASHBOARD_POLL_MS,
+});
 </script>
 
 <template>
@@ -179,7 +266,7 @@ const panels = [
                 and a second reader of it here would be the duplicate DESIGN.md §5.8 forbids.
                 It names where they are and opens the Center.
             -->
-            <Card class="min-w-0 gap-4 p-6 shadow-xs">
+            <Card class="min-w-0 gap-4 p-6">
                 <h2 class="text-sm font-medium">Notifications</h2>
                 <EmptyState
                     :icon="Bell"
@@ -199,16 +286,68 @@ const panels = [
                 to hold. No manage link: this shell has no holiday screen to send anybody to,
                 and a control the endpoint would refuse is the lie DESIGN.md §5.11 forbids.
             -->
+            <!--
+                Real rows since Phase 7, in the slot the "Arrives in Phase 7" placeholder used
+                to hold. No create control: the card links to Meetings, which is where one is
+                scheduled, and a second entry point would be a second place for the form to be
+                reached differently.
+            -->
+            <UpcomingMeetingsCard :meetings="upcomingMeetings" />
+
             <UpcomingHolidaysCard :holidays="upcomingHolidays" />
 
-            <Card v-for="panel in panels" :key="panel.title" class="min-w-0 gap-4 p-6 shadow-xs">
-                <h2 class="text-sm font-medium">{{ panel.title }}</h2>
+            <!--
+                "My Schedule" (Part D §3). It is the card that explains the hero above it: whether
+                today is an Off Day and whether 9:07 was late are both answers about this week, and
+                a clock widget reading "Off day" over a page that never says which days are working
+                days is a state nobody can check.
+
+                It links to the reader's own month, where the schedule is shown beside what it
+                produced. No edit control: a schedule is the Admin's to set, and a control the
+                server would refuse is the lie DESIGN.md §5.11 forbids.
+            -->
+            <Card class="min-w-0 gap-4 p-6">
+                <div class="flex min-w-0 items-center justify-between gap-4">
+                    <h2 class="text-sm font-medium">My schedule</h2>
+                    <Link
+                        v-if="schedule"
+                        :href="schedule.href"
+                        class="shrink-0 text-xs text-muted-foreground underline-offset-4 hover:underline"
+                    >
+                        My attendance
+                    </Link>
+                </div>
                 <EmptyState
-                    :icon="panel.icon"
-                    :title="`Arrives in Phase ${panel.phase}`"
-                    :description="panel.description"
+                    v-if="!schedule"
+                    :icon="CalendarDays"
+                    title="No schedule set yet"
+                    description="Nobody has set your working days or hours. An Admin sets them, and until they do no day of yours counts as an off day."
                 />
+                <div v-else class="flex min-w-0 flex-col gap-1">
+                    <p class="text-sm tabular-nums">{{ scheduleSummary }}</p>
+                    <p class="text-xs text-muted-foreground">{{ schedule.location }}</p>
+                </div>
             </Card>
+
+            <!--
+                "Recent activity" (Part D §3, and spec §23 for this surface only). The reader's own
+                task changes, newest first — never anybody else's, which is decided on the server by
+                `actor_id` and not by anything here.
+            -->
+            <!--
+                The wrapping `min-w-0` is not decoration: `AttentionList`'s root `Card` carries
+                none, so in a grid track it grows to fit its longest task title and drags the
+                column past the viewport. Measured at 375 on the Company dashboard.
+            -->
+            <div class="min-w-0">
+                <AttentionList
+                    title="Recent activity"
+                    :items="activityItems"
+                    :empty-icon="History"
+                    empty-title="Nothing yet"
+                    empty-description="Your own task changes show up here — a status moved, a checklist ticked, a link added."
+                />
+            </div>
         </section>
     </PageShell>
 </template>

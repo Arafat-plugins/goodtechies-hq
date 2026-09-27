@@ -16,7 +16,7 @@ const rowCount = computed(() => Array.from({ length: props.rows }, (_, index) =>
 </script>
 
 <template>
-    <div class="overflow-hidden rounded-xl border bg-card shadow-xs" aria-busy="true" aria-live="polite">
+    <div class="overflow-hidden rounded-xl border bg-card shadow-raised" aria-busy="true" aria-live="polite">
         <span class="sr-only">Loading</span>
         <!-- Header row: shorter bars, matching the real `text-xs uppercase` header. -->
         <div class="flex items-center gap-4 border-b bg-muted/40 px-4 py-3">

@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AttendanceRecord;
 use App\Models\Task;
 use App\Models\TimeEntry;
 use App\Models\User;
@@ -33,6 +34,14 @@ beforeEach(function (): void {
     Carbon::setTestNow('2026-09-24 18:00:00');
 
     $this->seed();
+
+    // Every minute asserted below is one this file put there — including the "0m on a day the
+    // timer never ran", which is only true of a day nothing was seeded on. Phase 10's
+    // `WorkSeeder` now seeds two real months of Tapu's tracked time and of office attendance,
+    // so the tables start empty here and the seeded rows are asserted in
+    // `tests/Feature/Database/WorkSeederTest.php`.
+    TimeEntry::query()->delete();
+    AttendanceRecord::query()->delete();
 
     $this->admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
     $this->tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail()->employee;

@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AttendanceRecord;
 use App\Models\Employee;
 use App\Models\User;
 use App\Services\AttendanceService;
@@ -152,6 +153,14 @@ it('shows the same availability word the attendance roster shows', function () {
 })->group('phase6', 'team');
 
 it('reads Present for somebody who clocked in, without saying when', function () {
+    // Phase 10's `WorkSeeder` already recorded this day for him — a Late one, as it happens —
+    // and this test is about the availability word a CLOCK-IN produces. So the day is cleared
+    // first and the clock-in below is the only thing on it.
+    AttendanceRecord::query()
+        ->where('employee_id', $this->yaseen->employee->id)
+        ->whereDate('date', '2026-09-24')
+        ->delete();
+
     app(AttendanceService::class)->clockIn($this->yaseen->employee, Carbon::parse('2026-09-24 08:50:00'));
 
     $row = teamRow(

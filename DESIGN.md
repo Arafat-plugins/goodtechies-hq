@@ -9,6 +9,17 @@ Regenerated 2026-09-20 against `resources/css/app.css` at Phase 0.5 (T1 brand to
 tokens). Every ratio below was measured from `app.css` by script, not estimated. The spec behind
 it is `docs/design-foundation-v1.md`; the reasons are `docs/decisions.md` → Phase 0.5.
 
+**§1.3, §1.5, §2 and §5 brought up to date in Phase 12's polish pass (2026-09-26)**, closing
+POLISH-BACKLOG §E.1, §E.2, §E.3 and §E.17. Two rules in this file were true of the document and
+false of the repo, both because nothing recomputed them: §2.2 measured `--ring` **opaque** while
+the application rendered it at 50 % and 1.90:1, and §5.13's three-step elevation vocabulary had 85
+`shadow-xs` call sites standing against it. The ring is now opaque everywhere, the shadows are the
+three tokens, and **§2.2's ring rows and §2.4 are computed by
+`tests/Unit/FocusRingContrastTest.php`** — it parses the oklch values out of `app.css`, composites,
+and fails under 3:1. `tests/Unit/DesignVocabularyTest.php` greps the source for the classes §5.13
+and §2.2 forbid. A ratio in a table nobody recomputes is exactly how this was wrong for eleven
+phases.
+
 **§4 brought up to date at the Phase 2 close-out (2026-09-23)** — §4.1's bell row, and the new
 §4.8 for `FilePanel`, `TagManagerDialog`, `TaskDiscussionPanel`, `MyTasks`, `NotificationRow`,
 the notification client and the Notification Center. **§1 and §2 were not re-measured and did
@@ -69,7 +80,7 @@ Light ramp steps: `0.985 / 0.97 / 0.922 / 0.70 / 0.52 / 0.30`. Dark mirrors it.
 | `--primary-hover` | `oklch(0.50 0.205 34.4)` `#BC0A00` | `oklch(0.78 0.150 34.4)` `#FF9175` | Hover/pressed on a primary control. Note dark is **lighter** than `--primary`, not darker (decision 0.5-14). |
 | `--primary-foreground` | `oklch(0.99 0 0)` `#FCFCFC` | `oklch(0.1582 0.0118 260.6)` `#0A0D12` | Text on a `--primary` fill. Only on `--primary` — see §6. |
 | `--destructive` | `oklch(0.577 0.245 27.325)` `#E7000B` | `oklch(0.704 0.191 22.216)` `#FF6467` | Delete, revoke, "this cannot be undone", a required-field asterisk, an inline error. shadcn's default, deliberately unchanged (decision 0.5-12). |
-| `--ring` | `var(--brand)` `#F04E27` | `var(--brand)` `#FE6845` | The focus ring, everywhere. `app.css` sets `outline-ring/50` globally; do not restyle focus per component. |
+| `--ring` | `var(--brand)` `#F04E27` | `var(--brand)` `#FE6845` | The focus ring, everywhere, and **always opaque** — `app.css` sets `outline-ring` and a control writes `focus-visible:ring-ring`. Never add an opacity modifier: at 50 % it measures 1.90:1 (§2.2). Do not restyle focus per component; the one exception is a control on a `--primary` fill, which uses `ring-primary-foreground` because `--ring` is 1.43:1 there. |
 | `--radius` | `0.75rem` (12 px) | same | Exposed as `rounded-sm` (8) / `rounded-md` (10) / `rounded-lg` (12) / `rounded-xl` (16). Cards are `rounded-xl`, controls `rounded-md`. |
 | `--font-sans` | `'Inter', ui-sans-serif, system-ui, sans-serif` | same | Applied to `body`. Inter is loaded from fonts.bunny.net in `resources/views/app.blade.php`. |
 
@@ -127,12 +138,36 @@ bad" colours in the app, and nothing introduces a third.
 
 | Variable | Light | Dark | Use it for |
 | --- | --- | --- | --- |
-| `--elevation-flat` / `shadow-flat` | `none` | `none` | Table rows, list items, nav rows. Things that sit *in* a surface. |
+| `--elevation-flat` / `shadow-flat` | `0 0 #0000` | `0 0 #0000` | Table rows, list items, nav rows. Things that sit *in* a surface. A **transparent** shadow, never the keyword `none` — see below. |
 | `--elevation-raised` / `shadow-raised` | `0 1px 2px 0 oklch(0 0 0/.05), 0 1px 3px 0 oklch(0 0 0/.06)` | `…/.30`, `…/.36` | Cards and panels — one step above the canvas. |
 | `--elevation-overlay` / `shadow-overlay` | `0 10px 15px -3px oklch(0 0 0/.10), 0 4px 6px -4px oklch(0 0 0/.10)` | `…/.50`, `…/.50` | Dialog, popover, drawer, command palette, toast. |
 
 Dark carries its own deeper values because a 5 % black shadow is invisible on `#0A0D12`
 (decision 0.5-10). **The rule: one surface may not sit on another at the same elevation.**
+
+**Why `shadow-xs` kept coming back.** `app.css` adds these three to the `--shadow-*` namespace and
+never clears Tailwind's own scale, so `shadow-xs` / `shadow-sm` / `shadow-md` / `shadow-lg` all
+still compile. Nothing broke when an agent wrote one, so three agents in three slices matched their
+neighbours instead of the token set — 85 `shadow-xs` call sites, and `Components/ui/card/Card.vue`
+itself generated with `shadow-sm`. Phase 12's polish pass swept them: **the card's elevation now
+lives on `Card.vue` as `shadow-raised`**, which is why a page writes `<Card class="min-w-0 gap-4">`
+and no shadow at all; an overlay primitive is `shadow-overlay`; a control (input, outline button,
+toggle, checkbox) is `shadow-flat`. `tests/Unit/DesignVocabularyTest.php` fails on a reintroduction,
+because the class working is not the same as the class being allowed.
+
+**And `--elevation-flat` is `0 0 #0000`, not `none`, because `none` deleted the focus ring.**
+Tailwind v4 composes one `box-shadow` out of five custom properties —
+`var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow),
+var(--tw-ring-shadow), var(--tw-shadow)` — and the keyword `none` is legal only as the *sole* value
+of `box-shadow`. With `--elevation-flat: none` the whole list was invalid CSS, the declaration was
+dropped, and the computed value fell back to `none`, taking `--tw-ring-shadow` with it. Every
+control carrying `shadow-flat` — input, textarea, select, native select, checkbox, radio, switch,
+toggle, outline button, pin-input slot — then painted **no focus ring at all**, with
+`:focus-visible` matching and `focus-visible:ring-3 focus-visible:ring-ring` sitting on the element.
+Measured in Chromium on 2026-09-26: `getComputedStyle(el).boxShadow === 'none'`. This is the second
+way the ring vanishes and it has nothing to do with opacity, so §2.2's ratios cannot catch it;
+`tests/Unit/DesignVocabularyTest.php` asserts no `--elevation-*` is the keyword `none`. `0 0 #0000`
+is what Tailwind's own `shadow-none` sets, for this reason.
 
 ### 1.6 Chart — T8 / decision 0.5-4
 
@@ -195,6 +230,18 @@ WCAG 2.x relative luminance on sRGB after gamut clipping, computed by parsing th
 straight out of `app.css`. Translucent tokens (`oklch(1 0 0 / 10%)`) are composited over the
 surface named in the row. Body text is held to 4.5:1; graphics, marks and boundaries to 3:1.
 
+**A ratio here has to be a number something recomputes.** §2.2's ring rows said 3.45:1 ✅ for
+eleven phases while the screen showed 1.90:1, because the table measured the token and the
+application rendered it at 50 % — and a markdown table does not notice. The focus-indicator rows
+and §2.4 are now computed by `tests/Unit/FocusRingContrastTest.php`, which reads `app.css`, follows
+the `var()` chains, reads the opacity off the global `@apply … outline-ring` rule, composites and
+fails under 3:1. The other rows were measured by the Phase 0.5 script and are unchanged.
+
+The Phase 12 helper quantises each channel to 8 bits before compositing — which is what a screen
+does — where the Phase 0.5 script stayed in floats, so a few rows differ by up to 0.03 (`--primary`
+/ `--primary-foreground` reads 5.01 here and 4.99 below). Neither is wrong and no row changes side
+of a threshold; the older figures are left as measured rather than churned.
+
 ### 2.1 Text on a surface — 4.5:1
 
 | Pair | Light | Dark |
@@ -240,8 +287,6 @@ button and badge render `bg-destructive/60` over `--card` in dark, which is the 
 | --- | --- | --- |
 | `--brand` / `--background` | 3.45:1 ✅ | 6.73:1 ✅ |
 | `--brand` / `--card` | 3.61:1 ✅ | 6.13:1 ✅ |
-| `--ring` / `--background` (focus indicator) | 3.45:1 ✅ | 6.73:1 ✅ |
-| `--ring` / `--card` | 3.61:1 ✅ | 6.13:1 ✅ |
 | `--sidebar-rail` / `--sidebar` | 3.45:1 ✅ | 6.26:1 ✅ |
 | `--sidebar-rail` / `--sidebar-accent` (rail on the active row's fill) | 3.26:1 ✅ | 5.45:1 ✅ |
 | `--chart-1` / `--card` | 3.61:1 ✅ | 6.13:1 ✅ |
@@ -262,6 +307,73 @@ button and badge render `bg-destructive/60` over `--card` in dark, which is the 
 | `--border` / `--card` (hairline) | 1.26:1 ❌ | 1.33:1 ❌ |
 | `--input` / `--card` (field boundary) | 1.26:1 ❌ | 1.33:1 ❌ |
 
+#### The focus indicator — measured as rendered, not as declared
+
+Every row below is composited the way the browser composites it and recomputed by
+`tests/Unit/FocusRingContrastTest.php`. WCAG 2.2 §1.4.11 asks 3:1 of a focus indicator.
+
+| Focus indicator, as rendered | Light | Dark |
+| --- | --- | --- |
+| `--ring` / `--background` | 3.45:1 ✅ | 6.75:1 ✅ |
+| `--ring` / `--card` (= `--popover`) | 3.61:1 ✅ | 6.15:1 ✅ |
+| `--ring` / `--muted` (= `--secondary`, `--accent`) | 3.30:1 ✅ | 5.39:1 ✅ |
+| `--ring` / `--sidebar` | 3.45:1 ✅ | 6.28:1 ✅ |
+| `--ring` / `--brand-tint` (= `--sidebar-accent`, the selected row) | 3.25:1 ✅ | 5.47:1 ✅ |
+| `--primary-foreground` / `--primary` (the DM bubble's own ring) | 5.01:1 ✅ | 7.31:1 ✅ |
+| `--destructive` / `--background` (destructive button, badge, invalid field) | 4.56:1 ✅ | 6.74:1 ✅ |
+| `--destructive` / `--card` | 4.77:1 ✅ | 6.15:1 ✅ |
+| `--destructive` / `--muted` | 4.37:1 ✅ | 5.39:1 ✅ |
+| `--ring` / `--accent` — the **inset** ring on a highlighted menu, command or select item | 3.30:1 ✅ | 5.39:1 ✅ |
+| `--destructive` / `--accent` — the same ring on a destructive menu item | 4.37:1 ✅ | 5.39:1 ✅ |
+
+And the same tokens at the opacities the repo shipped from Phase 0.5 to Phase 12, kept because they
+are the whole of POLISH-BACKLOG §E.1 and because a row that only says ✅ teaches nobody anything:
+
+| What shipped until 2026-09-26 | Light | Dark |
+| --- | --- | --- |
+| `--ring`/50 / `--background` — `outline-ring/50`, `focus-visible:ring-ring/50` | 1.90:1 ❌ | 2.45:1 ❌ |
+| `--ring`/50 / `--card` | 1.92:1 ❌ | 2.43:1 ❌ |
+| `--ring`/50 / `--muted` | 1.86:1 ❌ | 2.31:1 ❌ |
+| `--ring`/50 / `--primary` — a control in a DM's own bubble | 1.20:1 ❌ | 1.04:1 ❌ |
+| `--destructive`/20 light, /40 dark / `--background` — shadcn's destructive and `aria-invalid` ring | 1.43:1 ❌ | 1.96:1 ❌ |
+
+Three things that follow from those rows, all of them now in the code:
+
+- **The ring is opaque everywhere.** `app.css` applies `outline-ring`, and a control writes
+  `focus-visible:ring-ring`. An opacity modifier on a focus ring fails
+  `tests/Unit/DesignVocabularyTest.php`.
+- **A menu item's highlight is not a focus indicator, so it also carries a ring.** shadcn ships
+  `DropdownMenuItem`, its checkbox/radio/sub-trigger siblings, `SelectItem`, `CommandItem` and
+  `ComboboxItem` with `outline-hidden` and nothing but `focus:bg-accent` to say where the keyboard
+  is. `--accent` on `--popover` is **1.05:1** in both themes, so arrowing down a menu moved an
+  indicator nobody could see, and it was invisible to §E.1's sweep because there was no ring class
+  to find. Each of those seven now adds `ring-2 ring-ring ring-inset` on the same state, keeping
+  `bg-accent` as the second carrier (§6). The ring is **inset** because the items are flush inside
+  a `p-1` container: an outside ring would overlap its neighbour and clip at the edge. Inset, it is
+  drawn over the item's own `--accent` fill at 3.30:1 / 5.39:1, and on a destructive item over
+  `--destructive` at 4.37:1 / 5.39:1.
+- **`--ring` cannot go on a `--primary` fill.** At 1.43:1 light and 1.08:1 dark it is invisible
+  rather than weak, and no opacity rescues it — it is the same hue two lightness steps away. A
+  control inside a DM's own bubble paints `ring-primary-foreground` instead (§2.4).
+- **The `aria-invalid` ring is a focus indicator.** `aria-invalid:ring-destructive` sets only the
+  ring *colour*; the width comes from the control's own `focus-visible:ring-3`, so it paints nothing
+  until the field is focused and what it paints then is the focus ring, recoloured. At `/20` it
+  replaced a 3.45:1 indicator with a 1.43:1 one on exactly the fields a person is most likely to be
+  tabbing through. Opaque, it is 4.56:1.
+
+One ratio is recorded and never rendered: `--ring` / `--brand-tint-strong` (hover on an
+already-selected row) is **2.92:1 ❌** light, 4.50:1 ✅ dark. A Tailwind ring is drawn *outside* the
+element's box, so a row that is hovered *and* focused paints its ring over `--sidebar` at 3.45:1,
+not over its own hover fill. The test asserts the number rather than the threshold, so a token move
+forces a recompute instead of a surprise.
+
+Two rings keep an alpha on purpose, and neither is a focus indicator:
+`Tasks/Gantt/GanttBar.vue`'s `ring-ring/40` (armed) and `ring-ring/60` (staged). Armed only happens
+while the bar is focused, so the opaque `focus-visible:ring-ring` is what is painted then — a
+`:focus-visible` rule outranks an unqualified one. Those two are a second, weaker mark separating
+armed from staged, and both states are also in the button's accessible name and in
+`data-gantt-staged`, so §6 is satisfied without them.
+
 **Why each ❌ here is recorded rather than fixed:**
 
 - **Status dots and status borders** are decoration on a badge that always prints its label —
@@ -274,8 +386,8 @@ button and badge render `bg-destructive/60` over `--card` in dark, which is the 
 - **`--border` and `--input`** are shadcn's own hairlines. A separator is decorative. A *field*
   boundary is not — a text input identified only by a 1.26:1 hairline is a genuine 1.4.11
   shortfall in the shadcn default, and it is recorded here so nobody re-derives it. It is not
-  fixed in this file's scope; the focus state is fine (`--ring` at 3.45:1) and `aria-invalid`
-  swaps the border to `--destructive`.
+  fixed in this file's scope; the focus state is fine (`--ring` at 3.45:1, opaque, since 2026-09-26)
+  and `aria-invalid` swaps the border to `--destructive` at 4.56:1.
 
 ### 2.3 The recorded failure that is a rule
 
@@ -289,6 +401,35 @@ button and badge render `bg-destructive/60` over `--card` in dark, which is the 
 purpose: if a task ever puts text on a `--brand` fill, this is the row that says why it must not.
 The dark value passes, which changes nothing — a rule that only holds in one theme is not a rule
 anyone can follow in a template. **`--brand` is graphics only, in both modes.**
+
+### 2.4 The chat — decision M-23
+
+The colour treatment the chat slice shipped, recomputed by `tests/Unit/FocusRingContrastTest.php`.
+It arrived without a row in this file, which is POLISH-BACKLOG §E.2.
+
+A DM draws the viewer's own messages in a solid `--primary` bubble and everyone else's in `--muted`
+with a hairline; a channel keeps one list and tints the viewer's own row `--brand-tint` instead. So
+`--primary` is a **fill behind text** here, which is exactly what `--primary` exists for (§2.3) and
+exactly what `--brand` may never be.
+
+| Pair | Where | Light | Dark |
+| --- | --- | --- | --- |
+| `--primary-foreground` / `--primary` | the body text and the clock inside the viewer's own DM bubble | 5.01:1 ✅ | 7.31:1 ✅ |
+| `--primary` / `--primary-foreground` | the "Mentions you" chip on that bubble — the pair inverted | 5.01:1 ✅ | 7.31:1 ✅ |
+| `--foreground` / `--muted` | the other person's bubble | 12.48:1 ✅ | 14.26:1 ✅ |
+| `--foreground` / `--brand-tint` | the viewer's own row in a channel | 12.27:1 ✅ | 14.47:1 ✅ |
+| `--primary-foreground` / `--primary` — as a **mark** | the mention `ring-2` on the viewer's own bubble, and the focus ring of any control inside it | 5.01:1 ✅ | 7.31:1 ✅ |
+| `--primary` / `--muted` — as a **mark** | the mention `ring-2` on the other person's bubble | 4.71:1 ✅ | 5.85:1 ✅ |
+
+Three things this table is load-bearing for:
+
+- **The clock is `--primary-foreground`, not a muted grey**, and it is the size that makes it quiet.
+  Any alpha on top of 5.01:1 puts it under 4.5:1.
+- **A mention is a ring, not a left bar and not a tint**, because it has to survive on both fills —
+  and the words *"Mentions you"* are printed on every row of the run, so the ring is the second
+  carrier and never the only one (§6).
+- **The bubble's side and its squared tail corner** carry who spoke, so the fill is not doing that
+  alone either.
 
 ---
 
@@ -485,6 +626,16 @@ Each one with the reason it exists. These apply to this phase and every phase af
 3. **Never show more than one accent hue.** `--brand` plus the neutral ramp plus the six
    `--status-*` is the entire palette. The logo spends its accent on one dot; so does a screen —
    **orange appears once per screen**, and if it appears three times, two of them are wrong.
+
+   **The one carve-out: a DM thread.** A conversation of the viewer's own messages is a column of
+   `--primary` bubbles, which is not "once per screen" by any reading. It is still the rule and not
+   an exception to it, because the rule is about *spending* the accent: on every other screen the
+   orange marks the one thing that matters, and in a DM the viewer's own half of the conversation
+   **is** the content — the accent is carrying the one distinction the screen exists to make, which
+   is who said what. Two things keep it from becoming a licence: the fill is `--primary` and never
+   `--brand` (§5.2 is untouched, and §2.4 is the measurement), and the side of the thread plus the
+   squared tail corner carry the same distinction without colour. Nothing else on a Messages screen
+   spends orange a second time. Do not read this as permission to tint a list somewhere else.
 4. **Never use off-scale spacing.** Tailwind's 4 px scale only; no `p-[13px]`, no `text-[11px]`,
    no arbitrary `w-[220px]`. Off-scale values are what make two screens built a month apart fail
    to line up.
@@ -518,8 +669,23 @@ Each one with the reason it exists. These apply to this phase and every phase af
     `NotificationBell` degrade to nothing, not to greyed-out menus. Unbuilt nav rows live in the
     one closed *Coming soon* disclosure, never in their groups (decision 0.5-3).
 13. **Never let one surface sit on another at the same elevation.** Three steps only:
-    `shadow-flat` for rows, `shadow-raised` for cards, `shadow-overlay` for overlays. No ad-hoc
-    `shadow-xs` / `shadow-sm` / `shadow-lg`.
+    `shadow-flat` for rows, list items and controls, `shadow-raised` for cards and panels,
+    `shadow-overlay` for dialogs, popovers, drawers and menus. No ad-hoc `shadow-xs` /
+    `shadow-sm` / `shadow-md` / `shadow-lg` / `shadow-none`.
+
+    **This rule and the repo disagreed for eleven phases and the repo was the one that was wrong**
+    (POLISH-BACKLOG §E.3, §E.17; flagged by three agents in three slices). `app.css` defines exactly
+    `--elevation-flat` / `-raised` / `-overlay` and exposes exactly `--shadow-flat` / `-raised` /
+    `-overlay`; it defines no `shadow-xs` and never has. What it also does not do is *clear*
+    Tailwind's own `--shadow-*` namespace, so `shadow-xs` compiled, looked fine, and got copied 85
+    times. Since this file is generated from `app.css`, `app.css` settles it: the vocabulary is
+    three and the call sites were drift. Phase 12's polish pass swept them.
+
+    **A `<Card>` now carries its own elevation** — `Components/ui/card/Card.vue` is `shadow-raised`
+    — so a page writes `<Card class="min-w-0 gap-4">` and adds no shadow class at all. That is the
+    part that stops this recurring: there is no longer a shadow to get wrong at a call site.
+    `tests/Unit/DesignVocabularyTest.php` greps for the off-vocabulary classes and names the file
+    and line.
 14. **Never ship a gradient promo, upsell or marketing card.** This is an internal tool; nobody
     in it needs to be sold to.
 15. **Never put an emoji in a page heading.** The greeting text stays; `👋` does not.

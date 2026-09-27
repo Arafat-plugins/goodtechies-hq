@@ -396,6 +396,44 @@ it('gives the accountant no inbox at all', function () {
     expect($this->conversations->inboxFor($this->accountant))->toHaveCount(0);
 })->group('phase6');
 
+it('keeps the inbox candidate query composable — a constraint added after it still binds to all of it', function () {
+    // Decision M-16. `inboxFor()` used to build its candidates with
+    // `whereIn('type', …)->orWhere(fn …dmsFor…)`, which compiles to
+    // `type IN (…) OR (type = 'dm' AND …)`: an UNGROUPED `OR`, correct only because the DM arm
+    // restates its own type, and wrong the instant anybody appended a constraint — the new
+    // `where` would bind to the left arm alone and every DM in the table would walk past it.
+    //
+    // This asserts composability rather than SQL text, because that is the property the next
+    // person will rely on: narrow the candidates to ONE conversation and exactly that one comes
+    // back. Both halves are here, because the fix is only a fix if the bug was real — the
+    // ungrouped builder is rebuilt inline below and leaks, and the scope, asked the same
+    // question, does not.
+    $dm = $this->conversations->dmBetween($this->admin, $this->yaseen);
+    $team = $this->conversations->team();
+
+    // What the service used to do, with one constraint appended. `id = <team id>` binds to the
+    // `type = 'dm'` arm alone, so the channels come back unfiltered — including the
+    // announcements channel and every project's.
+    $leaky = Conversation::query()
+        ->whereIn('type', ['team', 'announcement', 'project'])
+        ->orWhere(fn ($query) => $query->dmsFor($this->admin))
+        ->whereKey($team->getKey())
+        ->get();
+
+    expect($leaky->pluck('id')->all())->not->toBe([$team->id])
+        ->and($leaky->count())->toBeGreaterThan(1);
+
+    $narrowed = Conversation::query()
+        ->inboxCandidatesFor($this->admin)
+        ->whereKey($team->getKey())
+        ->get();
+
+    expect($narrowed->pluck('id')->all())->toBe([$team->id])
+        // And the scope still answers the question it is for: the DM is a candidate.
+        ->and(Conversation::query()->inboxCandidatesFor($this->admin)->pluck('id')->all())
+        ->toContain($dm->id);
+})->group('phase6');
+
 it('counts what somebody has not read in each room, and never counts their own', function () {
     $team = $this->conversations->team();
 

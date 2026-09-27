@@ -270,16 +270,16 @@ it('delivers on the in-app channel and on no other', function () {
 })->group('phase2');
 
 it('puts every built type on a built tab and fakes none of the others', function () {
-    // **Leave joined the built tabs in Phase 5 and Messages in Phase 6**, which is
-    // `NotificationTab::isBuilt()` working as designed rather than an exception: it is derived
-    // from the catalogue, so a tab lights up by a type naming it and by nothing else. Meetings
-    // and Payroll are still empty and still say "arrives in Phase N" instead of showing an
-    // empty list that looks like a bug.
+    // **Leave joined the built tabs in Phase 5, Messages in Phase 6 and Meetings in Phase 7**,
+    // which is `NotificationTab::isBuilt()` working as designed rather than an exception: it is
+    // derived from the catalogue, so a tab lights up by a type naming it and by nothing else.
+    // Payroll is still empty and still says "arrives in Phase N" instead of showing an empty
+    // list that looks like a bug.
     expect(NotificationTab::Tasks->isBuilt())->toBeTrue()
         ->and(NotificationTab::System->isBuilt())->toBeTrue()
         ->and(NotificationTab::Leave->isBuilt())->toBeTrue()
         ->and(NotificationTab::Messages->isBuilt())->toBeTrue()
-        ->and(NotificationTab::Meetings->isBuilt())->toBeFalse()
+        ->and(NotificationTab::Meetings->isBuilt())->toBeTrue()
         ->and(NotificationTab::Payroll->isBuilt())->toBeFalse();
 
     foreach (NotificationType::cases() as $type) {
@@ -288,6 +288,7 @@ it('puts every built type on a built tab and fakes none of the others', function
             NotificationTab::System,
             NotificationTab::Leave,
             NotificationTab::Messages,
+            NotificationTab::Meetings,
         ]);
     }
 })->group('phase2');

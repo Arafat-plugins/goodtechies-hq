@@ -145,7 +145,13 @@ it('groups a resubmission into the approver existing row and says so', function 
 
     // One row, count 2, and a plural sentence — without the plural branch the second filing
     // would have said exactly what the first said (the bug decision 2-46 records).
-    expect(Notification::where('user_id', $this->faruk->id)->count())->toBe(1)
+    // Scoped to the leave type rather than to Faruk's whole mailbox: from Phase 7 the seeded
+    // database puts meeting rows in it too (MeetingSeeder schedules its demo meetings through
+    // MeetingService, so the participants are notified like anybody else). The claim is about
+    // grouping leave requests, and this is that claim said exactly.
+    expect(Notification::where('user_id', $this->faruk->id)
+        ->where('type', NotificationType::LeaveRequested->value)
+        ->count())->toBe(1)
         ->and($row->count)->toBe(2)
         ->and($row->summary())->toContain('has updated a leave request');
 });

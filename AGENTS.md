@@ -54,9 +54,13 @@ UI surfaces (Admin, Employee, Accountant) and **privacy by role is enforced on t
 
 ### Surfaces
 Regenerated **2026-09-23** at the Phase 2 close-out from `php artisan route:list --except-vendor`
-(107 routes, plus the framework's `GET /up`). It now covers Phase 2's tasks, board, calendar,
-my-tasks, tags, files, discussion and notification routes. `route:list` is still the source of
-truth; this table is the map.
+(107 routes, plus the framework's `GET /up`). It covers everything up to Phase 2's tasks, board,
+calendar, my-tasks, tags, files, discussion and notification routes, and **has not been
+regenerated since** — Phases 3-10 added recurring tasks, the timer and timesheets, leave and
+holidays, messaging and voice, meetings, finance, payroll, global search, the Gantt view and
+reports without touching it. So a route missing from this table means the table is old, never
+that the route does not exist. **`php artisan route:list --except-vendor` is the source of
+truth**; this table is a map of the oldest third of it. Regenerating it is Phase 12's close-out.
 Every page opens with `PageShell`; admin lists use `DataTable` + the chip `FilterBar`; an
 unbuilt panel is `Card` + `EmptyState`. See DESIGN.md §4.
 
@@ -175,21 +179,54 @@ overloaded so asking for one is a compile error rather than a 404 found in stagi
 The local cloud workspace has PostgreSQL 16 on `127.0.0.1:5432`, superuser `postgres`, trust auth (dev only), and Redis on `127.0.0.1:6379`.
 
 ## Known-failing baseline
-Measured 2026-09-24 after messaging live sync (ConversationActivity + live.ts) with
-`php vendor/bin/pest`: none failing (**1631 passed, ~8573 assertions**). The suite now exceeds a 10-minute tool timeout, so it is run in two halves — see the note below.
+Measured 2026-09-26 after Phase 12's **UX polish pass** (live sync, the focus-ring sweep, the
+§C.3 correctness follow-ups) with `php vendor/bin/pest`: none failing (**2776 passed, ~17799
+assertions**). The suite outgrows a 10-minute tool timeout repeatedly: two parts from Phase 6,
+three from Phase 8, four from Phase 10's search slice, six from Phase 10's reports slice, eight
+from Phase 12's admin-tools and cutover slices, and **NINE as of the polish pass**.
 `vendor/bin/pint --test`: passed. `npx vue-tsc --noEmit`: passed. `npm run build`: passed. If
-your number is not 1631, that is a finding, not drift.
+your number is not 2776, that is a finding, not drift.
+
+**How the previous baseline was checked rather than replaced.** The polish agent measured 602 on
+part 6 against the 565 written here and reported the 37 as a possible finding rather than
+absorbing it — which is what this paragraph asks for, and it was right to. The 37 resolved
+exactly: `Surfaces/ShellPropTest.php` (11 `it()` blocks, **21** tests), `Realtime/TaskBroadcastTest.php`
+(9 blocks, **11**) and `Surfaces/NavigationTest.php` (3) are all new files in part 6's folders,
+and the two modified `Services` files gained one test each — 35 + 2 = 37. The old eight numbers
+also still summed to their own stated 2697, so the block was internally consistent and simply
+predated three files. **Count with Pest, not with `grep -c "^it("`**: a `->with([...])` dataset is
+one block and many tests, and that is where the first attempt at this arithmetic went wrong.
 
 **Two concurrent agents must not share a dev-server port.** `php artisan serve` defaults to
 the same port for both; the loser silently reads the winner's database, and three measurement
 runs went unnoticed that way. Pick a distinct port, and check what answered before trusting it.
 
-**The suite no longer finishes inside a 10-minute tool timeout** — it is about 12 minutes in one
-process. Run it in two halves and add the numbers:
+**The suite no longer finishes inside a 10-minute tool timeout.** Run it in these **nine** parts
+and add the numbers — each one measured under 10 minutes on 2026-09-26, and they cover `tests/`
+exactly once between them.
+
+The split has grown three times in Phase 12 and every time for the same reason — a slice put
+enough tests into one folder that its line stopped fitting. `tests/Feature/Admin` took a line of its own
+when the audit viewer and the settings screens added 62; `Console` and `Reports` were cut out of
+line 2 when the ClickUp importer added 33 and the old line ran past ten minutes.
+`tests/Feature/Performance` sits on line 1 with the other structural suites: it measures query
+counts per surface through real HTTP and fails when one grows past its ceiling.
 ```
-php vendor/bin/pest tests/Unit tests/Permissions tests/Feature/{Leave,Workforce,Attendance,Console,Database,Resources,Policies,Privacy}
-php vendor/bin/pest tests/Feature/{Admin,Employee,Services,Shared,Surfaces,Auth,Middleware,Profile,Backup} tests/Feature/ScheduleTest.php tests/Feature/ExampleTest.php
+php vendor/bin/pest tests/Unit tests/Permissions tests/Feature/{Database,Performance}         # 408
+php vendor/bin/pest tests/Feature/{Leave,Workforce,Attendance,Resources,Policies,Privacy}     # 439
+php vendor/bin/pest tests/Feature/{Console,Reports}                                          # 165
+php vendor/bin/pest tests/Feature/Admin                                                      # 338
+php vendor/bin/pest tests/Feature/{Employee,Auth,Middleware,Profile,Backup} tests/Feature/ScheduleTest.php tests/Feature/ExampleTest.php   # 233
+php vendor/bin/pest tests/Feature/{Services,Surfaces}                                        # 461
+php vendor/bin/pest tests/Feature/{Search,Team,Realtime}                                     # 141
+php vendor/bin/pest tests/Feature/{Shared,Finance,Payroll}                                   # 391
+php vendor/bin/pest tests/Feature/{Meetings,Messages,Tasks}                                  # 200
 ```
+The part list is not decorative: three earlier groupings in this file silently stopped covering
+folders that were added after them (`Finance`, `Search`, `Reports`, `Tasks`, `Team`, `Realtime`,
+`Meetings`, `Messages`, `Payroll` were all outside the two halves that used to be written here,
+so "the suite passed" meant nine folders nobody ran). **When you add a `tests/Feature/` folder,
+add it to one of these lines in the same commit.**
 
 **A focus ring fades in.** Every shadcn control carries `transition-all`, so a computed style
 read in the same tick as a `Tab` samples the transition's *start* and reports a painted ring as
@@ -197,6 +234,28 @@ missing. Wait ~260-300ms. And a Tailwind ring is a *list* of shadows whose first
 transparent placeholder, so `box-shadow !== 'none'` is a false pass — parse per layer and require
 a non-transparent colour with non-zero geometry. Both directions of this have produced wrong
 measurements in this repo. Safest: press real `Tab` keys and diff focused/blurred screenshots.
+
+**Faker's `catchPhrase()` contains the words this repo forbids.** `ProjectFactory` names a
+project with it, and en_US catch-phrases are built from a word list that literally includes
+*productivity*, *efficiency* and *synergy* — so any test that greps a rendered payload for
+score-words and builds its data with `Project::factory()` fails **when the dice come up that
+way**, roughly one run in a few dozen, on a clean tree, with nothing in the diff. It fired on
+26 Sep 2026 and passed on the immediate re-run, which is the worst shape a failure can have. A
+payload-scanning test pins its own names (`tests/Feature/Employee/TimeScreenTest.php` shows how);
+it does not weaken the scan, because a score-word hiding inside a label is exactly what the scan
+is for. The other four no-score tests read seeded data and are deterministic.
+
+**`activity_logs` is polymorphic, so an id is only unique WITHIN a type.** A `->where('object_id',
+$x)->sole()` with no `object_type` found two rows and failed on a clean tree, because an employee
+id and a meeting id happened to be the same number. Scope on both, always.
+
+**A test that pins an absolute date will collide with the seed eventually.** `TaskSeeder` dates
+its work RELATIVELY (`'due' => 25`), so which calendar day a seeded task lands on depends on the
+day you run the suite. `NotifyTasksDueTomorrowTest` pinned `2026-10-20` and counted reminders;
+on 26 Sep 2026 — twenty-five days earlier — a seeded task landed on its "tomorrow" and six of
+its tests failed having passed every previous morning, with nothing in the diff to explain it.
+A test that counts things must **clear the window it measures** rather than hope the seed missed
+it. 23 test files pin an absolute date; that one is the only known collision so far.
 
 **A test file's constants and functions are GLOBAL in Pest.** Two files defining `ENDPOINT_MONDAY`
 silently gave one of them the other's date: each file passed alone and the suite failed. Prefix

@@ -21,6 +21,7 @@ import {
 } from '@/Components/ui/dialog';
 import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { useMenuDialog } from '@/lib/menuFocus';
 import { resetQuery } from '@/lib/tableState';
 import { useNavigationPending } from '@/lib/useNavigationPending';
 
@@ -82,11 +83,23 @@ const loading = useNavigationPending();
 const pendingClient = ref<Client | null>(null);
 const deactivating = ref(false);
 
-/** Let the dropdown finish closing before the dialog takes the focus trap. */
+/**
+ * Decision 5-20: the confirmation is opened from a `DropdownMenuItem`, which the `⋯` menu has
+ * unmounted by the time reka tries to restore focus to it — so the restore landed on `<body>`.
+ * `openFromMenu` captures the row's `⋯` trigger and defers the dialog by a tick; `closeDeactivate`
+ * is the one way out for focus. See `lib/menuFocus.ts`.
+ */
+const menu = useMenuDialog();
+
 function askToDeactivate(client: Client): void {
-    setTimeout(() => {
+    menu.openFromMenu(() => {
         pendingClient.value = client;
-    }, 0);
+    });
+}
+
+function closeDeactivate(): void {
+    pendingClient.value = null;
+    menu.returnFocus();
 }
 
 function confirmDeactivate(): void {
@@ -105,7 +118,7 @@ function confirmDeactivate(): void {
             preserveScroll: true,
             onFinish: () => {
                 deactivating.value = false;
-                pendingClient.value = null;
+                closeDeactivate();
             },
         },
     );
@@ -199,7 +212,7 @@ function confirmDeactivate(): void {
         </div>
     </PageShell>
 
-    <Dialog :open="pendingClient !== null" @update:open="(open) => (pendingClient = open ? pendingClient : null)">
+    <Dialog :open="pendingClient !== null" @update:open="(open) => { if (! open) { closeDeactivate(); } }">
         <DialogContent>
             <DialogHeader>
                 <DialogTitle>Deactivate {{ pendingClient?.name }}?</DialogTitle>
@@ -208,7 +221,7 @@ function confirmDeactivate(): void {
                 </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-                <Button type="button" variant="outline" :disabled="deactivating" @click="pendingClient = null">
+                <Button type="button" variant="outline" :disabled="deactivating" @click="closeDeactivate">
                     Cancel
                 </Button>
                 <Button type="button" variant="destructive" :disabled="deactivating" @click="confirmDeactivate">

@@ -1,20 +1,25 @@
 <?php
 
 use App\Http\Controllers\Admin\AttendanceController;
+use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\ClientFileController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\EmployeeController;
 use App\Http\Controllers\Admin\FileController;
 use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\LeaveBalanceController;
 use App\Http\Controllers\Admin\LeaveController;
 use App\Http\Controllers\Admin\MyTaskController;
+use App\Http\Controllers\Admin\NotificationDefaultsController;
 use App\Http\Controllers\Admin\ProjectController;
 use App\Http\Controllers\Admin\ProjectFileController;
 use App\Http\Controllers\Admin\ProjectFinanceController;
 use App\Http\Controllers\Admin\ProjectMemberController;
+use App\Http\Controllers\Admin\ProjectPermissionController;
 use App\Http\Controllers\Admin\ProjectStatusController;
 use App\Http\Controllers\Admin\RecurringTaskController;
+use App\Http\Controllers\Admin\ReportController;
 use App\Http\Controllers\Admin\ScheduleController;
 use App\Http\Controllers\Admin\SettingsController;
 use App\Http\Controllers\Admin\TagController;
@@ -24,16 +29,80 @@ use App\Http\Controllers\Admin\TaskFileController;
 use App\Http\Controllers\Admin\TimeController;
 use App\Http\Controllers\Admin\TimesheetController;
 use App\Http\Controllers\Admin\WorkloadController;
+use App\Support\Permission;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('admin')
     ->name('admin.')
-    ->middleware(['auth', 'active', 'two-factor', 'surface:admin'])
+    // `throttle:authenticated` is Phase 12's security pass: a ceiling on how fast a
+    // signed-in account can ask for anything at all. See AppServiceProvider's
+    // defineAuthenticatedRateLimiters() for the number and what it was measured against.
+    ->middleware(['auth', 'active', 'two-factor', 'surface:admin', 'throttle:authenticated'])
     ->group(function () {
         Route::get('/dashboard', DashboardController::class)->name('dashboard');
-        Route::get('/settings', SettingsController::class)
+        // Admin → Settings (Part D §20's closed key list, Part E's Phase 12 grouping).
+        //
+        // GET renders and PUT saves, and the PUT takes whichever of the editable keys the
+        // section that was submitted sent — one endpoint for all of them, because they are one
+        // table with one writer. `SettingsService::set()` is that writer: it refuses the
+        // read-only key, asks `settings.manage` of the actor again, and audits each change in
+        // the same transaction as the write. Neither line here restates any of that.
+        //
+        // A body-less PUT stops at the Form Request ("send at least one setting"), which is
+        // proof it got past both gates.
+        Route::get('/settings', [SettingsController::class, 'index'])
             ->middleware('can:settings.manage')
             ->name('settings');
+        Route::put('/settings', [SettingsController::class, 'update'])
+            ->middleware('can:settings.manage')
+            ->name('settings.update');
+
+        // Admin → Notifications: the agency-wide notification defaults
+        // (`notification_preferences`, Part D §20 — *"global defaults set by Admin, Phase 12;
+        // the engine reads them"*).
+        //
+        // Gated on `can:settings.manage` and not on a key of its own: Part C §1's permission
+        // list is closed and *Manage system settings* is the cell this screen belongs to — it is
+        // a configuration that decides who the agency tells about what, in the same sense the
+        // holiday calendar decides what a day is called. A new key would need a recorded
+        // decision and would have nothing to say that this one does not.
+        //
+        // It is `/admin/notifications` and not `/notifications`: the latter is the shared
+        // Notification Center in `routes/shared.php`, which is one person's own mail. These are
+        // the defaults for everybody's, so they live on the Admin surface.
+        Route::get('/notifications', [NotificationDefaultsController::class, 'index'])
+            ->middleware('can:settings.manage')
+            ->name('notifications');
+        Route::put('/notifications', [NotificationDefaultsController::class, 'update'])
+            ->middleware('can:settings.manage')
+            ->name('notifications.update');
+
+        // Admin → Audit Log (Part E, Phase 12: *"Admin → Audit Log viewer (filters, old/new
+        // diff, read-only)"*). Phase 12.
+        //
+        // **This is the whole surface of the feature: one line, one verb, one action.** There is
+        // no POST, no PUT, no DELETE and no soft one, because there is nothing an Admin may do to
+        // an audit row. `audit_logs` is append-only *at the database* — its migration runs
+        // `REVOKE UPDATE, DELETE, TRUNCATE ON audit_logs FROM hq_app` right after `CREATE TABLE`
+        // and `hq_app` is not the owner, so it cannot grant them back (Part B §3 rule 3);
+        // `tests/Feature/Database/AuditLogAppendOnlyTest.php` proves all three raise
+        // `42501 insufficient_privilege`. A write route here would be a route whose only possible
+        // outcome is a 500. Acceptance criterion 11 is kept by the absence, not by care.
+        //
+        // `can:audit.view` is Part C §1's *View audit log* row, which is ADMIN and nobody else.
+        // The ACCOUNTANT is worth naming: they hold `payroll.view_others` and may read every
+        // payslip in the agency, and they are **403** here — who changed what is a different
+        // question from what it says now. `surface:admin` refuses them first; the permission is
+        // what would still refuse them if a second shell ever got this screen.
+        //
+        // No `{parameter}`, so there is no record-level refusal to get right. One entry is read
+        // in the drawer from the row the list already sent, and a pasted `?detail=` is resolved
+        // by the controller with no scope — every row is in scope for anybody holding the key,
+        // which `AuditLogPolicy` argues at length. A 404 here would be describing a scope that
+        // does not exist.
+        Route::get('/audit-log', [AuditLogController::class, 'index'])
+            ->middleware('can:'.Permission::AuditView->value)
+            ->name('audit-log');
 
         // An Admin's own plate. One route, seven buckets on `?bucket=` — Due today and Overdue
         // are questions about the same plate, not separate screens, so they are deep links into
@@ -124,6 +193,11 @@ Route::prefix('admin')
             // Declared BEFORE `/{task}`, or `board` binds as a task id and the page 404s.
             Route::get('/board', [TaskController::class, 'board'])->name('board');
             Route::get('/calendar', [TaskController::class, 'calendar'])->name('calendar');
+            // Phase 10. The fourth view, registered exactly as the Calendar is and declared
+            // before `/{task}` for the same reason. It writes dates through `PUT /{task}`
+            // below — there is no Gantt endpoint, because a second way to move a date would
+            // be a second set of date rules.
+            Route::get('/gantt', [TaskController::class, 'gantt'])->name('gantt');
 
             Route::post('/', [TaskController::class, 'store'])->name('store');
             Route::get('/{task}', [TaskController::class, 'show'])->name('show');
@@ -160,7 +234,9 @@ Route::prefix('admin')
             // editing or deleting a message, and that is the feature: a message is what
             // somebody said at a time.
             Route::get('/{task}/discussion', [TaskDiscussionController::class, 'index'])->name('discussion.index');
-            Route::post('/{task}/discussion', [TaskDiscussionController::class, 'store'])->name('discussion.store');
+            Route::post('/{task}/discussion', [TaskDiscussionController::class, 'store'])
+                ->middleware('throttle:posting')
+                ->name('discussion.store');
         });
 
         // Tag management (spec: "Admin/Manager create, global or per project"). ASSIGNING a
@@ -266,6 +342,94 @@ Route::prefix('admin')
             Route::post('/{leaveRequest}/correction', [LeaveController::class, 'correction'])->name('correction');
         });
 
+        // Admin → Workforce → Employees, which is also Admin → Users & Roles (Part D §2: "Users
+        // & Roles is the same screen family (Employees list → employee detail →
+        // role/schedule/tracking_mode)"). Phase 12.
+        //
+        // **There is no DELETE here, for an employee or for a user, and there never will be.**
+        // Part B §3 rule 11: a departure is `status = inactive`. `deactivate` and `reactivate` are
+        // the two status moves, they are POSTs because each is one act on one person, and neither
+        // carries a body — the confirmation dialog is the whole of the input.
+        //
+        // The schedule is NOT written here: `PUT /admin/schedules/{employee}` above is the
+        // editor, and `ScheduleService` is the only writer of the table. The create form collects
+        // a working week because Part D §21's onboarding row says a hire has one, and it goes
+        // through that same service.
+        //
+        // `can:roles.manage` on the group is Part C §1's *Manage roles/permissions* row, and it
+        // sits behind `surface:admin` so that widening the surface one day would not quietly hand
+        // somebody the power to create accounts. `EmployeePolicy` is asked again behind both, per
+        // ability, because "read the list", "hire", "switch a login off" and "grant a project
+        // permission" are four different questions — and the last three add the self-guard that
+        // the middleware cannot express.
+        //
+        // Every `{employee}` is re-resolved through `EmployeeAdministrationService::findFor()`
+        // before its policy is asked, so an employee outside the requester's scope is **404** and
+        // never a refusal that would confirm the record exists (Part C) — the same ordering every
+        // parameterised admin route here keeps.
+        //
+        // The grants are `…/{employee}/permissions`: a grant is written about a PERSON, and the
+        // row it writes already knows which project it is on. Revoking names the grant's own id,
+        // so two Admins clearing the same list cannot take each other's row.
+        Route::prefix('employees')->name('employees.')->group(function () {
+            Route::get('/', [EmployeeController::class, 'index'])->name('index');
+            Route::post('/', [EmployeeController::class, 'store'])->name('store');
+            Route::get('/{employee}', [EmployeeController::class, 'show'])
+                ->whereNumber('employee')
+                ->name('show');
+
+            // Part D §2's *"role/schedule/tracking_mode"*, two thirds of it. PUT and not POST
+            // because each replaces one field with the value it is given and says nothing about
+            // what it was before — sending the same role twice is the same record both times,
+            // and the service returns early rather than writing a second audit row. The schedule
+            // is the third and is `PUT /admin/schedules/{employee}` above, because
+            // `ScheduleService` is the only writer of that table.
+            //
+            // Two endpoints rather than one `update`, for the reason `POST …/projects/{id}/status`
+            // is not a key in `PUT …/projects/{id}`: a role change is one of the events Part C §4
+            // requires in `audit_logs` and the one act Part C §1 forbids on your own account, and
+            // a tracking-mode change decides which table somebody's working day is recorded in
+            // from that moment on. Neither should be reachable as a field somebody tabbed past.
+            //
+            // MANAGER is refused by `UpdateEmployeeRoleRequest` against the same
+            // `ASSIGNABLE_ROLES` list `StoreEmployeeRequest` uses (Part C §1 assigns it to
+            // nobody), so it cannot be reached by promotion either.
+            Route::put('/{employee}/role', [EmployeeController::class, 'changeRole'])
+                ->whereNumber('employee')
+                ->name('role');
+            Route::put('/{employee}/tracking-mode', [EmployeeController::class, 'changeTrackingMode'])
+                ->whereNumber('employee')
+                ->name('tracking-mode');
+
+            Route::post('/{employee}/deactivate', [EmployeeController::class, 'deactivate'])
+                ->whereNumber('employee')
+                ->name('deactivate');
+            Route::post('/{employee}/reactivate', [EmployeeController::class, 'reactivate'])
+                ->whereNumber('employee')
+                ->name('reactivate');
+
+            // Re-issuing a sign-in password. It exists because without it an account could
+            // become permanently unusable by nobody's mistake: no email in the MVP (Part H §1),
+            // no reset route in `routes/auth.php`, and Profile → Password needs the CURRENT
+            // password — so a forgotten one left a person whose record is kept forever
+            // (Part B §3 rule 11) and whose login nobody in the agency could repair.
+            //
+            // POST and not PUT: it is an act with a consequence beyond the field it writes —
+            // it ends that person's sessions — and repeating it does not produce the same
+            // record twice, it produces a different password.
+            Route::post('/{employee}/reset-password', [EmployeeController::class, 'resetPassword'])
+                ->whereNumber('employee')
+                ->name('reset-password');
+
+            Route::post('/{employee}/permissions', [ProjectPermissionController::class, 'store'])
+                ->whereNumber('employee')
+                ->name('permissions.store');
+            Route::delete('/{employee}/permissions/{grant}', [ProjectPermissionController::class, 'destroy'])
+                ->whereNumber('employee')
+                ->whereNumber('grant')
+                ->name('permissions.destroy');
+        })->middleware('can:'.Permission::RolesManage->value);
+
         // Admin → Workforce → Work Schedule. The working week is per employee and editable,
         // which is what stops it being a constant anywhere else: every rule that reads it —
         // Off Day, Late, and which days `hq:mark-absent` marks — is stated once in
@@ -328,6 +492,37 @@ Route::prefix('admin')
         // viewer may not see is missing from the list rather than refused, which is the
         // absence rule expressed as a scope and needs no 404.
         Route::get('/workload', [WorkloadController::class, 'index'])->name('workload');
+
+        // Admin → Reports (Part D §15, Phase 10; the shape is frozen in docs/report-contract.md).
+        //
+        // Two routes for all sixteen reports, because a report here is DATA in one shape and
+        // not a screen: the index is the catalogue and `{report}` is one `ReportResult`
+        // rendered by one page component. Adding a report in the next slice adds a `ReportKey`
+        // case and a builder, and touches neither of these lines.
+        //
+        // **There is no `can:` on either of them, and that is deliberate.** A report requires
+        // the permission of the DATA IT READS — `tasks.view`, `attendance.manage_others`,
+        // `finance.view`, `payroll.view_others` — so which key applies depends on which report
+        // was asked for. A single middleware key could only be the wrong one for fifteen of
+        // them; `ReportKey::permission()` is asked in the controller instead, and the index
+        // lists exactly the cards whose key the viewer holds. No role is named anywhere in it.
+        //
+        // `surface:admin` on the group above is still what refuses the Accountant here, before
+        // any of that is asked — their finance reporting is Phase 8's `/finance/report`.
+        //
+        // `{report}` binds to the `ReportKey` enum, so a value that is not a case — including
+        // one of the eight the next slice adds — is a **404** from the router rather than a 500
+        // from a missing builder. A `?employee=`, `?project=` or `?client=` the viewer may not
+        // see is neither: the scope returns nothing for it, because a 404 there would confirm
+        // that the row exists (Part C §1).
+        Route::prefix('reports')->name('reports.')->group(function () {
+            Route::get('/', [ReportController::class, 'index'])->name('index');
+            // `throttle:reports`: one builder scans a whole table per section — 37 queries
+            // measured on `completion`. 60 a minute is faster than the screen can be read.
+            Route::get('/{report}', [ReportController::class, 'show'])
+                ->middleware('throttle:reports')
+                ->name('show');
+        });
 
         // One file, whatever owns it. Downloading is not here: it is `GET /files/{file}` in
         // routes/shared.php, signed, because the answer does not depend on the surface.

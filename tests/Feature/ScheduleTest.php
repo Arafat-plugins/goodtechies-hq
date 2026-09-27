@@ -4,7 +4,7 @@ use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Str;
 
-it('schedules the recurring sweep, the two task reminders, the backups, the cleanup, the monitor and the weekly verification', function () {
+it('schedules the recurring sweep, the two task reminders, the payroll draft, the backups, the cleanup, the monitor and the weekly verification', function () {
     $events = collect(app(Schedule::class)->events())
         ->mapWithKeys(fn (Event $event) => [
             trim(Str::after($event->command, 'artisan'), " '\"") => $event,
@@ -35,6 +35,17 @@ it('schedules the recurring sweep, the two task reminders, the backups, the clea
         // minutes. What it SKIPS is AttendanceService::markAbsent()'s and not this schedule's,
         // including the one place Phase 5 adds approved leave and holidays.
         'hq:mark-absent' => '55 23 * * *',
+        // Phase 7: "reminder 15 min before" (Part D §12). Every minute, because the lead time
+        // is fifteen and anything coarser would fire early or miss the window. "Once per
+        // meeting" is the notifications table's answer, not this schedule's — see
+        // SendMeetingReminders — so a re-run inside the window costs nothing.
+        'hq:remind-meetings' => '* * * * *',
+        // Phase 9: "Draft auto-created on the 1st for all active employees from
+        // employee_salaries" (Part D §14). The 1st at 00:10, after the recurring sweep at 00:05
+        // — both run at the turn of the month and ordering them costs nothing. "Exactly once"
+        // is the unique indexes' answer and not this schedule's, so a re-run, a restart and a
+        // restore all leave the month with one draft; see CreatePayrollDraft.
+        'hq:create-payroll-draft' => '10 0 1 * *',
         'backup:clean' => '30 1 * * *',
         'backup:run --only-db' => '0 2 * * *',
         'backup:monitor' => '0 3 * * *',

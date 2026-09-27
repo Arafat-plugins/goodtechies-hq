@@ -1,4 +1,5 @@
 import '@inertiajs/core';
+import type { ShellLive } from '@/Components/Realtime/shell';
 
 export type Role = 'ADMIN' | 'MANAGER' | 'EMPLOYEE' | 'REMOTE_EMPLOYEE' | 'ACCOUNTANT';
 
@@ -35,6 +36,18 @@ export interface SharedProps {
     app: {
         name: string;
     };
+    /**
+     * The shell's own live state — the announcement banner app-wide and the Messages nav row's
+     * unread indicator (`HandleInertiaRequests::sharedShell()`).
+     *
+     * **Optional, and that is a fact about the server and not about TypeScript.** It is an
+     * `Inertia::optional()` prop: absent from an ordinary page render and resolved only on a
+     * partial reload that names it, because resolving it costs 5 to 12 statements and every page
+     * would have paid them. So `undefined` is the normal case and nothing should read this
+     * directly — `Components/Realtime/shell.ts` holds the last value it saw at module scope and
+     * is what the shell renders from.
+     */
+    shell?: ShellLive;
 }
 
 declare module '@inertiajs/core' {

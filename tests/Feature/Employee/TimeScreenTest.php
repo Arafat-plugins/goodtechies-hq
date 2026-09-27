@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Employee;
+use App\Models\Project;
 use App\Models\Task;
 use App\Models\TimeEntry;
 use App\Support\RoleName;
@@ -34,6 +35,35 @@ use Illuminate\Support\Carbon;
 
 /** The words that must not appear, and the ones that would be them under another name. */
 const FORBIDDEN_WORDS = ['score', 'productivity', 'productive', 'efficiency', 'rating', 'ranking'];
+
+/**
+ * A project and a task with names nobody has to hope about.
+ *
+ * **`ProjectFactory` names a project with `fake()->catchPhrase()`**, and Faker's en_US
+ * catch-phrase word lists contain — literally — *productivity*, *efficiency* and several of the
+ * other words this file forbids. So a scan of the rendered payload for those words was a scan
+ * that failed whenever the dice came up that way: roughly one run in a few dozen, on a clean
+ * tree, with nothing in the diff to explain it. It fired on 26 Sep 2026 and passed on the
+ * immediate re-run, which is the worst shape a failure can have.
+ *
+ * The scan itself is right and is not weakened — *"no score-word anywhere in what this employee
+ * sees"* is the whole point, and skipping the fields where free text lives would have let a real
+ * one through inside a label. What changes is the DATA: the names are pinned, so the only way a
+ * forbidden word reaches the payload is if the application put it there.
+ *
+ * @return array{0: Project, 1: Task}
+ */
+function timerNeutralWork(): array
+{
+    $project = Project::factory()->create(['name' => 'Buffalo Modular — Website Maintenance']);
+    $task = Task::factory()->create([
+        'project_id' => $project->id,
+        'title' => 'Apply the April core and plugin updates',
+        'description' => 'One pass over the staging site before production.',
+    ]);
+
+    return [$project, $task];
+}
 
 /** Every file this slice put in front of a person, or that builds what they see. */
 function timerSourceFiles(): array
@@ -106,7 +136,7 @@ it('sends no score and no productivity figure to the Time page', function (): vo
     $this->seed(SettingsSeeder::class);
 
     $tapu = Employee::factory()->forRole(RoleName::REMOTE_EMPLOYEE)->create();
-    $task = Task::factory()->create();
+    [, $task] = timerNeutralWork();
     $task->assignees()->attach($tapu->id, ['is_primary' => true]);
 
     TimeEntry::factory()
@@ -133,7 +163,7 @@ it('sends no score with the timer on a task detail page either', function (): vo
     $this->seed(SettingsSeeder::class);
 
     $tapu = Employee::factory()->forRole(RoleName::REMOTE_EMPLOYEE)->create();
-    $task = Task::factory()->create();
+    [, $task] = timerNeutralWork();
     $task->assignees()->attach($tapu->id, ['is_primary' => true]);
 
     $payload = strtolower((string) json_encode(

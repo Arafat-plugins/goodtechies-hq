@@ -12,6 +12,8 @@ import type { TimeableTask, TimeDay, TimeEntry, TimerState } from '@/Components/
 import { formatDuration, formatTimeOfDay, useTimer } from '@/Components/Timer/timer';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
+import { ATTENDANCE_POLL_MS } from '@/Components/Realtime/live';
+import { useLiveProps } from '@/Components/Realtime/reload';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 
 /**
@@ -59,6 +61,23 @@ function correct(entry: TimeEntry): void {
     editing.value = entry;
     dialogOpen.value = true;
 }
+
+/* ---------------------------------------------------------------- keeping it current */
+
+/**
+ * The Time screen's own half of §A.3's attendance-and-time line.
+ *
+ * `timer` is in the list and that is deliberate even though `Components/Timer/timer.ts` has its
+ * own heartbeat: the heartbeat keeps the RUNNING session current, and what goes stale here is
+ * everything around it — an entry an Admin approved or refused, a session the watchdog closed
+ * while the laptop was shut, the day's totals. The page already `watch`es `props.timer` into
+ * `timer.adopt()`, so a re-read arrives through the one path that was built for it and there is
+ * no second idea of what is running.
+ *
+ * Thirty seconds, poll-only, and held while a dialog is open — the same terms as the attendance
+ * screens, for the same reason.
+ */
+useLiveProps(['timer', 'days', 'flagged_count'], { intervalMs: ATTENDANCE_POLL_MS });
 </script>
 
 <template>

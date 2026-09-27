@@ -51,7 +51,7 @@ function isViewer(member: EmployeeProject['members'][number]): boolean {
 
         <div class="grid min-w-0 items-start gap-4 lg:grid-cols-3">
             <div class="flex min-w-0 flex-col gap-4 lg:col-span-2">
-                <Card class="min-w-0 gap-2 shadow-xs">
+                <Card class="min-w-0 gap-2">
                     <CardHeader>
                         <CardTitle class="text-sm font-medium">Notes from the team</CardTitle>
                     </CardHeader>
@@ -69,7 +69,7 @@ function isViewer(member: EmployeeProject['members'][number]): boolean {
                     hands the reader to the Tasks screens filtered to this project rather than
                     growing a fourth copy of that query here (DESIGN.md §5.8).
                 -->
-                <Card class="min-w-0 gap-4 p-6 shadow-xs">
+                <Card class="min-w-0 gap-4 p-6">
                     <h2 class="text-sm font-medium">Tasks</h2>
                     <EmptyState
                         :icon="ListTodo"
@@ -92,7 +92,7 @@ function isViewer(member: EmployeeProject['members'][number]): boolean {
                     employee can reach is a task's own attachments, so the panel says that
                     instead of naming a phase that has already shipped.
                 -->
-                <Card class="min-w-0 gap-4 p-6 shadow-xs">
+                <Card class="min-w-0 gap-4 p-6">
                     <h2 class="text-sm font-medium">Files</h2>
                     <EmptyState
                         :icon="FileText"
@@ -105,7 +105,7 @@ function isViewer(member: EmployeeProject['members'][number]): boolean {
             <div class="flex min-w-0 flex-col gap-4">
                 <ProjectFacts :project="project" />
 
-                <Card class="min-w-0 gap-4 shadow-xs">
+                <Card class="min-w-0 gap-4">
                     <CardHeader>
                         <CardTitle class="text-sm font-medium">Team</CardTitle>
                     </CardHeader>

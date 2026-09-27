@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Support\ClientStatus;
 use Database\Factories\ClientFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -17,6 +18,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * list<array{name: string, role: string, email: string, phone: string}>
  */
 #[Fillable(['name', 'internal_notes', 'status'])]
+// Decision 10-18: `search_vector` is a STORED GENERATED tsvector of this row's own
+// searchable text. `select *` loads it (~282 B a row on `tasks`, measured with
+// `pg_column_size`), and it belongs in no payload — so it is hidden from every
+// `toArray()`, `toJson()` and `dd()`. Hidden, not dropped: search reads the column.
+#[Hidden(['search_vector'])]
 class Client extends Model
 {
     /** @use HasFactory<ClientFactory> */

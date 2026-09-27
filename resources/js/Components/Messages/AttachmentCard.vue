@@ -4,6 +4,7 @@ import { computed } from 'vue';
 import { iconFor } from '@/Components/Files/files';
 import type { ThreadAttachment } from '@/Components/Messages/messages';
 import { formatDuration } from '@/Components/Messages/messages';
+import VoicePlayer from '@/Components/Messages/VoicePlayer.vue';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
@@ -33,6 +34,11 @@ import { cn } from '@/lib/utils';
  * `onAccent` only drops the hairline. `--border` on a `--primary` fill is a grey line on coral
  * that measures 1.31:1 and reads as grime; the card's own fill against the bubble is the edge
  * (5.13:1 light / 6.66:1 dark), which is a stronger boundary than the border ever was.
+ *
+ * That same paragraph is why `VoicePlayer` below takes no accent variant and draws no surface:
+ * this root has already put it on `--card`, in every bubble on every screen, so its pairs are
+ * card-relative and pass as they are. A player that recoloured itself for the bubble outside
+ * would be reinstating exactly the 1.01:1 bug the paragraph above describes.
  */
 
 const props = withDefaults(
@@ -81,7 +87,7 @@ const meta = computed(() => {
             :href="file.url"
             target="_blank"
             rel="noopener noreferrer"
-            class="min-w-0 rounded-sm focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            class="min-w-0 rounded-sm focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
         >
             <img
                 :src="file.url"
@@ -93,10 +99,17 @@ const meta = computed(() => {
         </a>
 
         <!--
-            Nothing records audio yet. This is here so a voice note written by the later slice
-            plays, instead of arriving as a download link nobody expected.
+            A voice note plays here rather than arriving as a download link nobody expected.
+            The total comes from `duration_seconds` on the payload and not from the file: a
+            WebM stream written by `MediaRecorder` carries no duration in its header, so
+            `audio.duration` for one is `Infinity` until the whole thing has been seeked.
         -->
-        <audio v-else-if="rendersVoice" :src="file.url" controls class="w-full min-w-0"></audio>
+        <VoicePlayer
+            v-else-if="rendersVoice"
+            :src="file.url"
+            :duration-seconds="file.duration_seconds"
+            label="voice message"
+        />
 
         <div class="flex min-w-0 items-center gap-2">
             <span
@@ -125,7 +138,7 @@ const meta = computed(() => {
                             :target="file.is_previewable ? '_blank' : undefined"
                             rel="noopener noreferrer"
                             :aria-label="`Download ${file.name}`"
-                            class="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                            class="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                         >
                             <Download class="size-4" aria-hidden="true" />
                             <span v-if="file.is_previewable" class="sr-only">

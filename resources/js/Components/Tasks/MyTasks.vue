@@ -168,7 +168,7 @@ const loading = useNavigationPending();
             </ul>
         </nav>
 
-        <Card class="min-w-0 gap-4 p-4 shadow-xs sm:p-6">
+        <Card class="min-w-0 gap-4 p-4 sm:p-6">
             <div class="flex min-w-0 flex-col gap-1">
                 <h2 class="text-base font-semibold tracking-tight">{{ heading }}</h2>
                 <p v-if="capped" class="text-xs text-muted-foreground">

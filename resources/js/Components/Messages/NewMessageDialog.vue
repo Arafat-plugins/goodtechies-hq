@@ -179,7 +179,7 @@ function start(person: MessagePerson): void {
                         <button
                             type="button"
                             :disabled="opening"
-                            class="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                            class="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50 focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                             @keydown.down.prevent="step($event.currentTarget as HTMLElement, 1)"
                             @keydown.up.prevent="step($event.currentTarget as HTMLElement, -1)"
                             @click="start(person)"

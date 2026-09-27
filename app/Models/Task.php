@@ -10,6 +10,7 @@ use App\Support\TaskPriority;
 use App\Support\TaskStatus;
 use Database\Factories\TaskFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -32,6 +33,11 @@ use Illuminate\Support\Carbon;
     'work_summary',
     'position',
 ])]
+// Decision 10-18: `search_vector` is a STORED GENERATED tsvector of this row's own
+// searchable text. `select *` loads it (~282 B a row on `tasks`, measured with
+// `pg_column_size`), and it belongs in no payload — so it is hidden from every
+// `toArray()`, `toJson()` and `dd()`. Hidden, not dropped: search reads the column.
+#[Hidden(['search_vector'])]
 class Task extends Model
 {
     /** @use HasFactory<TaskFactory> */
@@ -170,13 +176,31 @@ class Task extends Model
     /**
      * Everyone assigned, primary or not. `is_primary` rides on the pivot.
      *
+     * **The order is stated here, and it is not decoration.** Without an `ORDER BY`, PostgreSQL
+     * returns these rows in whatever order the plan happens to produce, which is stable right
+     * up until something unrelated writes to `tasks` — and then a list of names silently comes
+     * back the other way round. Phase 10 hit exactly that: seeding tracked time flipped
+     * *"Yaseen, Faruk Ahmed"* to *"Faruk Ahmed, Yaseen"* in a report assertion, reproducibly,
+     * but only when another test file had run first. The symptom looked like test pollution;
+     * the cause was that nobody had ever said what order assignees come in.
+     *
+     * Primary first, then by `employee_number`. The primary half is the meaningful one: the
+     * person who owns completion leads the list on every surface that prints assignees — the
+     * Task detail, the List's cell, the Overdue report — rather than each one sorting for
+     * itself or, worse, none of them sorting at all. The second key is the employee number and
+     * not the name because a name lives on `users` and ordering by it would drag a join into
+     * every read of this relation; the number is already on the table and is stable for the
+     * life of the employee, which is the whole requirement.
+     *
      * @return BelongsToMany<Employee, $this>
      */
     public function assignees(): BelongsToMany
     {
         return $this->belongsToMany(Employee::class, 'task_assignees')
             ->withPivot('is_primary')
-            ->withTimestamps();
+            ->withTimestamps()
+            ->orderByDesc('task_assignees.is_primary')
+            ->orderBy('employees.employee_number');
     }
 
     /**
@@ -254,6 +278,33 @@ class Task extends Model
     public function isGenerated(): bool
     {
         return $this->recurring_task_id !== null;
+    }
+
+    /**
+     * The meeting whose action item this task was (Phase 7, master prompt Part D §12:
+     * *"action items → Convert to Task (tasks get `source_meeting_id`)"*).
+     *
+     * Like `recurringTask()`, the column is NOT fillable and is set only in the INSERT that
+     * creates the task — see `TaskService::BIRTH_FIELDS`. Unlike it, the FK is `nullOnDelete`
+     * against a table whose rows are deleted for real: **deleting a meeting nulls this and
+     * keeps the task.** An action item is work somebody owes whether or not the calendar entry
+     * it came out of still exists, and a cascade here would let an admin tidying old meetings
+     * empty somebody's board. Part D §12 says the same thing about cancelling; this is the
+     * stronger sibling of that rule.
+     *
+     * @return BelongsTo<Meeting, $this>
+     */
+    public function sourceMeeting(): BelongsTo
+    {
+        return $this->belongsTo(Meeting::class, 'source_meeting_id');
+    }
+
+    /**
+     * Did this task come out of a meeting?
+     */
+    public function isActionItem(): bool
+    {
+        return $this->source_meeting_id !== null;
     }
 
     /**

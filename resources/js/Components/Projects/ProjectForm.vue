@@ -214,7 +214,7 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
 
 <template>
     <form class="flex flex-col gap-4" novalidate @submit.prevent="submit">
-        <Card class="min-w-0 gap-4 shadow-xs">
+        <Card class="min-w-0 gap-4">
             <CardHeader>
                 <CardTitle class="text-sm font-medium">Details</CardTitle>
                 <CardDescription>Who the work is for, what it is, and when it runs.</CardDescription>
@@ -392,7 +392,7 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
             </CardContent>
         </Card>
 
-        <Card class="min-w-0 gap-4 shadow-xs">
+        <Card class="min-w-0 gap-4">
             <CardHeader>
                 <CardTitle class="text-sm font-medium">Notes</CardTitle>
                 <CardDescription>Two audiences, two boxes — keep them apart.</CardDescription>
@@ -434,7 +434,7 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
             </CardContent>
         </Card>
 
-        <Card v-if="!isEdit" class="min-w-0 gap-4 shadow-xs">
+        <Card v-if="!isEdit" class="min-w-0 gap-4">
             <CardHeader>
                 <CardTitle class="text-sm font-medium">Members</CardTitle>
                 <CardDescription>
@@ -459,7 +459,7 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
             </CardContent>
         </Card>
 
-        <Card v-if="!isEdit" class="min-w-0 gap-4 shadow-xs">
+        <Card v-if="!isEdit" class="min-w-0 gap-4">
             <CardHeader>
                 <CardTitle class="text-sm font-medium">Finance</CardTitle>
                 <CardDescription>All optional, and visible to Admins only.</CardDescription>

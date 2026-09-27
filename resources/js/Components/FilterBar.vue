@@ -64,6 +64,16 @@ const props = withDefaults(
         filters?: FilterDef[];
         /** Chip mode: true when a control in `#extra` is set, so "Clear all" appears. */
         extraActive?: boolean;
+        /**
+         * Whether the bar offers a free-text search box at all.
+         *
+         * Every screen before Phase 10 searched, so this defaults to `true` and none of them
+         * changed. The Reports surface is the first that does not: `ReportRequest` reads four
+         * keys and no search term, so a box there would be a control the server ignores —
+         * DESIGN.md §5.11, and worse than no box, because a reader who types in it and gets
+         * the same rows back concludes the report is broken.
+         */
+        searchable?: boolean;
     }>(),
     {
         search: null,
@@ -71,6 +81,7 @@ const props = withDefaults(
         placeholder: 'Search…',
         inputId: 'filter-bar-search',
         extraActive: false,
+        searchable: true,
     },
 );
 
@@ -271,7 +282,7 @@ function isChosen(def: FilterDef, value: string): boolean {
 <template>
     <div class="flex min-w-0 flex-col gap-3">
         <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-            <div class="relative w-full sm:w-64">
+            <div v-if="searchable" class="relative w-full sm:w-64">
                 <Search
                     class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                     aria-hidden="true"

@@ -54,7 +54,8 @@ import { cn } from '@/lib/utils';
  *
  * In `sided` it sits OUTSIDE the bubble, on the card surface. That is deliberate: it keeps the
  * one control in the row on a background its `--ring` focus ring was actually measured against
- * (3.61:1 / 6.13:1) instead of against a brand fill, where `ring-ring/50` composites to 1.19:1.
+ * (3.61:1 / 6.15:1) instead of against a brand fill, where `--ring` is 1.43:1 at full opacity and
+ * was 1.20:1 at the `/50` the app used to paint.
  */
 
 const props = withDefaults(
@@ -213,7 +214,7 @@ async function copy(): Promise<void> {
                         <button
                             type="button"
                             :aria-label="copied ? 'Message copied' : 'Copy message text'"
-                            class="mb-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none motion-reduce:transition-none"
+                            class="mb-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none motion-reduce:transition-none"
                             @click="copy"
                         >
                             <Check v-if="copied" class="size-3.5" aria-hidden="true" />
@@ -305,7 +306,7 @@ async function copy(): Promise<void> {
                         <button
                             type="button"
                             :aria-label="copied ? 'Message copied' : 'Copy message text'"
-                            class="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none motion-reduce:transition-none"
+                            class="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none motion-reduce:transition-none"
                             @click="copy"
                         >
                             <Check v-if="copied" class="size-3.5" aria-hidden="true" />

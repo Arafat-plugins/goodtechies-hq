@@ -26,7 +26,7 @@ const form = useForm({
 
 // Native select, styled to match `Input` (the timezone list is ~400 entries).
 const selectClass =
-    'border-input h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30 dark:aria-invalid:ring-destructive/40';
+    'border-input h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-flat transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring aria-invalid:border-destructive aria-invalid:ring-destructive disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30';
 
 function submit(): void {
     if (form.processing) {
@@ -41,7 +41,7 @@ function submit(): void {
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4 shadow-xs">
+    <Card class="min-w-0 gap-4 shadow-flat">
         <CardHeader>
             <CardTitle class="text-sm font-medium">Details</CardTitle>
             <CardDescription>Your name, sign-in email and timezone.</CardDescription>

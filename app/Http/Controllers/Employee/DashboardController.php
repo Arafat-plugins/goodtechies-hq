@@ -4,19 +4,25 @@ namespace App\Http\Controllers\Employee;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\HolidayResource;
+use App\Http\Resources\MeetingResource;
+use App\Models\ActivityLog;
 use App\Models\AttendanceRecord;
 use App\Models\Employee;
 use App\Models\Holiday;
 use App\Models\LeaveRequest;
+use App\Models\Meeting;
 use App\Models\Task;
+use App\Models\User;
 use App\Services\AttendanceService;
 use App\Services\HolidayService;
 use App\Services\LeaveService;
+use App\Services\ScheduleService;
 use App\Services\TaskService;
 use App\Services\TimerService;
 use App\Support\LeaveStatus;
 use App\Support\TaskBucket;
 use App\Support\TrackingMode;
+use App\Support\Weekday;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
@@ -40,12 +46,33 @@ class DashboardController extends Controller
         TaskBucket::Completed,
     ];
 
+    /**
+     * How many rows the "Upcoming meetings" card shows. The same five the Company dashboard's
+     * card shows, and for the same reason: it answers *"what is on today and tomorrow"*, and
+     * the Meetings screen it links to is where the rest of the diary is.
+     */
+    private const UPCOMING_MEETINGS = 5;
+
+    /**
+     * How many rows "Recent activity" shows, and how far back it looks to find them.
+     *
+     * The window is a bounded scan rather than a join, for the reason `Admin\DashboardController`
+     * names at `REVIEW_SCAN`: *"is this task still mine to see"* is `Task::visibleTo()`'s
+     * question, asked of the scope rather than restated as SQL inside an `activity_logs` query.
+     * Forty is an order of magnitude above the five rows shown, so a person who spent yesterday
+     * on one task still gets a list.
+     */
+    private const RECENT_ACTIVITY = 5;
+
+    private const ACTIVITY_SCAN = 40;
+
     public function __construct(
         private readonly TaskService $tasks,
         private readonly TimerService $timers,
         private readonly AttendanceService $attendance,
         private readonly HolidayService $holidays,
         private readonly LeaveService $leave,
+        private readonly ScheduleService $schedules,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -63,8 +90,187 @@ class DashboardController extends Controller
             'timer' => $this->timerHero($user?->employee),
             'attendance' => $this->attendanceHero($user?->employee),
             'upcomingHolidays' => $this->upcomingHolidays($request),
+            'upcomingMeetings' => $this->upcomingMeetings($request, $user),
             'leave' => $this->myLeave($user?->employee),
+            // The two Part D §3 secondary cards this dashboard was still missing.
+            'schedule' => $this->mySchedule($user?->employee),
+            'recentActivity' => $this->recentActivity($user),
         ]);
+    }
+
+    /**
+     * "My Schedule" — Part D §3 lists it among this dashboard's secondary cards.
+     *
+     * Four facts about the reader's own week, and **`ScheduleService::rowFor()` is where all four
+     * come from**: the working days in the week's order, the hours a day, the start time and
+     * whether the day is an office day or a remote one. Those are the same four the Admin's
+     * schedule editor writes and the same four `/attendance` prints at the top of the month, so a
+     * person cannot be told their week is Sunday-to-Thursday on one screen and Monday-to-Friday on
+     * another. Nothing is derived here and no weekday order is spelled out: the service returns
+     * them in `Weekday`'s order and the labels are `Weekday::shortLabel()`.
+     *
+     * **This is the card that explains the two above it.** Whether today is an Off Day, and
+     * whether 9:07 counts as late, are both answers about the schedule — a clock widget that says
+     * *Off day* with nothing on the page saying which days are working days is a state nobody can
+     * check.
+     *
+     * `null` for somebody with no employee record, and `schedule: null` for an employee nobody has
+     * given one: the card then says so in words rather than printing a zero-hour week (Part C §1's
+     * shape — an absence is rendered, not faked).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function mySchedule(?Employee $employee): ?array
+    {
+        if ($employee === null) {
+            return null;
+        }
+
+        $schedule = $this->schedules->rowFor($employee)['schedule'];
+
+        if ($schedule === null) {
+            return null;
+        }
+
+        return [
+            // `sun` → `Sun`, from the enum. Already in week order; nothing here sorts them.
+            'days' => array_map(
+                fn (string $day): string => Weekday::from($day)->shortLabel(),
+                $schedule['working_days'],
+            ),
+            'hours_per_day' => $schedule['working_hours_per_day'],
+            'start_time' => $schedule['start_time'],
+            // The word, resolved here. `Pages/Shared/Attendance.vue` reads the raw column and
+            // picks the word itself; a card that did the same would be a second place for the
+            // same two strings, and the server is where every other label on this page is chosen.
+            'location' => $schedule['office_or_remote'] === 'remote' ? 'Remote' : 'Office',
+            // Their own month, which is where the schedule is shown in full beside what it
+            // produced. The shared route defaults to the requester, so no id travels.
+            'href' => '/attendance',
+        ];
+    }
+
+    /**
+     * "Recent activity" — Part D §3's last secondary card, and Part I's *"Recent activity list
+     * (spec §23 lists it for the employee surface)"*.
+     *
+     * ## Whose activity: the reader's own, and there is no query here that could return anybody
+     * else's
+     *
+     * `actor_id = the requester` is the first `where` clause. That makes this a record of what
+     * **you** did, which is what the card the design reference shows is, and it is also the only
+     * shape of it that cannot become surveillance: Part H §1 forbids monitoring and spec §22
+     * keeps an activity feed off the Company dashboard entirely for that reason. A feed of
+     * *"everything that happened on your projects"* would have been the second kind — it would put
+     * colleagues' movements on a screen nobody asked for one on.
+     *
+     * ## And only tasks, still checked against `Task::visibleTo()`
+     *
+     * `activity_logs` is written for tasks, clients, projects, tags and meetings. This card reads
+     * **tasks**, because a task is the only one of the five that this surface has a page to open
+     * and a row that cannot be opened is worse than no row (the rule `Admin\DashboardController`
+     * states for its attention panel).
+     *
+     * The visibility check is not decoration: a task can be handed off, reassigned or archived
+     * after somebody worked on it, and their old log line must not become a title they may no
+     * longer read. So the window is scanned, the ids are resolved through `Task::visibleTo()` —
+     * the one statement of that rule (decision 2-37) — and a row whose task has left their scope
+     * is dropped rather than shown without a link.
+     *
+     * Empty is an answer: a person who has not touched a task yet has no activity, and the card
+     * says that instead of naming a phase.
+     *
+     * **`meta` is composed here, not in Vue**, for the reason `UpcomingHolidaysCard` states about
+     * its own day counts: the agency's timezone is the server's, and "2 hours ago" computed from a
+     * `Date` in the browser moves by five hours on a laptop somebody took to London. The row's
+     * title is the log's own sentence — `ActivityLogger` already writes it for a reader.
+     *
+     * @return list<array{id: int, title: string, meta: string, href: string}>
+     */
+    private function recentActivity(?User $user): array
+    {
+        if ($user === null) {
+            return [];
+        }
+
+        $logs = ActivityLog::query()
+            ->where('actor_id', $user->getKey())
+            ->where('object_type', (new Task)->getMorphClass())
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(self::ACTIVITY_SCAN)
+            ->get();
+
+        if ($logs->isEmpty()) {
+            return [];
+        }
+
+        $tasks = Task::query()
+            ->visibleTo($user)
+            ->whereIn('id', $logs->pluck('object_id')->unique()->all())
+            ->get(['id', 'title'])
+            ->keyBy('id');
+
+        return $logs
+            ->filter(fn (ActivityLog $log): bool => $tasks->has($log->object_id))
+            ->take(self::RECENT_ACTIVITY)
+            ->map(fn (ActivityLog $log): array => [
+                'id' => (int) $log->getKey(),
+                'title' => (string) $log->description,
+                'meta' => sprintf(
+                    '%s · %s',
+                    (string) $tasks->get($log->object_id)->title,
+                    $log->created_at?->diffForHumans() ?? 'Unknown time',
+                ),
+                'href' => '/employee/tasks/'.$log->object_id,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * "Upcoming meetings" — Part D §12's dashboard card, Phase 7.
+     *
+     * **One query, scoped, capped.** `Meeting::visibleTo()` is `MeetingPolicy::view()` in SQL:
+     * for this person it is the meetings they organise or were invited to, and nothing else.
+     * That is what replaces the "Arrives in Phase 7" panel this slot used to hold, and it is
+     * the same query and the same five rows the Company dashboard's card runs — a meeting is
+     * the same meeting on both screens, it is only the scope that differs, and the scope is the
+     * one thing neither controller decides for itself.
+     *
+     * **`MeetingResource`, not a shape of this card's own** — the same move
+     * `upcomingHolidays()` below makes with `HolidayResource`: a meeting is the same meeting on
+     * the card, on the list and on its own page, and a fourth shape would be a fourth place for
+     * a state or a Join control to be worded differently. It also means the linked project
+     * arrives already scoped per viewer (`linkedContextFor()`), whether or not this card prints
+     * it — somebody can be in a meeting about a project they are not on, and there is no
+     * shortcut here that could leak one.
+     *
+     * *Follow-up, in the shape decision 6-16 records:* `Admin\DashboardController` asks this
+     * same question with this same query, because Phase 7's two slices could not both add a
+     * method to `MeetingService`. It wants a `MeetingService::upcomingFor(User, int)` that both
+     * call.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function upcomingMeetings(Request $request, ?User $user): array
+    {
+        if ($user === null || ! Gate::forUser($user)->allows('viewAny', Meeting::class)) {
+            return [];
+        }
+
+        $meetings = Meeting::query()
+            ->visibleTo($user)
+            ->notCancelled()
+            // Still to come, or happening right now. `start_at` would have dropped the meeting
+            // somebody is five minutes late for, which is the one this card is most useful for.
+            ->where('end_at', '>=', now())
+            ->with(['organizer', 'participantSeats.user', 'project', 'task'])
+            ->orderBy('start_at')
+            ->limit(self::UPCOMING_MEETINGS)
+            ->get();
+
+        return MeetingResource::collection($meetings)->resolve($request);
     }
 
     /**

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\ContentSecurityPolicy;
 use App\Http\Middleware\EnsureActiveUser;
 use App\Http\Middleware\EnsureSurface;
 use App\Http\Middleware\EnsureTwoFactorEnrolled;
@@ -34,6 +35,19 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
+
+        // Phase 12's security pass. The Content-Security-Policy is in the application rather
+        // than in deploy/nginx.conf because it is coupled to the hash of one inline script
+        // this application renders — see the middleware's docblock. The transport headers
+        // (X-Frame-Options, nosniff, Referrer-Policy, HSTS) stay in nginx, which also covers
+        // the responses PHP never sees at all.
+        //
+        // GLOBAL rather than appended to `web`, and that is the point of the line: a URL that
+        // matches no route throws before the `web` group is entered, so a group-scoped policy
+        // left every 404 — the one page an attacker can reach on any path they like — as the
+        // only HTML this application serves with no CSP on it. Measured in Chromium against
+        // /admin/recurring-tasks, which does not exist.
+        $middleware->append(ContentSecurityPolicy::class);
 
         $middleware->redirectGuestsTo(fn () => route('login'));
         $middleware->redirectUsersTo(fn () => route('home'));

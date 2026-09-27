@@ -2,9 +2,9 @@
 import { Link, usePage } from '@inertiajs/vue3';
 import { ChevronDown } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import { messagesBadge } from '@/Components/Realtime/shell';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/Components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
-import { usePagePoll } from '@/lib/pagePoll';
 import { cn } from '@/lib/utils';
 import { readGroupOpen, writeGroupOpen } from '@/lib/sidebarState';
 import type { NavGroup, NavItem } from '@/navigation/types';
@@ -121,6 +121,26 @@ const activeClass =
 const inactiveClass =
     'text-sidebar-foreground/80 hover:bg-sidebar-border hover:text-sidebar-accent-foreground';
 
+/**
+ * The unread pill on the Messages row — POLISH-BACKLOG §A.3's *"Messages — anywhere in the app"*.
+ *
+ * Matched on the row's own `href` rather than its label, because a label is prose and this has to
+ * survive it being reworded; `/messages` is the route, spelled once in `navigation/*.ts` and once
+ * here. Every nav in the application carries that row, so one match covers all three surfaces and
+ * both mounts (the sidebar, the rail and the mobile drawer are this component).
+ *
+ * The number itself is `Components/Realtime/shell.ts` — module state kept current by the shell's
+ * own poll, so the badge is live on every screen rather than only where a page happens to know
+ * about messages. `null` while nothing has been read from the server yet, which is why an unread
+ * count never flashes as a zero.
+ *
+ * It is never the only carrier: the pill has an `aria-label` with the count in words, and it
+ * cannot be confused with the active-row treatment, which is a fill and a rail (DESIGN.md §5.6).
+ */
+function badgeFor(item: NavItem): { text: string; label: string } | null {
+    return item.href === '/messages' ? messagesBadge.value : null;
+}
+
 function itemClass(item: NavItem): string {
     return cn(
         props.rail ? railRowClass : rowClass,
@@ -128,35 +148,6 @@ function itemClass(item: NavItem): string {
         isActive(item) ? activeClass : inactiveClass,
     );
 }
-
-/**
- * The number on a row, or null for no pill.
- *
- * Read from the page props by the key the nav data names, so this component knows nothing about
- * messages — add a `badgeKey` to a row and the pill follows. Zero is null: a badge that reads 0
- * is telling the reader nothing while asking for their attention.
- */
-function badgeFor(item: NavItem): number | null {
-    if (!item.badgeKey) {
-        return null;
-    }
-
-    const value = (page.props as Record<string, unknown>)[item.badgeKey];
-
-    return typeof value === 'number' && value > 0 ? value : null;
-}
-
-function badgeLabel(item: NavItem, count: number): string {
-    return `${item.label}, ${count} unread`;
-}
-
-/**
- * Part 0.5 refresh rule: the badge counts something somebody else does, and the sidebar is on
- * every page — so it is the sidebar that keeps it current, not each page in turn. Mounted twice
- * (rail and drawer) on some viewports; `usePagePoll` is reference-counted, so that is still one
- * interval and one request.
- */
-usePagePoll(['messagesUnread']);
 </script>
 
 <template>
@@ -182,19 +173,28 @@ usePagePoll(['messagesUnread']);
                                 >
                                     <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
                                     <span :class="rail ? 'sr-only' : 'truncate'">{{ item.label }}</span>
+                                    <!--
+                                        Railed, the label is gone and there is no room for a
+                                        number, so the same fact is a dot in the icon's corner. The
+                                        count still reaches a screen reader, from the one sr-only
+                                        line below that both shapes share.
+                                    -->
                                     <span
-                                        v-if="badgeFor(item) !== null"
+                                        v-if="badgeFor(item)"
+                                        aria-hidden="true"
                                         :class="
                                             cn(
-                                                'shrink-0 rounded-full bg-primary text-xs font-medium tabular-nums text-primary-foreground',
+                                                'bg-primary text-primary-foreground',
                                                 rail
-                                                    ? 'absolute top-1 right-1 size-2 p-0'
-                                                    : 'ml-auto px-1.5 py-0.5',
+                                                    ? 'absolute top-1.5 right-1.5 size-2 rounded-full'
+                                                    : 'ml-auto inline-flex min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-xs font-medium tabular-nums',
                                             )
                                         "
                                     >
-                                        <template v-if="!rail">{{ badgeFor(item)! > 99 ? '99+' : badgeFor(item) }}</template>
-                                        <span class="sr-only">{{ badgeLabel(item, badgeFor(item)!) }}</span>
+                                        {{ rail ? '' : badgeFor(item)!.text }}
+                                    </span>
+                                    <span v-if="badgeFor(item)" class="sr-only">
+                                        {{ badgeFor(item)!.label }}
                                     </span>
                                 </Link>
                             </TooltipTrigger>
@@ -235,11 +235,14 @@ usePagePoll(['messagesUnread']);
                                     <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
                                     <span class="truncate">{{ item.label }}</span>
                                     <span
-                                        v-if="badgeFor(item) !== null"
-                                        class="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-xs font-medium tabular-nums text-primary-foreground"
+                                        v-if="badgeFor(item)"
+                                        aria-hidden="true"
+                                        class="ml-auto inline-flex min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-medium tabular-nums text-primary-foreground"
                                     >
-                                        {{ badgeFor(item)! > 99 ? '99+' : badgeFor(item) }}
-                                        <span class="sr-only">{{ badgeLabel(item, badgeFor(item)!) }}</span>
+                                        {{ badgeFor(item)!.text }}
+                                    </span>
+                                    <span v-if="badgeFor(item)" class="sr-only">
+                                        {{ badgeFor(item)!.label }}
                                     </span>
                                 </Link>
                             </li>

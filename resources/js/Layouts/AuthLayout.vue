@@ -10,7 +10,7 @@ import { Card } from '@/Components/ui/card';
         <main class="flex w-full max-w-sm flex-col gap-6">
             <AppWordmark variant="lockup" surface="light" :size="32" class="self-center" />
             <FlashMessage />
-            <Card class="w-full shadow-xs">
+            <Card class="w-full">
                 <slot />
             </Card>
             <p class="text-center text-xs text-muted-foreground">

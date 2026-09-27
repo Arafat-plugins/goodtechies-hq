@@ -46,6 +46,14 @@ beforeEach(function (): void {
 
     $this->seed();
 
+    // Every figure in this file is one a human added up from the five entries in
+    // `sheetFixture()`. Phase 10's `WorkSeeder` now seeds a real two months of Tapu's tracked
+    // time, which the screens needed and which this file's arithmetic cannot survive: the week
+    // it asserts on is inside that window. So the table starts empty here and the fixture is
+    // the only thing in it. The seeded month is asserted in
+    // `tests/Feature/Database/WorkSeederTest.php`.
+    TimeEntry::query()->delete();
+
     $this->admin = User::where('email', 'shahadat@goodtechies.test')->firstOrFail();
     $this->tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
     $this->yaseen = User::where('email', 'yaseen@goodtechies.test')->firstOrFail();

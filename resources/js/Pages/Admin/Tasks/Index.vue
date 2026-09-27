@@ -3,6 +3,7 @@ import { Head } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import PageShell from '@/Components/PageShell.vue';
+import GanttNarrowNotice from '@/Components/Tasks/Gantt/GanttNarrowNotice.vue';
 import QuickAddTaskModal from '@/Components/Tasks/QuickAddTaskModal.vue';
 import TaskDetailDrawer from '@/Components/Tasks/TaskDetailDrawer.vue';
 import type {
@@ -18,7 +19,6 @@ import TaskViewSwitcher from '@/Components/Tasks/TaskViewSwitcher.vue';
 import { Button } from '@/Components/ui/button';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
-import { usePagePoll } from '@/lib/pagePoll';
 import { queryParam, syncQuery } from '@/lib/tableState';
 
 defineOptions({ layout: AdminLayout });
@@ -38,9 +38,6 @@ defineProps<{
     /** Slice 1 had no list to build the assignee chip from; slice 2's controller sends one. */
     employees: TaskNamedRef[];
 }>();
-
-/** Part 0.5 refresh rule: somebody else moves or closes a task in a column you are reading. */
-usePagePoll(['tasks']);
 
 /**
  * The drawer's writes are this screen's writes, and a drawer covers the layout's alert strip
@@ -105,6 +102,8 @@ function openTask(task: Task): void {
                 New task
             </Button>
         </template>
+
+        <GanttNarrowNotice />
 
         <TaskList
             table-id="admin-tasks"

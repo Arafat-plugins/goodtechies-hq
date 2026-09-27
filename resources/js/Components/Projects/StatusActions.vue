@@ -20,6 +20,7 @@ import {
 } from '@/Components/ui/dropdown-menu';
 import { Label } from '@/Components/ui/label';
 import { Textarea } from '@/Components/ui/textarea';
+import { useMenuDialog } from '@/lib/menuFocus';
 
 const props = defineProps<{
     project: Project;
@@ -74,13 +75,27 @@ const cancelForm = useForm({
     reason: '',
 });
 
-/** Let the dropdown finish closing before the dialog takes the focus trap. */
+/**
+ * Decision 5-20: this dialog is opened from a `DropdownMenuItem`, so reka's focus restore aimed at an
+ * element the menu had already unmounted and landed on `<body>`. `openFromMenu` captures the *Change
+ * status* trigger while the menu is still open and defers the dialog by a tick; `closeCancel` puts
+ * the keyboard back on it. The trigger disappears when a cancellation lands — a cancelled project has
+ * no further moves — so the fallback matters here, and it is the `<main>` region rather than nothing
+ * (see `lib/menuFocus.ts`).
+ */
+const menu = useMenuDialog();
+
 function askToCancel(): void {
-    setTimeout(() => {
+    menu.openFromMenu(() => {
         cancelForm.clearErrors();
         cancelForm.reason = '';
         cancelOpen.value = true;
-    }, 0);
+    });
+}
+
+function closeCancel(): void {
+    cancelOpen.value = false;
+    menu.returnFocus();
 }
 
 function confirmCancel(): void {
@@ -90,8 +105,10 @@ function confirmCancel(): void {
 
     cancelForm.post(`/admin/projects/${props.project.id}/status`, {
         preserveScroll: true,
+        // `onSuccess`, not "close on submit": a validation failure has to leave the dialog open with
+        // the reason still in it (decision 9-27's lesson, one screen over).
         onSuccess: () => {
-            cancelOpen.value = false;
+            closeCancel();
         },
     });
 }
@@ -127,7 +144,7 @@ function choose(status: string): void {
         </DropdownMenuContent>
     </DropdownMenu>
 
-    <Dialog v-model:open="cancelOpen">
+    <Dialog :open="cancelOpen" @update:open="(open) => { if (! open) { closeCancel(); } }">
         <DialogContent>
             <form novalidate @submit.prevent="confirmCancel">
                 <DialogHeader>
@@ -162,7 +179,7 @@ function choose(status: string): void {
                         type="button"
                         variant="outline"
                         :disabled="cancelForm.processing"
-                        @click="cancelOpen = false"
+                        @click="closeCancel"
                     >
                         Keep it open
                     </Button>

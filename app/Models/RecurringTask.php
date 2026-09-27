@@ -43,6 +43,26 @@ class RecurringTask extends Model
     public const MAX_CHECKLIST_ITEMS = 30;
 
     /**
+     * The three placeholders a title pattern may carry.
+     *
+     * Named here, once: `RecurringTaskEngine::renderTitle()` renders them into a task's title and
+     * `displayName()` below takes them back out for the one place that has to print the pattern
+     * beside a title already rendered from it. A fourth placeholder is one edit, not three.
+     */
+    public const PLACEHOLDER_PERIOD = '{period}';
+
+    public const PLACEHOLDER_PROJECT = '{project}';
+
+    public const PLACEHOLDER_DATE = '{date}';
+
+    /** @var list<string> */
+    public const PLACEHOLDERS = [
+        self::PLACEHOLDER_PERIOD,
+        self::PLACEHOLDER_PROJECT,
+        self::PLACEHOLDER_DATE,
+    ];
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
@@ -54,6 +74,42 @@ class RecurringTask extends Model
             'next_run_at' => 'datetime',
             'active' => 'boolean',
         ];
+    }
+
+    /**
+     * What this template is CALLED, as opposed to the pattern it titles tasks with.
+     *
+     * Decision 3-13: the task detail page prints *"Generated from: Buffalo Modular Monthly SEO —
+     * {period}"* directly under the title that pattern produced — *"Buffalo Modular Monthly SEO —
+     * October 2026"* — so the reader met a piece of template syntax in a sentence about their own
+     * task. Correct, and unreadable.
+     *
+     * The fix is not a second stored "display name" field, which is what made this a decision
+     * rather than a fix: a column somebody has to fill in is a column that will disagree with the
+     * pattern the first time one of them is edited. The placeholders are simply taken out and the
+     * punctuation that was only there to hold them goes with them — so the pattern above is
+     * *"Buffalo Modular Monthly SEO"*, which is what a person would call it out loud.
+     *
+     * Three steps, and the middle one is the one worth explaining: a run of separators left
+     * touching by a removed placeholder ("abc.com — {period} — Maintenance") collapses to one,
+     * because two em dashes in a row is a visible hole where something used to be.
+     *
+     * A pattern that is nothing BUT placeholders has no name to give, so it keeps the pattern —
+     * the same choice `renderTitle()` makes when every placeholder resolves to nothing. An
+     * identifier the author recognises beats an empty space.
+     *
+     * The Recurring tab is deliberately not a caller: there the pattern IS the thing being
+     * edited, and `RecurringTaskResource::title_template` still sends it verbatim.
+     */
+    public function displayName(): string
+    {
+        $pattern = trim((string) $this->title_template);
+
+        $name = str_replace(self::PLACEHOLDERS, '', $pattern);
+        $name = (string) preg_replace('/([—–\-·:|\/,])(\s*[—–\-·:|\/,])+/u', '$1', $name);
+        $name = trim((string) preg_replace('/\s+/u', ' ', $name), " \t\n—–-·:|/,");
+
+        return $name === '' ? $pattern : $name;
     }
 
     /**

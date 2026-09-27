@@ -32,7 +32,7 @@ function skip(): void {
 <template>
     <a
         :href="`#${targetId}`"
-        class="fixed -top-16 left-4 z-50 rounded-md border bg-card px-4 py-2 text-sm font-medium text-card-foreground shadow-overlay outline-none focus:top-4 focus:border-ring focus:ring-3 focus:ring-ring/50"
+        class="fixed -top-16 left-4 z-50 rounded-md border bg-card px-4 py-2 text-sm font-medium text-card-foreground shadow-overlay outline-none focus:top-4 focus:border-ring focus:ring-3 focus:ring-ring"
         @click.prevent="skip"
     >
         Skip to main content

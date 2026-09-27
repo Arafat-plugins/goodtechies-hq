@@ -105,7 +105,7 @@ it('reports the delete permission per requester', function () {
 |--------------------------------------------------------------------------
 */
 
-it('sends the attachment count on the task payload', function () {
+it('sends the attachment count on the task payload, and no attachments with it', function () {
     $this->files->store($this->admin, $this->task, UploadedFile::fake()->create('a.pdf', 4, 'application/pdf'));
     $this->files->store($this->admin, $this->task, UploadedFile::fake()->create('b.pdf', 4, 'application/pdf'));
 
@@ -114,8 +114,13 @@ it('sends the attachment count on the task payload', function () {
         ->assertOk()
         ->viewData('page')['props']['task'];
 
+    // Decision 2-30, closed. The array used to ride along on every detail render — a full
+    // `FileResource` per file, which is a signed URL minted and a policy pass — and nothing read
+    // it: `FilePanel` fetches its own list, because it also has to re-fetch after an upload, a
+    // replace and a delete. The count is what the paperclip and the panel heading read, and the
+    // count is all that is sent.
     expect($payload['attachment_count'])->toBe(2)
-        ->and($payload['attachments'])->toHaveCount(2);
+        ->and($payload)->not->toHaveKey('attachments');
 })->group('phase2');
 
 it('counts a file once however many versions it has', function () {
@@ -127,8 +132,16 @@ it('counts a file once however many versions it has', function () {
         ->assertOk()
         ->viewData('page')['props']['task'];
 
-    expect($payload['attachment_count'])->toBe(1)
-        ->and($payload['attachments'][0]['version'])->toBe(2);
+    // The count is per FILE, not per version. What version the panel draws is the panel's own
+    // question, asked at the files endpoint.
+    expect($payload['attachment_count'])->toBe(1);
+
+    $panel = $this->actingAs($this->admin)
+        ->getJson("/admin/tasks/{$this->task->id}/files")
+        ->assertOk()
+        ->json();
+
+    expect($panel['files'][0]['version'])->toBe(2);
 })->group('phase2');
 
 it('sends the count on every list view and no attachments with it', function (string $path, string $prop) {

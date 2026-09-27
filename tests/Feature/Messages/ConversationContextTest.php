@@ -5,6 +5,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\ConversationService;
 use App\Services\MessageService;
+use App\Support\TaskStatus;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -138,18 +139,30 @@ it('carries the project and its tasks on a project channel', function () {
     expect(array_keys($payload))->toEqualCanonicalizing([
         'conversation_id', 'type', 'members', 'files', 'project', 'tasks',
     ])
-        ->and(array_keys($payload['project']))->toEqualCanonicalizing(['id', 'name', 'status', 'href'])
+        ->and(array_keys($payload['project']))
+        ->toEqualCanonicalizing(['id', 'name', 'status', 'status_label', 'status_tone', 'href'])
         ->and($payload['project']['id'])->toBe($this->tapusProject->id)
         ->and($payload['project']['name'])->toBe($this->tapusProject->name)
         ->and($payload['project']['status'])->toBe($this->tapusProject->status->value)
+        // Decision M-14: the word and the tone are the SERVER's, so the panel prints a
+        // `StatusBadge` instead of de-underscoring the key into something that was neither this
+        // app's vocabulary nor a colour a screen may choose.
+        ->and($payload['project']['status_label'])->toBe($this->tapusProject->status->label())
+        ->and($payload['project']['status_tone'])->toBe($this->tapusProject->status->tone())
         // Into the shell this reader is actually in. An employee sent to /admin/... would meet
         // a 403 dressed up as a link.
         ->and($payload['project']['href'])->toBe('/employee/projects/'.$this->tapusProject->id)
         ->and(array_column($payload['tasks'], 'id'))->toContain($this->tapusTask->id);
 
     foreach ($payload['tasks'] as $task) {
-        expect(array_keys($task))->toEqualCanonicalizing(['id', 'title', 'status', 'href'])
-            ->and($task['href'])->toBe('/employee/tasks/'.$task['id']);
+        expect(array_keys($task))
+            ->toEqualCanonicalizing(['id', 'title', 'status', 'status_label', 'status_tone', 'href'])
+            ->and($task['href'])->toBe('/employee/tasks/'.$task['id'])
+            // The enum's own words, which is how the panel comes to say "Waiting / Blocked" and
+            // "Done" rather than "Waiting" and "Completed" (the disagreement decision 10-30
+            // settled on the reports).
+            ->and($task['status_label'])->toBe(TaskStatus::from($task['status'])->label())
+            ->and($task['status_tone'])->toBe(TaskStatus::from($task['status'])->tone());
     }
 })->group('phase6');
 

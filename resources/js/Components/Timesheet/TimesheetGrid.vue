@@ -236,7 +236,7 @@ function add(date: string, taskId: number | null): void {
                                         'flex min-h-14 w-full flex-col gap-1 rounded-md p-1 text-left',
                                         canAddTime
                                             && !days[index].is_future
-                                            && 'outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50',
+                                            && 'outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring',
                                     )
                                 "
                                 :aria-label="

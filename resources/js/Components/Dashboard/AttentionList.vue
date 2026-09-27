@@ -49,7 +49,16 @@ withDefaults(
 </script>
 
 <template>
-    <Card class="gap-4 p-6 shadow-xs">
+    <!--
+        `min-w-0` on the root is load-bearing, not tidiness. A grid track's default minimum is
+        `auto`, which is its content's intrinsic width — so a card whose rows carry long titles
+        grows the track rather than truncating inside it, and the `truncate` classes below never
+        get a chance to fire. That pushed /admin/dashboard 51px wide at 375 the day this card
+        gained a second caller, while every child in it already said `min-w-0`. The root has to
+        say it too; a wrapper at each call site would be the same fix written three times and
+        forgotten the fourth.
+    -->
+    <Card class="min-w-0 gap-4 p-6">
         <div class="flex min-w-0 items-center justify-between gap-2">
             <h2 class="text-sm font-medium">{{ title }}</h2>
             <slot name="action" />
@@ -67,7 +76,7 @@ withDefaults(
             <li v-for="item in items" :key="item.id" class="min-w-0 border-b last:border-b-0">
                 <Link
                     :href="item.href"
-                    class="flex min-w-0 items-center gap-3 rounded-md px-2 py-3 outline-none transition-colors hover:bg-accent/40 focus-visible:ring-3 focus-visible:ring-ring/50"
+                    class="flex min-w-0 items-center gap-3 rounded-md px-2 py-3 outline-none transition-colors hover:bg-accent/40 focus-visible:ring-3 focus-visible:ring-ring"
                 >
                     <span
                         :class="

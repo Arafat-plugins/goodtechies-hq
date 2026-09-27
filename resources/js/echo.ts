@@ -1,6 +1,6 @@
 import type EchoClass from 'laravel-echo';
 import type { Ref } from 'vue';
-import { onScopeDispose, readonly, ref } from 'vue';
+import { readonly, ref } from 'vue';
 
 /**
  * The realtime transport, and the switch that turns it off.
@@ -172,11 +172,17 @@ export type RealtimeHandlers = Record<string, (payload: never) => void>;
  * not branch on the mode. They subscribe, and then ask `realtimeConnection` whether they also
  * need to poll.
  *
- * This is the low-level half. Anything living inside a component should use
- * `useRealtimeChannel()` below, which cannot forget to call the returned function. This one
- * exists for the module-scoped, reference-counted subscription in
- * `Components/Notifications/notifications.ts`, whose lifetime is the bell's and not any one
- * bell component's.
+ * **This is the low-level half, and it has exactly two callers on purpose.**
+ * `Components/Realtime/live.ts` wraps it into `useLiveRefresh()` — the one composable every
+ * screen uses — and `Components/Notifications/notifications.ts` holds a module-scoped,
+ * reference-counted subscription whose lifetime is the bell's rather than any one bell
+ * component's. A component should never reach for this directly; it should ask `live.ts`.
+ *
+ * There used to be a third thing here, a `useRealtimeChannel()` that tied a subscription to a
+ * Vue scope. The polish pass deleted it: once `useLiveRefresh()` existed, nothing called it, and
+ * a second way to subscribe — one that knows about sockets but not about the polling fallback
+ * the client actually runs on — is how a screen ends up live on one build and dead on the other.
+ * §A.4's rule is one transport and one pattern.
  */
 export function listenPrivate(channel: string, handlers: RealtimeHandlers): () => void {
     // Synchronous in, synchronous out, even though the client is now imported asynchronously:
@@ -207,17 +213,4 @@ export function listenPrivate(channel: string, handlers: RealtimeHandlers): () =
         leave?.();
         leave = null;
     };
-}
-
-/**
- * Listen to a private channel for as long as the calling scope lives.
- *
- * The subscription is torn down by `onScopeDispose`, because a component that has to remember
- * to unsubscribe is a component that will not, and a leaked channel keeps delivering into a
- * handler whose component is gone.
- */
-export function useRealtimeChannel(channel: string, handlers: RealtimeHandlers): void {
-    const stop = listenPrivate(channel, handlers);
-
-    onScopeDispose(stop);
 }

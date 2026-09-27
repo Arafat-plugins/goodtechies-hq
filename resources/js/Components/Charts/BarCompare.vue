@@ -24,9 +24,26 @@ const props = withDefaults(
         label?: string;
         height?: number;
         loading?: boolean;
+        /**
+         * How a value is written out — in the axis, in the tooltip, in the legend and in the
+         * screen-reader table, so all four agree.
+         *
+         * Defaults to grouped digits, which is right for a count. A chart of money or of
+         * durations passes its own: **a chart whose axis reads `432` when the table under it
+         * reads `432h` is a chart the reader has to be told how to read**, and the unit
+         * smuggled into the title is a caption doing a scale's job.
+         *
+         * It takes a number because a mark's geometry is a number; the exact value — a money
+         * string from PostgreSQL, say — stays in the table beside the chart (report contract
+         * §3).
+         */
+        valueFormat?: (value: number) => string;
     }>(),
-    { orientation: 'vertical', height: 200, loading: false },
+    { orientation: 'vertical', height: 200, loading: false, valueFormat: (value: number): string => value.toLocaleString() },
 );
+/** The caller's formatter, or grouped digits. One indirection so every site below agrees. */
+const fmt = (value: number): string => props.valueFormat(value);
+
 
 const tokens = useChartTokens();
 const cssVars = computed(() => chartCssVars(tokens.value));
@@ -66,7 +83,7 @@ function labelAt(tick: number | Date): string {
 }
 
 const valueFormat = (tick: number | Date): string =>
-    typeof tick === 'number' ? tick.toLocaleString() : String(tick);
+    typeof tick === 'number' ? fmt(tick) : String(tick);
 
 const barOrientation = computed(() => (isHorizontal.value ? Orientation.Horizontal : Orientation.Vertical));
 
@@ -78,7 +95,7 @@ const valueTicks = computed(() => niceTicks(Math.max(0, ...props.data.map((item)
 
 const triggers = computed(() => ({
     [StackedBar.selectors.bar]: (bar: { datum: BarCompareItem }) =>
-        chartTooltip(bar.datum.label, bar.datum.value.toLocaleString(), accent.value),
+        chartTooltip(bar.datum.label, fmt(bar.datum.value), accent.value),
 }));
 
 /** Horizontal bars need room for their category labels; vertical ones do not. */
@@ -155,7 +172,17 @@ const margin = computed(() =>
                 </VisXYContainer>
             </div>
 
-            <table class="sr-only">
+            <!--
+                **The wrapper carries `sr-only`, not the table.** `sr-only` pins `width: 1px`
+                and `overflow: hidden`, which clips an ordinary box and does NOT clip a table:
+                a table is sized by its content whatever its container says, so a long label in
+                this fallback pushes the PAGE wide while staying invisible. Measured on the
+                finance report at 360px, where one project name added 63px of horizontal scroll
+                to a page nobody could see the cause of. A `<div class="sr-only">` around it is
+                a box, and a box clips.
+            -->
+            <div class="sr-only">
+            <table>
                 <caption>{{ label ?? 'Comparison' }} — {{ data.length }} categories</caption>
                 <thead>
                     <tr>
@@ -166,10 +193,11 @@ const margin = computed(() =>
                 <tbody>
                     <tr v-for="item in data" :key="item.label">
                         <th scope="row">{{ item.label }}</th>
-                        <td class="tabular-nums">{{ item.value.toLocaleString() }}</td>
+                        <td class="tabular-nums">{{ fmt(item.value) }}</td>
                     </tr>
                 </tbody>
             </table>
+            </div>
         </template>
     </div>
 </template>

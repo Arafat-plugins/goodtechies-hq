@@ -1,22 +1,4 @@
-import {
-    Bell,
-    CalendarCheck,
-    CalendarClock,
-    CalendarDays,
-    CalendarOff,
-    CalendarRange,
-    ChartColumn,
-    CircleAlert,
-    FolderKanban,
-    LayoutDashboard,
-    ListChecks,
-    ListTodo,
-    MessagesSquare,
-    Timer,
-    UserRound,
-    UsersRound,
-    Video,
-} from '@lucide/vue';
+import { Bell, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CalendarRange, ChartColumn, CircleAlert, FileText, FolderKanban, LayoutDashboard, ListChecks, ListTodo, MessagesSquare, Timer, UserRound, UsersRound, Video } from '@lucide/vue';
 import type { TrackingMode } from '@/types';
 import type { NavGroup, NavItem } from './types';
 
@@ -65,24 +47,49 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
                 { label: 'Projects', href: '/employee/projects', icon: FolderKanban },
                 // Shipped in slice 3. The longer claim wins the row — see `activeItem()`.
                 { label: 'Calendar', href: '/employee/tasks/calendar', icon: CalendarDays },
-                { label: 'Meetings', icon: Video, phase: 7 },
+                // Phase 7. The shared Meetings page — whose calendar a meeting is on belongs
+                // to the person and not to the shell, so this points at `/meetings` and the
+                // page picks `EmployeeLayout` from the viewer's surface.
+                { label: 'Meetings', href: '/meetings', icon: Video },
                 // Phase 6. The shared Messages page — whose mail a thread is belongs to the
                 // person and not to the shell, so this points at `/messages` and the page picks
                 // `EmployeeLayout` from the viewer's surface, exactly as My Leave does.
-                { label: 'Messages', href: '/messages', icon: MessagesSquare, badgeKey: 'messagesUnread' },
+                { label: 'Messages', href: '/messages', icon: MessagesSquare },
                 // Phase 6. Part D §2 words the employee's entry point as "Messages → Team",
                 // and the Messages page has no sub-navigation to hang it off — so the row sits
                 // directly under Messages, which is the same neighbourhood and one fewer click.
                 // The alternative was a page nobody on this surface could reach.
                 { label: 'Team', href: '/team', icon: UsersRound },
-                { label: 'Notifications', icon: Bell, phase: 2 },
+                // Phase 2's Notification Center, at the shared `/notifications` — the same page
+                // the bell in the top bar opens, which is why it needs no surface of its own.
+                //
+                // **This row said `phase: 2` until Phase 12 and the route had existed since
+                // Phase 2.** It was the last phase-gated row left in the application, and it
+                // sat in the *Coming soon* disclosure labelled `P2` for ten phases while the
+                // screen behind it worked perfectly — so an employee was told the thing they
+                // were already being notified in was not built yet. Enabling a row is one line
+                // (`href` in, `phase` out); the cost of forgetting it is a feature nobody knows
+                // they have.
+                { label: 'Notifications', href: '/notifications', icon: Bell },
                 tracking,
                 ...timesheet,
                 // The shared My Leave page — applying for leave is a fact about the person, not
                 // about the shell (Part C §1 gives the cell to every role), so this points at
                 // `/leave` and the page picks `EmployeeLayout` from the viewer's surface.
                 { label: 'My Leave', href: '/leave', icon: CalendarOff },
-                { label: 'My Reports', icon: ChartColumn, phase: 10 },
+
+                // **My Payslip (Phase 9).** Part C §1 gives *view own payslip* to every role, so
+                // this row exists on all three shells — and it points at the SHARED `/payslip`,
+                // which picks `EmployeeLayout` from the viewer's surface exactly as My Leave
+                // above does. The page shows only this person's own items: the scope is
+                // `PayrollService::itemsFor()`, so a row somebody else's is not merely hidden by
+                // a nav that does not link to it — it is absent from the listing, 404 by id, and
+                // the attempt is audit-logged (Part B §3 rule 1).
+                { label: 'My Payslip', href: '/payslip', icon: FileText },
+                // Phase 10. Self-scoped and deliberately not the Admin catalogue: Part D §15
+                // names a different list for an employee, so this is its own screen rather than
+                // `/admin/reports` with a filter on it.
+                { label: 'My Reports', href: '/employee/reports', icon: ChartColumn },
                 { label: 'Profile', href: '/profile', icon: UserRound },
             ],
         },

@@ -1,12 +1,14 @@
 <?php
 
 use App\Models\AttendanceRecord;
+use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\LeaveBalance;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\User;
 use App\Support\AttendanceStatus;
+use App\Support\AuditEvent;
 use App\Support\LeaveStatus;
 use App\Support\RoleName;
 use Illuminate\Support\Carbon;
@@ -181,6 +183,162 @@ it('refuses to resubmit a request that was not sent back', function () {
 
 /*
 |--------------------------------------------------------------------------
+| Withdrawing your own request — decision 5-19
+|--------------------------------------------------------------------------
+|
+| The applicant's second move. Before it, somebody who booked the wrong week had
+| to ask an Admin to REJECT them: a refusal on their record and a
+| `leave.rejected` row in the audit log for a week they never wanted.
+|
+*/
+
+it('lets the applicant withdraw a request that is still waiting, audited, and frees the days again', function () {
+    $request = leaveRequestFor($this->yaseen);
+    $before = AuditLog::query()->count();
+
+    $this->actingAs($this->yaseen)
+        ->post("/leave/{$request->id}/withdraw")
+        ->assertRedirect()
+        ->assertSessionHas('success');
+
+    $request->refresh();
+
+    expect($request->status)->toBe(LeaveStatus::Withdrawn)
+        // `leave_requests_decision_is_whole` reads `decided_at` as "no longer waiting in the queue",
+        // which is exactly what a withdrawal is. Nobody approved anything, so `approver_id` is
+        // untouched — the audit row's actor is the only name on this.
+        ->and($request->decided_at)->not->toBeNull()
+        ->and($request->approver_id)->toBeNull();
+
+    // Audited the way its neighbours are: old and new values, the actor, and its own event rather
+    // than a `leave.rejected` row, because WHO ended a request is the whole of what a reader wants.
+    $row = AuditLog::query()->latest('id')->firstOrFail();
+
+    expect(AuditLog::query()->count())->toBe($before + 1)
+        ->and($row->event)->toBe(AuditEvent::LeaveWithdrawn->value)
+        ->and($row->actor_id)->toBe($this->yaseen->id)
+        ->and($row->old_value['status'])->toBe('pending')
+        ->and($row->new_value['status'])->toBe('withdrawn');
+
+    // The point of withdrawing: `withdrawn` is not a holding status, so the GiST exclusion
+    // constraint has let go of the window and the same days can be booked again.
+    $this->actingAs($this->yaseen)
+        ->post('/leave', [
+            'leave_type_id' => $this->annual->id,
+            'start_date' => LEAVE_ENDPOINT_SUNDAY,
+            'end_date' => LEAVE_ENDPOINT_MONDAY,
+            'reason' => 'Asking again for the week I actually meant.',
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('success');
+
+    expect(LeaveRequest::query()->forEmployee($this->yaseen->employee)->holding()->count())->toBe(1);
+});
+
+it('lets a request sent back for correction be withdrawn instead of amended', function () {
+    $request = leaveRequestFor($this->yaseen);
+
+    $this->actingAs($this->admin)
+        ->post("/admin/leave/{$request->id}/correction", ['note' => 'Which week did you mean?'])
+        ->assertRedirect();
+
+    $this->actingAs($this->yaseen)
+        ->post("/leave/{$request->id}/withdraw")
+        ->assertRedirect()
+        ->assertSessionHas('success');
+
+    // The approver's question survives on the row — nothing here erases what was said — and
+    // `approver_id` still names who asked it, because a withdrawal is not a second decision.
+    $request->refresh();
+
+    expect($request->status)->toBe(LeaveStatus::Withdrawn)
+        ->and($request->decision_note)->toBe('Which week did you mean?')
+        ->and($request->approver_id)->toBe($this->admin->id);
+});
+
+it('leaves an approved or rejected request alone, with the days it already spent', function () {
+    $approved = leaveRequestFor($this->yaseen);
+    $rejected = leaveRequestFor($this->yaseen, LEAVE_ENDPOINT_SUNDAY_2, LEAVE_ENDPOINT_MONDAY_2);
+
+    $this->actingAs($this->admin)->post("/admin/leave/{$approved->id}/approve")->assertRedirect();
+    $this->actingAs($this->admin)
+        ->post("/admin/leave/{$rejected->id}/reject", ['note' => 'We need you that week.'])
+        ->assertRedirect();
+
+    // 403 and not 404: the requester may see their own request, they simply may not do this to it.
+    // An approval has spent a balance and written attendance rows, and unwinding those from a status
+    // change would be a second write path for facts this table does not own.
+    foreach ([$approved, $rejected] as $finished) {
+        $this->actingAs($this->yaseen)
+            ->post("/leave/{$finished->id}/withdraw")
+            ->assertForbidden();
+    }
+
+    expect($approved->fresh()->status)->toBe(LeaveStatus::Approved)
+        ->and($rejected->fresh()->status)->toBe(LeaveStatus::Rejected);
+});
+
+it('lets nobody withdraw somebody else request — 404 for a stranger, 403 for an Admin who can see it', function () {
+    $yaseens = leaveRequestFor($this->yaseen);
+
+    // The Accountant cannot see it at all, so it is absent rather than refused (Part C) and they
+    // never learn whether the id exists.
+    $this->actingAs($this->accountant)
+        ->post("/leave/{$yaseens->id}/withdraw")
+        ->assertNotFound();
+
+    // An Admin CAN see it — it is in their queue — so the refusal is about the verb: withdrawing is
+    // the applicant's move, and an Admin who wants it gone rejects it under their own name.
+    $this->actingAs($this->admin)
+        ->post("/leave/{$yaseens->id}/withdraw")
+        ->assertForbidden();
+
+    expect($yaseens->fresh()->status)->toBe(LeaveStatus::Pending);
+});
+
+it('takes a withdrawn request out of the queue and its counts, and keeps it on My Leave', function () {
+    $request = leaveRequestFor($this->yaseen);
+
+    $this->actingAs($this->yaseen)->post("/leave/{$request->id}/withdraw")->assertRedirect();
+
+    // The queue is `isOpen()` at query time, never a stored flag, so the row leaves it by itself —
+    // which is why a withdrawal writes no notification: nobody is being asked for anything.
+    $queue = $this->actingAs($this->admin)->get('/admin/leave')->assertOk()->viewData('page')['props'];
+
+    expect(array_column($queue['requests'], 'id'))->not->toContain($request->id)
+        ->and($queue['counts']['open'])->toBe(0)
+        ->and($queue['counts']['withdrawn'])->toBe(1)
+        // The status is in the filter list, so the Admin can still go and look at it — the options
+        // come from `LeaveStatus::cases()`, so the fifth status arrived there by itself.
+        ->and(array_column($queue['statuses'], 'value'))->toContain('withdrawn');
+
+    // And it is still the applicant's own record, in History, with the word on it.
+    $mine = $this->actingAs($this->yaseen)->get('/leave')->assertOk()->viewData('page')['props']['requests'];
+    $row = collect($mine)->firstWhere('id', $request->id);
+
+    expect($row['status_label'])->toBe('Withdrawn')
+        // A state is in the WORDS, not only the colour (DESIGN.md §5.6): the tone it shares with a
+        // rejection, the word is what tells the two apart.
+        ->and($row['tone'])->toBe('cancelled')
+        ->and($row['permissions']['can_withdraw'])->toBeFalse();
+});
+
+it('offers Withdraw on the applicant own open request and on nobody else', function () {
+    $mine = leaveRequestFor($this->yaseen);
+
+    $rows = $this->actingAs($this->yaseen)->get('/leave')->assertOk()->viewData('page')['props']['requests'];
+
+    expect(collect($rows)->firstWhere('id', $mine->id)['permissions']['can_withdraw'])->toBeTrue();
+
+    // In the Admin queue, on somebody else's request, the button is absent rather than drawn and
+    // refused — `LeaveRequestPolicy` answered per record, never a role read in Vue.
+    $queue = $this->actingAs($this->admin)->get('/admin/leave')->assertOk()->viewData('page')['props']['requests'];
+
+    expect(collect($queue)->firstWhere('id', $mine->id)['permissions']['can_withdraw'])->toBeFalse();
+});
+
+/*
+|--------------------------------------------------------------------------
 | The Admin screens are the Admin surface
 |--------------------------------------------------------------------------
 */
@@ -304,6 +462,11 @@ it('walks the plan acceptance: Tapu applies for 2 days, an Admin approves, every
 it('marks an office employee working days as Leave on approval, with no manual step', function () {
     // Yaseen is on the office clock, so the same approval writes the attendance rows Tapu's
     // cannot have. Both halves of decision 4-11, read side by side.
+    // The two rows counted below are the two this approval writes. Phase 10's `WorkSeeder`
+    // now seeds Yaseen a real month of attendance, so his table is cleared first and the count
+    // stays a statement about the approval rather than about the seed.
+    AttendanceRecord::where('employee_id', $this->yaseen->employee->id)->delete();
+
     $request = leaveRequestFor($this->yaseen);
 
     $this->actingAs($this->admin)

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Exceptions\TaskStateException;
 use App\Http\Controllers\Concerns\BuildsDiscussionPayload;
+use App\Http\Controllers\Concerns\BuildsGanttPayload;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Task\ChangeTaskStatusRequest;
 use App\Http\Requests\Task\HandOffTaskRequest;
@@ -16,6 +17,7 @@ use App\Http\Requests\Task\UpdateChecklistItemRequest;
 use App\Http\Requests\Task\UpdateTaskAssigneesRequest;
 use App\Http\Requests\Task\UpdateTaskRequest;
 use App\Http\Requests\Task\ViewTaskCalendarRequest;
+use App\Http\Requests\Task\ViewTaskGanttRequest;
 use App\Http\Resources\TaskResource;
 use App\Models\ActivityLog;
 use App\Models\Employee;
@@ -28,6 +30,7 @@ use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\ConversationService;
 use App\Services\TaskService;
+use App\Support\GanttZoom;
 use App\Support\TaskBucket;
 use App\Support\TaskPriority;
 use App\Support\TaskStatus;
@@ -60,6 +63,11 @@ class TaskController extends Controller
     // `…/discussion` endpoint sends, so the panel paints with its thread already in hand.
     use BuildsDiscussionPayload;
 
+    // The Gantt's window, columns, bar geometry and dependency arrows — built in one place for
+    // both surfaces, because a payload built twice is a payload that gains a field on one
+    // surface and not the other.
+    use BuildsGanttPayload;
+
     /** How far back a task's timeline is shown on the detail page. */
     private const ACTIVITY_LIMIT = 30;
 
@@ -73,9 +81,11 @@ class TaskController extends Controller
         'completer',
         'firstCompleter',
         'workSummaryAuthor',
-        // The attachment panel. Current versions only — the relation says so — each one's
-        // uploader eager-loaded so FileResource does not query per row.
-        'files.uploader',
+        // **The attachments are deliberately NOT here** (decision 2-30). The panel that draws
+        // them fetches its own list from the files endpoint — it has to, because it re-fetches
+        // after every upload, replace and delete — so loading the relation here only fed a
+        // `TaskResource` key nobody read, at two signed-URL mintings and two policy passes per
+        // file per render. `attachment_count` is a `withCount` in `visible()` and is untouched.
         // Phase 3: "Generated from: <template> · period <Month YYYY>". A belongsTo that is null
         // on every hand-made task, which is most of them — eager-loaded rather than read lazily
         // so the detail payload is one query here too.
@@ -179,6 +189,42 @@ class TaskController extends Controller
             // dashboards' cards link in, so a card's count and the list it opens are the
             // same predicate. Unset, the chip is invisible: FilterBar only draws a chip for
             // a filter that has a value.
+            'buckets' => $this->options(TaskBucket::cases()),
+            'projects' => $this->projects($request),
+            'tags' => $this->filterTags($request),
+            'canManageTags' => $this->mayManageTags(),
+            'employees' => $this->employees(),
+        ]);
+    }
+
+    /**
+     * The Gantt: the same query again, over a window, with each task's bar geometry and the
+     * dependency arrows between the bars that are actually on screen.
+     *
+     * A route of its own for the same reasons the Board and the Calendar are, and its window
+     * is spelled `date_from` / `date_to` exactly as the Calendar's is — one vocabulary, so the
+     * view switcher carries a window between the two views that have one and drops it on the
+     * two that do not.
+     *
+     * `can_plan` is here for the same reason it is on the Calendar: the Gantt's drag writes
+     * dates, and `TaskService::mayPlan()` is the one definition behind both this flag and the
+     * `prohibited` rule `UpdateTaskRequest` puts on `start_date` and `due_date`. It is only
+     * half the answer — whether THIS task may be edited is `permissions.can_update` on each
+     * row, which TaskPolicy resolved — and the screen renders both and computes neither.
+     */
+    public function gantt(ViewTaskGanttRequest $request): Response
+    {
+        Gate::authorize('viewAny', Task::class);
+
+        $filters = $this->tasks->filters($request->query());
+
+        return Inertia::render('Admin/Tasks/Gantt', [
+            'gantt' => $this->ganttPayload($request, $filters),
+            'filters' => $this->presentFilters($filters),
+            'can_plan' => TaskService::mayPlan($request->user()),
+            'zooms' => $this->zooms(),
+            'statuses' => $this->options(TaskStatus::boardOrder()),
+            'priorities' => $this->options(TaskPriority::cases()),
             'buckets' => $this->options(TaskBucket::cases()),
             'projects' => $this->projects($request),
             'tags' => $this->filterTags($request),
@@ -682,6 +728,21 @@ class TaskController extends Controller
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * The Gantt's zoom control. Labelled on the server like every other option list here, so
+     * the control cannot offer a ruling `ViewTaskGanttRequest` would refuse.
+     *
+     * @return list<array{value: string, label: string, description: string}>
+     */
+    private function zooms(): array
+    {
+        return array_map(fn (GanttZoom $zoom): array => [
+            'value' => $zoom->value,
+            'label' => $zoom->label(),
+            'description' => $zoom->description(),
+        ], GanttZoom::all());
     }
 
     /**

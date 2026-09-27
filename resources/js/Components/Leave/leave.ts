@@ -21,8 +21,17 @@ import type { StatusKey } from '@/Components/StatusBadge.vue';
  * is no total across people, no percentage and no comparison with anybody (Part H §1).
  */
 
-/** Part D §9's four statuses. */
-export type LeaveStatusKey = 'pending' | 'approved' | 'rejected' | 'correction_requested';
+/**
+ * Part D §9's four statuses, plus the fifth (decision 5-19).
+ *
+ * `withdrawn` is the applicant taking their own request back. Part D §9 lists four, but those four
+ * are the four answers an APPROVER can give, and somebody who booked the wrong week is not waiting
+ * for an answer — without it the only way out was to ask an Admin to *reject* you.
+ */
+export type LeaveStatusKey = 'pending' | 'approved' | 'rejected' | 'correction_requested' | 'withdrawn';
+
+/** The two statuses still waiting on somebody: `LeaveStatus::isOpen()`, spelled for the client. */
+export const LEAVE_OPEN_STATUSES: readonly LeaveStatusKey[] = ['pending', 'correction_requested'];
 
 export interface LeaveTypeOption {
     id: number;
@@ -68,7 +77,12 @@ export interface LeaveRequestRow {
     /** Absent on the reader's own rows — on My Leave it would be their own name every time. */
     employee: LeavePerson | null;
 
-    permissions: { can_decide: boolean; can_resubmit: boolean };
+    /**
+     * `LeaveRequestPolicy`, resolved per record on the server. `can_withdraw` is the applicant's own
+     * second move and is true only on their own request and only while it is still open
+     * (decision 5-19) — never derived here from a status or a role.
+     */
+    permissions: { can_decide: boolean; can_resubmit: boolean; can_withdraw: boolean };
 }
 
 export interface LeaveBalanceRow {
@@ -134,6 +148,12 @@ export const leaveRoutes = {
     apply: '/leave',
     /** Answering a correction request by amending and resubmitting — the same request. */
     resubmit: (id: number): string => `/leave/${id}`,
+    /**
+     * Taking your own request back (decision 5-19). Shared, with no surface prefix, for the reason
+     * `mine` and `apply` are: it is a fact about the applicant, not about an approver — an Admin who
+     * wants a request gone rejects it, under their own name, from the Admin queue.
+     */
+    withdraw: (id: number): string => `/leave/${id}/withdraw`,
 
     queue: (status?: string | null): string => (status ? `/admin/leave?status=${status}` : '/admin/leave'),
     calendar: (month?: string | null): string =>

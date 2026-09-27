@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AttendanceRecord;
 use App\Models\DailyWorkSummary;
 use App\Models\Employee;
 use App\Models\Holiday;
@@ -45,6 +46,13 @@ beforeEach(function (): void {
     Carbon::setTestNow('2026-09-24 18:00:00');
 
     $this->seed();
+
+    // The view is asserted here row by row, including "a person with neither an attendance row
+    // nor an entry has no row at all" — which only holds of a database nothing was seeded into.
+    // Phase 10's `WorkSeeder` now seeds two real months of both, so the tables start empty here
+    // and the seeded rows are asserted in `tests/Feature/Database/WorkSeederTest.php`.
+    TimeEntry::query()->delete();
+    AttendanceRecord::query()->delete();
 
     $this->yaseen = User::where('email', 'yaseen@goodtechies.test')->firstOrFail()->employee;
     $this->tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail()->employee;

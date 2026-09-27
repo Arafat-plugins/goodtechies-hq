@@ -100,7 +100,7 @@ it('sends the grouped wording, not the raw payload', function () {
 |--------------------------------------------------------------------------
 */
 
-it('lists every tab and fakes none of the four that have no types yet', function () {
+it('lists every tab and fakes none of the ones that have no types yet', function () {
     $project = Project::where('name', 'Buffalo Modular — SEO')->firstOrFail();
 
     $this->notifications->notify(NotificationType::TaskCommented, $this->task, [$this->admin], ['title' => 'a task']);
@@ -118,7 +118,11 @@ it('lists every tab and fakes none of the four that have no types yet', function
     expect($tabs->keys()->all())->toBe(['all', 'tasks', 'messages', 'meetings', 'leave', 'payroll', 'system'])
         ->and($tabs['tasks']['is_built'])->toBeTrue()
         ->and($tabs['system']['is_built'])->toBeTrue()
-        ->and($tabs['meetings']['is_built'])->toBeFalse()
+        // Meetings lit up in Phase 7 by four types naming that tab, which is
+        // NotificationTab::isBuilt() working as designed — a tab is built when the catalogue
+        // fills it and never because somebody flipped a flag. Payroll is the last one left.
+        ->and($tabs['meetings']['is_built'])->toBeTrue()
+        ->and($tabs['payroll']['is_built'])->toBeFalse()
         ->and($tabs['payroll']['unread_count'])->toBe(0)
         ->and($tabs['tasks']['unread_count'])->toBe(1)
         ->and($tabs['system']['unread_count'])->toBe(1);

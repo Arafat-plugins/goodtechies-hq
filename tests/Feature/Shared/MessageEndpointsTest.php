@@ -10,6 +10,7 @@ use App\Services\MessageService;
 use App\Support\ConversationType;
 use App\Support\UserStatus;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 
 /*
@@ -330,6 +331,46 @@ it('offers nobody who may not use messaging in the direct-message picker', funct
         ->not->toContain($this->accountant->id)
         // And never yourself.
         ->not->toContain($this->tapu->id);
+})->group('phase6');
+
+it('answers "may this person be sent a DM" in exactly one place', function () {
+    // Decision 6-16. The rule — active, holding `messages.use`, and not yourself — used to be
+    // written out twice: a private method on this controller and another in
+    // `TeamMemberResource::dmUrl()`. It is now `ConversationPolicy::dm`, asked with the class
+    // leading because the DM row does not exist yet, and this asserts that the three things that
+    // consume it cannot disagree: the picker's option list, the directory's button, and the
+    // endpoint's own refusal.
+    $this->yaseen->forceFill(['status' => UserStatus::Inactive->value])->save();
+
+    $picker = array_column(
+        $this->actingAs($this->tapu)->get(MSGX_URL)->assertOk()->inertiaPage()['props']['people'],
+        'id',
+    );
+
+    $directory = collect($this->actingAs($this->tapu)->get('/team')->assertOk()->inertiaPage()['props']['members'])
+        ->filter(fn (array $row): bool => $row['dm_url'] !== null)
+        ->pluck('id')
+        ->all();
+
+    // The directory keys rows by EMPLOYEE, so the comparison is over the one thing both lists
+    // carry: who the DM button and the picker option point at.
+    $reachable = fn (int $id): bool => Gate::forUser($this->tapu)
+        ->allows('dm', [Conversation::class, User::query()->findOrFail($id)]);
+
+    foreach ([$this->admin->id, $this->tapu->id, $this->accountant->id, $this->yaseen->id] as $id) {
+        expect(in_array($id, $picker, true))->toBe($reachable($id));
+    }
+
+    // Four people, and the endpoint agrees with the policy about each of them: the two the
+    // picker refuses are 404 rather than a button that would fail.
+    expect($reachable($this->admin->id))->toBeTrue()
+        ->and($reachable($this->tapu->id))->toBeFalse()
+        ->and($reachable($this->accountant->id))->toBeFalse()
+        ->and($reachable($this->yaseen->id))->toBeFalse()
+        ->and($directory)->not->toBeEmpty();
+
+    $this->actingAs($this->tapu)->post(MSGX_URL.'/direct/'.$this->tapu->id)->assertNotFound();
+    $this->actingAs($this->tapu)->post(MSGX_URL.'/direct/'.$this->admin->id)->assertRedirect();
 })->group('phase6');
 
 /*

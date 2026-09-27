@@ -2,6 +2,7 @@
 
 use App\Exceptions\ConversationStateException;
 use App\Exceptions\FileStateException;
+use App\Http\Resources\MessageResource;
 use App\Models\Conversation;
 use App\Models\Employee;
 use App\Models\File;
@@ -17,6 +18,7 @@ use App\Support\ConversationType;
 use App\Support\RoleName;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
@@ -252,6 +254,40 @@ it('counts what somebody has not read, and never counts their own', function () 
 
     expect($this->conversations->readState($this->tapu, $conversation)['unread_count'])->toBe(0);
 })->group('phase2');
+
+it('counts a reply posted in the same second as the read — the unread line is sub-second', function () {
+    // Decision M-15, and the test that fails on the old comparison. Both sides of
+    // `messages.created_at > last_read_at` were `timestamp(0)` columns written through the query
+    // grammar's `Y-m-d H:i:s`, so a read and a reply 300ms apart landed on the same stored value
+    // and `>` answered "already read": no badge, no new-messages line, no trace anywhere that a
+    // message had been skipped.
+    //
+    // The two instants are pinned rather than raced, so the assertion means the same thing on
+    // every run: the read at .100 and the reply at .400 are the same SECOND and a different
+    // moment. Before the fix both stored `12:00:00` and this counted 0.
+    $conversation = $this->conversations->forTask($this->tapusTask);
+
+    $this->travelTo(Carbon::parse('2026-11-02 12:00:00.100'));
+    $this->conversations->markRead($this->tapu, $conversation);
+
+    $this->travelTo(Carbon::parse('2026-11-02 12:00:00.400'));
+    $this->messages->post($this->admin, $conversation, 'One more thing before you go');
+
+    $state = $this->conversations->readState($this->tapu, $conversation);
+
+    expect($state['unread_count'])->toBe(1)
+        // The grouped query the inbox and the shell prop read is the same comparison, so it is
+        // asserted here too rather than trusted to agree.
+        ->and($this->conversations->unreadCounts($this->tapu, [$conversation]))
+        ->toBe([$conversation->id => 1]);
+
+    // And the precision survives the payload, because the browser redoes this comparison to draw
+    // the line: `toIso8601String()` has no fractional part, so sending it would move the bug
+    // one layer out rather than fix it.
+    expect($state['last_read_at'])->toContain('.100')
+        ->and((new MessageResource($conversation->messages()->latest('id')->firstOrFail()))
+            ->resolve(request())['created_at'])->toContain('.400');
+})->group('phase6');
 
 it('writes a member row that is only a timestamp', function () {
     $conversation = $this->conversations->forTask($this->tapusTask);

@@ -365,6 +365,74 @@ class LeaveService
         });
     }
 
+    /**
+     * Take your own request back — decision 5-19.
+     *
+     * Part D §9 names four statuses and none of them is this, and for five phases that was read as
+     * "there is no withdrawal". But those four are the four answers an APPROVER can give, and
+     * somebody who booked the wrong week is not waiting for an answer: the only way out was to ask
+     * an Admin to **reject** you, which puts a refusal on your record and a `leave.rejected` row in
+     * the audit log for a week you never meant to ask for. So this is the applicant's second move,
+     * beside the resubmit they already had.
+     *
+     * ## What it is, precisely
+     *
+     *   - **A status move through the machine**, like every other transition in this file. Legal
+     *     only from `pending` and `correction_requested` — `LeaveStatus::isWithdrawable()`, the
+     *     same sentence `LeaveRequestPolicy::withdraw()` and the payload's `can_withdraw` read —
+     *     and terminal, like a rejection.
+     *   - **Own only.** `assertOwn()` is the mirror of `assertNotOwn()` and is here for the reason
+     *     that one is: the policy says it first, and a future command or console call reaches the
+     *     service and not the policy.
+     *   - **Audited**, with old and new values, as `leave.withdrawn`. Nothing was granted and no
+     *     balance moved, which by `requestCorrection()`'s reasoning would argue for no audit row at
+     *     all — but a week vanishing off the leave calendar and out of an approver's queue has to
+     *     have a row saying who removed it, and the actor is the only name on it: `approver_id`
+     *     stays exactly as it was, because nobody approved anything.
+     *   - **`decided_at` is stamped**, because `leave_requests_decision_is_whole` reads it as "this
+     *     row is not waiting in the queue any more" — the same reading `requestCorrection()` relies
+     *     on — and because the screen has to be able to say when the request was taken back.
+     *
+     * ## What it deliberately does not do
+     *
+     *   - **It does not delete the row.** The same choice as a rejection and as a refused time
+     *     entry (decision 4-18): the request, its dates and the employee's own words stay where
+     *     they were, with what happened to them beside them.
+     *   - **It touches no balance and no attendance.** Neither status it is reachable from has
+     *     spent anything, which is exactly why those are the two.
+     *   - **It writes no notification.** Nobody is being asked for anything, and the request leaves
+     *     the approver's queue by itself — the queue and its counts are `isOpen()` at query time,
+     *     never a stored flag. An approver who had already READ *"Yaseen requested leave"* still has
+     *     that row; resolving somebody else's notification needs a rule about the object's state
+     *     rather than about who acted, which is decision 2-55's open shape, not this one's.
+     *   - **It frees the week.** `withdrawn` is not in `LeaveStatus::holding()`, so the GiST
+     *     exclusion constraint stops covering those dates and the applicant can immediately book
+     *     the days they withdrew the request to free.
+     */
+    public function withdraw(User $actor, LeaveRequest $request): LeaveRequest
+    {
+        return DB::transaction(function () use ($actor, $request): LeaveRequest {
+            $request = $this->lock($request);
+            $this->assertOwn($actor, $request);
+
+            $old = $request->auditValues();
+
+            $request->applyTransition(LeaveStatus::Withdrawn);
+            $request->decided_at = Carbon::now();
+            $request->save();
+
+            $this->audit->record(
+                AuditEvent::LeaveWithdrawn,
+                $request,
+                $old,
+                $request->auditValues(),
+                $actor,
+            );
+
+            return $request;
+        });
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Balances
@@ -743,6 +811,21 @@ class LeaveService
     {
         if ((int) ($actor->employee?->getKey() ?? 0) === (int) $request->employee_id) {
             throw LeaveStateException::cannotDecideOwn();
+        }
+    }
+
+    /**
+     * The mirror, for the one move that is only ever about yourself (decision 5-19).
+     *
+     * Withdrawing somebody else's request is not a decision an Admin is allowed to make quietly
+     * under the applicant's name — there are three verbs for what an Admin may do to a request and
+     * all three are recorded as theirs. `0` cannot match an employee id, so a user with no employee
+     * record is refused here as well.
+     */
+    private function assertOwn(User $actor, LeaveRequest $request): void
+    {
+        if ((int) ($actor->employee?->getKey() ?? 0) !== (int) $request->employee_id) {
+            throw LeaveStateException::cannotWithdrawAnothers();
         }
     }
 

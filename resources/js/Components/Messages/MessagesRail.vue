@@ -240,7 +240,7 @@ function retry(): void {
                             <Link
                                 :href="messagesHref(row.conversation_id)"
                                 preserve-scroll
-                                class="flex min-w-0 flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                                class="flex min-w-0 flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                             >
                                 <span class="flex min-w-0 items-baseline justify-between gap-2">
                                     <span class="min-w-0 truncate font-medium">

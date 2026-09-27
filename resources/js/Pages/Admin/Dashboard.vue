@@ -20,17 +20,23 @@ import {
 import { computed, type Component } from 'vue';
 import { formatMinutes } from '@/Components/Attendance/attendance';
 import AttentionList, { type AttentionItem } from '@/Components/Dashboard/AttentionList.vue';
-import AreaTrend from '@/Components/Charts/AreaTrend.vue';
+import BarCompare, { type BarCompareItem } from '@/Components/Charts/BarCompare.vue';
 import DonutBreakdown, { type DonutSlice } from '@/Components/Charts/DonutBreakdown.vue';
+import { formatMoney } from '@/Components/Finance/finance';
+import type { FinanceMonthSummary } from '@/Components/Finance/financeReport';
+import type { DashboardPayrollCard } from '@/Components/Payroll/payslip';
 import type { Holiday } from '@/Components/Holidays/holidays';
 import UpcomingHolidaysCard from '@/Components/Holidays/UpcomingHolidaysCard.vue';
+import type { Meeting } from '@/Components/Meetings/meetings';
+import UpcomingMeetingsCard from '@/Components/Meetings/UpcomingMeetingsCard.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatCard from '@/Components/StatCard.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import { DASHBOARD_POLL_MS } from '@/Components/Realtime/live';
+import { useLiveProps } from '@/Components/Realtime/reload';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { usePagePoll } from '@/lib/pagePoll';
 
 defineOptions({ layout: AdminLayout });
 
@@ -99,6 +105,44 @@ interface TaskStatusCount {
     count: number;
 }
 
+/**
+ * One bar of "Tasks by employee": a person and how many open tasks they hold.
+ *
+ * A **count**, never a score (Part H §1, Part B §3 rule 12). The rows arrive ordered by name and
+ * nothing here re-orders them — sorting by `count` would turn the chart into a league table, and
+ * the first bar of one reads as the winner. There is no ratio, no target and no comparison with
+ * anybody or with last week.
+ */
+interface EmployeeTaskCount {
+    id: number;
+    name: string;
+    count: number;
+    /** `/admin/tasks` under the exact two filters the count was made with. */
+    href: string;
+}
+
+/** One bar of "Projects by type": the type, its count, and the filtered list it opens. */
+interface ProjectTypeCount {
+    key: string;
+    label: string;
+    count: number;
+    href: string;
+}
+
+/**
+ * One row of "Upcoming deadlines" — a project, when it is due in words, and its own page.
+ *
+ * Part D §3 lists this beside three charts and budgets three charts, so it is the LIST. The
+ * words in `meta` are the second encoding of `tone`, never the other way round.
+ */
+interface DeadlineRow {
+    id: string;
+    title: string;
+    meta: string;
+    href: string;
+    tone: 'default' | 'urgent';
+}
+
 const props = defineProps<{
     greetingName: string;
     today: string;
@@ -132,6 +176,32 @@ const props = defineProps<{
     /** Open tasks per status, for the donut. Server-counted, server-toned. */
     taskStatuses: TaskStatusCount[];
     /**
+     * Row 2's second chart — open tasks per person, ordered by name.
+     *
+     * Every figure is `WorkloadService`'s, which is one `TaskService::count()` per person with
+     * `assignee_id` and `TaskBucket::Open`: the same query `/admin/workload` prints and the same
+     * query the bar's `href` opens. Nothing on this page adds these up — a task with two
+     * assignees is on both of their bars, so a sum of them is higher than the agency's total and
+     * would be wrong however it was labelled.
+     */
+    tasksByEmployee: EmployeeTaskCount[];
+    /**
+     * Row 2's third chart — projects per type, every type including the empty ones.
+     *
+     * Counted over `Project::visibleTo()` not archived, which is what `/admin/projects` starts
+     * from, so each bar's link opens exactly the projects it counted. `[]` for a viewer who may
+     * not see projects at all — absent, not eight zeroes (Part C §1).
+     */
+    projectsByType: ProjectTypeCount[];
+    /**
+     * Row 2's fourth item, and the one that is not a chart: the next few **project** deadlines.
+     *
+     * Task dates are already answered three times on this screen (two cards and the attention
+     * panel), so this is `projects.deadline` — the date a client was promised and the one date
+     * nothing else here shows.
+     */
+    upcomingDeadlines: DeadlineRow[];
+    /**
      * The next few company holidays, today included — Part D §3's card, recorded from the
      * design references (Part I).
      *
@@ -141,10 +211,31 @@ const props = defineProps<{
      * clear, and the card then offers the screen where next year's gazette is typed in.
      */
     upcomingHolidays: Holiday[];
+    /**
+     * The next few meetings, soonest first — Part D §12's card, Phase 7.
+     *
+     * One query scoped by `Meeting::visibleTo()` and capped at five on the server, never the
+     * whole table filtered here. An Admin's scope is the agency's whole diary, which is what
+     * makes this the Company dashboard's version of the card an employee also has: same
+     * component, same `MeetingResource` rows, different scope — and the scope is the one thing
+     * neither screen decides for itself.
+     */
+    upcomingMeetings: Meeting[];
+    /**
+     * Row 3 — this month's income, expense, payroll and operating result (Part D §3, Phase 8).
+     *
+     * The two real figures are `FinanceService::monthlyRollup()`'s, the same call `/finance`
+     * makes, so this row and the Finance dashboard cannot disagree about September;
+     * `operating_result` is that rollup's own net, computed in integer cents. **`payroll` is
+     * null with the phase that brings it** — Phase 9 owns `payroll_periods` and it does not
+     * exist, so the card is a marked placeholder rather than a zero that would read as "we paid
+     * nobody this month".
+     *
+     * `{}` for a viewer without `finance.view` — absent from the payload rather than zeroed
+     * (Part C §1), which is why every key is optional.
+     */
+    finance: FinanceMonthSummary & DashboardPayrollCard;
 }>();
-
-/** Part 0.5 refresh rule: who is in, and what is waiting on the Admin. */
-usePagePoll(['stats', 'attendance', 'attention']);
 
 /**
  * The icon each of the five wears. Icons are components, so they cannot come from PHP; the
@@ -213,6 +304,38 @@ const taskStatusSlices = computed<DonutSlice[]>(() =>
     })),
 );
 
+/**
+ * The two bar charts' data, and nothing else done to it.
+ *
+ * `map`, not `sort`, `filter` or `reduce`: the server decided the order (by name for people, by
+ * the enum for types) and the counts are the server's. A `sort((a, b) => b.count - a.count)` here
+ * is the ranking Part H §1 forbids, and it would be one line.
+ */
+const employeeBars = computed<BarCompareItem[]>(() =>
+    props.tasksByEmployee.map((row) => ({ label: row.name, value: row.count })),
+);
+
+const projectTypeBars = computed<BarCompareItem[]>(() =>
+    props.projectsByType.map((row) => ({ label: row.label, value: row.count })),
+);
+
+/**
+ * "Upcoming deadlines" as `AttentionList` rows — the same panel component the attention feed
+ * uses, because a deadline is a thing you open and DESIGN.md §5.8 forbids a second way to draw a
+ * card of linked rows. The icon is chosen here because an icon is a component and cannot travel
+ * as JSON; the words, the destination and the tone all come from the server.
+ */
+const deadlineItems = computed<AttentionItem[]>(() =>
+    props.upcomingDeadlines.map((row) => ({
+        id: row.id,
+        icon: CalendarClock,
+        title: row.title,
+        meta: row.meta,
+        href: row.href,
+        tone: row.tone,
+    })),
+);
+
 /** True once the server sent the attendance block at all — see the prop's docblock. */
 const hasAttendance = computed(() => props.attendance.present !== undefined);
 
@@ -229,16 +352,107 @@ function remoteTime(row: RemoteTimeRow): string {
 }
 
 /**
- * Tier 4. Money is a footnote on the company dashboard, so these are the compact card:
- * same anatomy, smaller number, clearly below the hero row. The sparkline slot is left
- * unfilled until Phase 8 has a series to draw.
+ * Tier 4 — Row 3. Money is a footnote on the company dashboard, so these stay the compact
+ * card: same anatomy, smaller number, clearly below the hero row.
+ *
+ * All four carry real figures now. Three come from `FinanceService::monthlyRollup()` (Phase 8);
+ * **Payroll is Phase 9's** — this month's `payroll_periods` row, its status and the sum of its
+ * items' `net_salary`, all resolved on the server. It falls back to `StatCard`'s em-dash and
+ * "Not available yet" only when the month has **no period yet**, which is every 1st before
+ * `hq:create-payroll-draft` runs; `payroll_note` then says so in words, because a zero would
+ * claim the agency paid nobody this month.
+ *
+ * The **operating result** says what it is and what it is not, because a figure by that name
+ * which quietly omitted the largest cost would be worse than no figure at all. Expenses filed
+ * under the *Payroll* category are in it — they are expenses somebody entered. What is not in
+ * it is the payroll RUN: `payroll_items` is a different table and the rollup never reads it.
+ * That was true before Phase 9 and is still true; only the wording lost its phase number.
  */
-const monthStats = [
-    { label: 'Income', phase: 8, icon: TrendingUp },
-    { label: 'Expenses', phase: 8, icon: Receipt },
-    { label: 'Payroll', phase: 9, icon: HandCoins },
-    { label: 'Operating result', phase: 8, icon: Scale },
+const hasFinance = computed(() => props.finance.income !== undefined);
+
+const financeCards = computed(() => [
+    {
+        key: 'income',
+        label: 'Income',
+        value: formatMoney(props.finance.income ?? '0', props.finance.currency),
+        sub: 'Recorded this month',
+        icon: TrendingUp,
+        href: props.finance.href,
+    },
+    {
+        key: 'expense',
+        label: 'Expenses',
+        value: formatMoney(props.finance.expense ?? '0', props.finance.currency),
+        sub: 'Recorded this month',
+        icon: Receipt,
+        href: props.finance.href,
+    },
+    {
+        key: 'payroll',
+        label: 'Payroll',
+        // Real from Phase 9: this month's period total. `undefined` — an em-dash and "Not
+        // available yet" — only when there is NO period for the month yet, which is every 1st
+        // before the draft command runs. A zero would claim we paid nobody; the sub-line says
+        // which of the two it is, in words, from the server.
+        value:
+            props.finance.payroll === null || props.finance.payroll === undefined
+                ? undefined
+                : formatMoney(props.finance.payroll, props.finance.currency),
+        sub: props.finance.payroll_note,
+        icon: HandCoins,
+        href: props.finance.payroll_href ?? undefined,
+    },
+    {
+        key: 'operating_result',
+        label: 'Operating result',
+        value: formatMoney(props.finance.operating_result ?? '0', props.finance.currency),
+        // Still true after Phase 9, and worth keeping: `payroll_items` is a different table
+        // and `FinanceService::monthlyRollup()` never reads it, so the wage bill on the card
+        // to the left is not inside this figure. Only the tense changed — a sentence still
+        // naming a phase number would read as unbuilt work rather than as an accounting fact.
+        sub: 'Income less expenses. The payroll run is not in it.',
+        icon: Scale,
+        href: props.finance.href,
+    },
+]);
+
+/** What the row shows to somebody who may not see the books: four placeholders, as before. */
+const financePlaceholders = [
+    { key: 'income', label: 'Income', phase: 8, icon: TrendingUp },
+    { key: 'expense', label: 'Expenses', phase: 8, icon: Receipt },
+    // No phase number since Phase 9 shipped: this row is what somebody WITHOUT `finance.view`
+    // sees, and "Arrives in Phase 9" would now be false. It prints an em-dash and "Not
+    // available yet", which is what the blank actually means to that reader.
+    { key: 'payroll', label: 'Payroll', phase: undefined, icon: HandCoins },
+    { key: 'operating_result', label: 'Operating result', phase: 8, icon: Scale },
 ];
+
+/* ---------------------------------------------------------------- keeping it current */
+
+/**
+ * The counters and the *Needs your attention* feed re-read themselves — POLISH-BACKLOG §A.3's
+ * dashboard line, *"counters and 'needs your attention' refresh on a timer at minimum"*.
+ *
+ * **A timer, and only a timer, on both builds.** A dashboard has no channel and should not get
+ * one: its props are a dozen aggregate queries over everything this reader may see, so a
+ * "something changed" frame for it would have to be rung by every write in the application and
+ * would say nothing useful when it arrived. §A.4's third rule is answered by saying that out
+ * loud rather than by inventing a `dashboard.{user}` room.
+ *
+ * **Sixty seconds**, because nobody reads a dashboard as a clock and this is the heaviest
+ * controller in the application — a partial reload runs it in full whether it answers thirteen
+ * props or four (see `reload.ts`). Anything faster spends the client's machine on a number that
+ * is the same number. The one figure on this screen that IS read as a clock, the running timer,
+ * does not wait for this: it has its own heartbeat in `Components/Timer/timer.ts`.
+ *
+ * Named props rather than a bare reload: the dates, the holidays and the meetings on this screen
+ * are not what changes minute to minute, and a full reload would replace every prop on the page
+ * including ones a card holds local state against.
+ */
+useLiveProps(
+    ['workStats', 'attention', 'taskStatuses', 'tasksByEmployee', 'attendance', 'upcomingDeadlines'],
+    { intervalMs: DASHBOARD_POLL_MS },
+);
 </script>
 
 <template>
@@ -402,9 +616,29 @@ const monthStats = [
             <UpcomingHolidaysCard :holidays="upcomingHolidays" manage-href="/admin/holidays" />
         </section>
 
-        <!-- Tier 3 — two charts, the screen's whole chart budget. -->
-        <section aria-label="Work and attendance" class="grid gap-4 lg:grid-cols-2">
-            <Card class="min-w-0 gap-4 p-6 shadow-xs">
+        <!--
+            The diary. Its own row rather than a third column beside the two above: at `lg` that
+            row is already two thirds and one third, and a meeting's title needs the width more
+            than a holiday's name does. It links to Meetings, where one is scheduled.
+        -->
+        <section aria-label="Upcoming meetings" class="grid min-w-0 gap-4">
+            <UpcomingMeetingsCard :meetings="upcomingMeetings" />
+        </section>
+
+        <!--
+            Tier 3 — Part D §3's Row 2, and the screen's **whole chart budget**: Tasks by status,
+            Tasks by employee, Projects by type. Three, and the fourth thing Row 2 names —
+            Upcoming deadlines — is the list below them, not a chart.
+
+            The "Attendance, last 14 days" card that used to sit beside the donut is gone. It was
+            `:data="[]"` on a database with a month of seeded attendance in it, it is in neither
+            Part D §3's Row 2 nor anywhere else in the plan, and Part I says in as many words that
+            the reference's attendance chart is what to LEAVE: attendance shows as the
+            Present/Absent/On-leave cards above. Keeping it would also have made this screen's
+            fourth chart.
+        -->
+        <section aria-label="Work by status and by person" class="grid gap-4 lg:grid-cols-2">
+            <Card class="min-w-0 gap-4 p-6">
                 <h2 class="text-sm font-medium">Tasks by status</h2>
                 <div class="flex min-h-56 min-w-0 flex-col justify-center">
                     <!--
@@ -417,26 +651,118 @@ const monthStats = [
                     <DonutBreakdown :data="taskStatusSlices" center-label="Open tasks" />
                 </div>
             </Card>
-            <Card class="min-w-0 gap-4 p-6 shadow-xs">
-                <h2 class="text-sm font-medium">Attendance, last 14 days</h2>
+            <Card class="min-w-0 gap-4 p-6">
+                <div class="flex min-w-0 items-center justify-between gap-4">
+                    <h2 class="text-sm font-medium">Tasks by employee</h2>
+                    <!--
+                        The chart cannot carry a link per bar, so the header carries the one to
+                        the screen where every one of these counts IS a link under the filter it
+                        was counted with. The numbers here are that screen's own.
+                    -->
+                    <Link
+                        v-if="tasksByEmployee.length > 0"
+                        href="/admin/workload"
+                        class="shrink-0 text-xs text-muted-foreground underline-offset-4 hover:underline"
+                    >
+                        Open Workload
+                    </Link>
+                </div>
                 <div class="flex min-h-56 min-w-0 flex-col justify-center">
-                    <AreaTrend :data="[]" label="Present" />
+                    <!--
+                        Open tasks per person, **by name**. Horizontal because the categories are
+                        people's names and a vertical axis cannot hold one. No ordering by count,
+                        no target line, no percentage — a bar is a count of tasks (Part H §1).
+                    -->
+                    <BarCompare :data="employeeBars" orientation="horizontal" label="Open tasks" :height="240" />
                 </div>
             </Card>
         </section>
 
-        <!-- Tier 4 — this month, at the bottom and at a lower weight. -->
+        <section aria-label="Projects by type and deadlines" class="grid min-w-0 gap-4 lg:grid-cols-2">
+            <Card class="min-w-0 gap-4 p-6">
+                <div class="flex min-w-0 items-center justify-between gap-4">
+                    <h2 class="text-sm font-medium">Projects by type</h2>
+                    <Link
+                        v-if="projectsByType.length > 0"
+                        href="/admin/projects"
+                        class="shrink-0 text-xs text-muted-foreground underline-offset-4 hover:underline"
+                    >
+                        See all
+                    </Link>
+                </div>
+                <div class="flex min-h-56 min-w-0 flex-col justify-center">
+                    <BarCompare :data="projectTypeBars" orientation="horizontal" label="Projects" :height="240" />
+                </div>
+            </Card>
+
+            <!--
+                Row 2's fourth item, as a list. Every row is the project's own page, and how near
+                the date is is printed in words — the medallion is the second encoding of the
+                sentence, never the only one (DESIGN.md §5.6).
+            -->
+            <!--
+                The wrapping `min-w-0` is not decoration. `AttentionList`'s own root `Card` does
+                not carry one, so in a grid track it grows to fit its longest project name and
+                drags the whole column — chart included — past the viewport. Measured at 375, where
+                one deadline row made this row 410 px wide inside a 343 px page. The attention
+                panel above wraps itself the same way for the same reason.
+            -->
+            <div class="min-w-0">
+                <AttentionList
+                    title="Upcoming deadlines"
+                    :items="deadlineItems"
+                    :empty-icon="CalendarClock"
+                    empty-title="No deadline in the next month"
+                    empty-description="No project that is still being worked on is due inside the next 30 days."
+                >
+                    <template #action>
+                        <Link
+                            v-if="upcomingDeadlines.length > 0"
+                            href="/admin/projects"
+                            class="shrink-0 text-xs text-muted-foreground underline-offset-4 hover:underline"
+                        >
+                            See all
+                        </Link>
+                    </template>
+                </AttentionList>
+            </div>
+        </section>
+
+        <!--
+            Tier 4 — Row 3: this month's money, at the bottom and at a lower weight.
+
+            Income, expenses and the operating result are real from Phase 8 and each card opens
+            the Finance dashboard on the month it counted. Payroll is real from Phase 9 and
+            opens the payroll workbench — see `financeCards` for why a month with no period yet
+            is an em-dash and not a zero.
+        -->
         <section aria-labelledby="this-month" class="flex flex-col gap-4">
-            <h2 id="this-month" class="text-base font-semibold tracking-tight">This month</h2>
+            <h2 id="this-month" class="text-base font-semibold tracking-tight">
+                This month<template v-if="finance.label"> — {{ finance.label }}</template>
+            </h2>
             <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <StatCard
-                    v-for="stat in monthStats"
-                    :key="stat.label"
-                    size="compact"
-                    :label="stat.label"
-                    :phase="stat.phase"
-                    :icon="stat.icon"
-                />
+                <template v-if="hasFinance">
+                    <StatCard
+                        v-for="card in financeCards"
+                        :key="card.key"
+                        size="compact"
+                        :label="card.label"
+                        :value="card.value"
+                        :sub="card.sub"
+                        :icon="card.icon"
+                        :href="card.href"
+                    />
+                </template>
+                <template v-else>
+                    <StatCard
+                        v-for="card in financePlaceholders"
+                        :key="card.key"
+                        size="compact"
+                        :label="card.label"
+                        :phase="card.phase"
+                        :icon="card.icon"
+                    />
+                </template>
             </div>
         </section>
     </PageShell>

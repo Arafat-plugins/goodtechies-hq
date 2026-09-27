@@ -2,12 +2,13 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Conversation;
 use App\Models\Employee;
 use App\Models\User;
 use App\Support\AttendanceDay;
-use App\Support\Permission;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -146,13 +147,17 @@ class TeamMemberResource extends JsonResource
      * nothing here is a permission — it is the question "will that endpoint refuse this, in
      * which case do not draw the control".
      *
-     * **The one rule in this phase that does not go through a policy.** Whether somebody may be
-     * sent a direct message is `active + messages.use`, and there is no ability on
-     * `ConversationPolicy` that states it for a User (its abilities all take a Conversation,
-     * and the DM row may not exist yet). `MessageController` holds the same two lines in a
-     * private method. It is asked here as a PERMISSION and never as a role, which is the half
-     * of decision 2-31 that can be honoured; the other half is a finding, recorded in the
-     * Phase 6 report.
+     * **It goes through a policy now** — `ConversationPolicy::dm` (decision 6-16). It did not,
+     * because that ability did not exist: every other ability on that policy takes a Conversation
+     * and the DM row may not exist yet, so the rule was written out here and again in a private
+     * method on `MessageController`, by two agents in the same hour. Two copies of *"active, and
+     * holding the messaging key"* meant the button this resource draws and the endpoint it points
+     * at could have disagreed about who is reachable.
+     *
+     * The class leads the arguments because there is no row: Laravel resolves the policy from
+     * `Conversation::class`, drops it, and the ability arrives as `dm($viewer, $subject)`. It is
+     * still a permission and never a role, which is the half of decision 2-31 that can be
+     * honoured.
      */
     private function dmUrl(?User $viewer, ?User $subject): ?string
     {
@@ -160,9 +165,7 @@ class TeamMemberResource extends JsonResource
             return null;
         }
 
-        $mayMessage = fn (User $one): bool => $one->isActive() && $one->hasPermission(Permission::MessagesUse);
-
-        return $mayMessage($viewer) && $mayMessage($subject)
+        return Gate::forUser($viewer)->allows('dm', [Conversation::class, $subject])
             ? route('messages.direct', $subject->getKey())
             : null;
     }

@@ -74,7 +74,7 @@ function submit(): void {
 
 <template>
     <form class="flex flex-col gap-4" novalidate @submit.prevent="submit">
-        <Card class="min-w-0 gap-4 shadow-xs">
+        <Card class="min-w-0 gap-4">
             <CardHeader>
                 <CardTitle class="text-sm font-medium">Details</CardTitle>
                 <CardDescription>The client's name and where they stand with the agency.</CardDescription>
@@ -143,7 +143,7 @@ function submit(): void {
             </CardContent>
         </Card>
 
-        <Card class="min-w-0 gap-4 shadow-xs">
+        <Card class="min-w-0 gap-4">
             <CardHeader>
                 <CardTitle class="text-sm font-medium">Contacts</CardTitle>
                 <CardDescription>The people to reach at this client.</CardDescription>

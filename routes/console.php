@@ -46,6 +46,25 @@ Schedule::command('hq:timer-watchdog')->everyMinute()->withoutOverlapping();
 // with approved leave and holidays; this line is only when.
 Schedule::command('hq:mark-absent')->dailyAt('23:55')->withoutOverlapping();
 
+// Meetings (master prompt Part D §12, Phase 7): "reminder 15 min before". Every minute, for
+// the same reason the timer watchdog is — the lead time is fifteen minutes, so anything coarser
+// than a minute would either fire early or miss the window entirely. It reads one indexed range
+// of `start_at` over meetings that have not been cancelled, which is a handful of rows at any
+// moment. "Exactly once per meeting, however often this runs" is answered by the notifications
+// table and not by this line — see SendMeetingReminders, which is why a re-run, a restart and
+// an hour of downtime all send the same one reminder each.
+Schedule::command('hq:remind-meetings')->everyMinute()->withoutOverlapping();
+
+// Payroll (master prompt Part D §14, Phase 9): "Draft auto-created on the 1st for all active
+// employees from employee_salaries". The 1st at 00:10 — after the recurring-task sweep at 00:05,
+// because both run at the turn of the month and the payroll draft reads `employees` while that
+// one writes `tasks`, so ordering them costs nothing and makes a slow night's log readable.
+// "Exactly once" is NOT this line's doing: `payroll_periods.month` and
+// `payroll_items (payroll_period_id, employee_id)` are unique indexes, so a re-run, a restart
+// and a restore all leave the month with one draft — see CreatePayrollDraft, which is why a
+// stray run mid-month cannot add a line to a payroll somebody has already approved.
+Schedule::command('hq:create-payroll-draft')->monthlyOn(1, '00:10')->withoutOverlapping();
+
 // Backups (master prompt Part B §4): encrypted daily database dump, weekly restore test.
 Schedule::command('backup:clean')->dailyAt('01:30')->withoutOverlapping();
 Schedule::command('backup:run --only-db')->dailyAt('02:00')->withoutOverlapping();

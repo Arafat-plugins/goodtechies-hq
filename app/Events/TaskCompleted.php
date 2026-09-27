@@ -6,6 +6,7 @@ use App\Events\Concerns\BroadcastsTaskStatus;
 use App\Models\Task;
 use App\Models\User;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * A task reached Completed (spec §19 "Task completed → notify original assigner/reviewer").
@@ -15,7 +16,7 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
  *
  * Fired instead of TaskStatusChanged for this one destination — see that class.
  */
-class TaskCompleted implements ShouldBroadcast
+class TaskCompleted implements ShouldBroadcast, ShouldDispatchAfterCommit
 {
     use BroadcastsTaskStatus;
 

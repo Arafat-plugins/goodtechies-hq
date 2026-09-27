@@ -45,7 +45,7 @@ const emit = defineEmits<{ (event: 'reload'): void }>();
     <div class="sticky bottom-4 z-10 mt-2 flex justify-center" role="status" aria-live="polite">
         <p
             v-if="message"
-            class="flex flex-wrap items-center gap-3 rounded-md border bg-card px-3 py-2 text-sm shadow-sm"
+            class="flex flex-wrap items-center gap-3 rounded-md border bg-card px-3 py-2 text-sm shadow-raised"
         >
             <span>{{ message }}</span>
             <Button variant="outline" size="sm" @click="emit('reload')">

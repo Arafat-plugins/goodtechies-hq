@@ -42,7 +42,7 @@ const headClass = 'text-xs uppercase text-muted-foreground';
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4 shadow-xs">
+    <Card class="min-w-0 gap-4">
         <CardHeader>
             <CardTitle class="text-sm font-medium">Login history</CardTitle>
             <CardDescription>Your most recent sign-in attempts.</CardDescription>

@@ -17,11 +17,12 @@ import PageShell from '@/Components/PageShell.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import { ATTENDANCE_POLL_MS } from '@/Components/Realtime/live';
+import { useLiveProps } from '@/Components/Realtime/reload';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import type { SharedProps } from '@/types';
-import { usePagePoll } from '@/lib/pagePoll';
 
 /**
  * Somebody's attendance: today's clock, and the month.
@@ -65,9 +66,6 @@ const props = defineProps<{
     permissions: { can_clock: boolean; can_edit: boolean };
 }>();
 
-/** Part 0.5 refresh rule: a second tab, and an Admin's edit to one of these days. */
-usePagePoll(['days', 'summary', 'today']);
-
 const editing = ref<AttendanceDay | null>(null);
 const editOpen = ref(false);
 
@@ -80,6 +78,32 @@ function edit(day: AttendanceDay): void {
 function workingDayLabels(days: string[]): string {
     return days.map((day) => day.charAt(0).toUpperCase() + day.slice(1)).join(', ');
 }
+
+/* ---------------------------------------------------------------- keeping it current */
+
+/**
+ * A clock-in from another device lands here — POLISH-BACKLOG §A.3's *"Attendance / Time"* line,
+ * whose note is *"the clock widget's live counter already ticks locally; a clock-in from another
+ * device should land"*.
+ *
+ * The two halves of that sentence are different problems and only the second one was open.
+ * `ClockWidget` counts up from `clock_in_at` in the browser, once a minute, and always did — but
+ * the `clock_in_at` it counts from is a prop, so somebody who tapped *Clock in* on their phone at
+ * the door and then opened the laptop saw yesterday's answer until they reloaded. Now the page
+ * re-reads `today` (and the month's `days` and `summary` under it) every thirty seconds, and the
+ * local counter picks up the new start time from the fresh prop with no code of its own.
+ *
+ * **Thirty seconds**, because nobody clocks in twice in thirty seconds, and a clock-in is the one
+ * event on this screen that happens while somebody is looking at it. Poll-only: attendance has no
+ * broadcast event and no channel — adding one would be a room whose audience is "this employee
+ * and whoever may manage their attendance", which is a policy question that has an answer but
+ * would buy thirty seconds on a screen nobody watches for thirty seconds. Said out loud rather
+ * than built (§A.4 rule 3).
+ *
+ * `useLiveProps` holds the refresh while the edit-a-day dialog is open, so a correction somebody
+ * is typing is never re-read out from under them.
+ */
+useLiveProps(['today', 'days', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
 </script>
 
 <template>

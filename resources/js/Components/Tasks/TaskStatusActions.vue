@@ -32,6 +32,7 @@ import {
 } from '@/Components/ui/dropdown-menu';
 import { Label } from '@/Components/ui/label';
 import { Textarea } from '@/Components/ui/textarea';
+import { useMenuDialog } from '@/lib/menuFocus';
 
 /**
  * Every move this task can make, and the one thing each move has to say first.
@@ -216,6 +217,9 @@ const awaitingSomebodyElsesVerdict = computed(
 
 /* --------------------------------------------------------------- the dialogs */
 
+/** Where the keyboard goes when one of the dialogs below closes — see `start()`. */
+const menu = useMenuDialog();
+
 const open = ref<Kind | null>(null);
 const pending = ref<Move | null>(null);
 const text = ref('');
@@ -249,10 +253,15 @@ function start(move: Move, afterId: number | null = null): void {
     // resubmission after "changes requested" is an edit rather than a retype.
     text.value = move.kind === 'review' ? summary.value : '';
 
-    // Let a dropdown finish closing before the dialog takes the focus trap.
-    setTimeout(() => {
+    // Decision 5-20, both halves. `openFromMenu` defers the open by a tick so a dropdown can finish
+    // dismissing before the dialog claims the focus trap — and captures what focus must come back
+    // to, which on the detail page is the *Change status* trigger and on the Board is the card's `⋯`.
+    // Either can be gone by the time the dialog closes: a completed task offers fewer moves, and the
+    // Board re-renders its columns around the card that moved. `lib/menuFocus.ts` then falls back to
+    // the `<main>` region rather than dropping the keyboard on `<body>` (decision 9-27's shape).
+    menu.openFromMenu(() => {
         open.value = move.kind;
-    }, 0);
+    });
 }
 
 /** The dialog's own field takes focus, so the first Tab inside is not a hunt. */
@@ -324,6 +333,7 @@ function submit(move: Move, payload: Record<string, unknown>): void {
                 open.value = null;
                 pending.value = null;
                 text.value = '';
+                menu.returnFocus();
             },
             onSettled: () => {
                 emit('settled');
@@ -366,6 +376,7 @@ function dismiss(): void {
     open.value = null;
     pending.value = null;
     text.value = '';
+    menu.returnFocus();
 
     if (!landed.value) {
         emit('dismissed');

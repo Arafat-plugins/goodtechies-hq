@@ -10,6 +10,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Support\ConversationType;
 use App\Support\Permission;
+use App\Support\UnreadLine;
 use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
@@ -233,14 +234,16 @@ class ConversationService
             return new Collection;
         }
 
+        // The candidate list is `Conversation::inboxCandidatesFor()`, which keeps the whole
+        // `channels OR my DMs` question inside one group. It was written inline here and
+        // UNGROUPED (decision M-16): `whereIn('type', …)->orWhere(…)` compiles to
+        // `type IN (…) OR (type = 'dm' AND …)`, which was correct only because the DM arm
+        // restates its own type — and which would have quietly stopped being correct the first
+        // time anybody appended a constraint to this builder. The scope closes the group before
+        // a caller can reach it.
         $candidates = Conversation::query()
             ->with(['project', 'dmOne', 'dmTwo'])
-            ->whereIn('type', [
-                ConversationType::Team->value,
-                ConversationType::Announcement->value,
-                ConversationType::Project->value,
-            ])
-            ->orWhere(fn ($query) => $query->dmsFor($user))
+            ->inboxCandidatesFor($user)
             ->get();
 
         return $candidates
@@ -519,9 +522,16 @@ class ConversationService
     {
         $existing = $conversation->members()->whereKey($user->getKey())->exists();
 
+        // Written through `UnreadLine::sql()` — a STRING at microsecond precision — because a
+        // `DateTimeInterface` binding goes through `Grammar::getDateFormat()` (`Y-m-d H:i:s`) on
+        // its way to the database and arrives with the fraction of a second already gone.
+        // Decision M-15: at second precision, a reply posted in the same second as this read is
+        // equal to it rather than after it, and `>` calls it already-read.
+        $at = UnreadLine::sql(Carbon::now());
+
         $existing
-            ? $conversation->members()->updateExistingPivot($user->getKey(), ['last_read_at' => now()])
-            : $conversation->members()->attach($user->getKey(), ['last_read_at' => now()]);
+            ? $conversation->members()->updateExistingPivot($user->getKey(), ['last_read_at' => $at])
+            : $conversation->members()->attach($user->getKey(), ['last_read_at' => $at]);
     }
 
     /**
@@ -542,13 +552,24 @@ class ConversationService
         $raw = $member?->pivot?->last_read_at;
         $lastReadAt = $raw === null ? null : Carbon::parse($raw);
 
+        // The bound value is a microsecond STRING for the reason markRead() writes one: a Carbon
+        // binding is reformatted to `Y-m-d H:i:s` by the grammar, so passing the object here
+        // would compare a full-precision column against a value truncated to the second and
+        // count messages from the same second as unread that had been read (decision M-15,
+        // the same blindness from the other side).
         $unread = $conversation->messages()
             ->where('author_id', '!=', $user->getKey())
-            ->when($lastReadAt !== null, fn ($query) => $query->where('created_at', '>', $lastReadAt))
+            ->when(
+                $lastReadAt !== null,
+                fn ($query) => $query->where('created_at', '>', UnreadLine::sql($lastReadAt)),
+            )
             ->count();
 
         return [
-            'last_read_at' => $lastReadAt === null ? null : $lastReadAt->toIso8601String(),
+            // Sent with milliseconds, because the thread compares it to each message's
+            // `created_at` to draw the new-messages line and `toIso8601String()` has no
+            // fractional part at all — see UnreadLine.
+            'last_read_at' => UnreadLine::iso($lastReadAt),
             'unread_count' => $unread,
         ];
     }

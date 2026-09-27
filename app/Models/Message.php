@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\UnreadLine;
 use Database\Factories\MessageFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -30,6 +31,23 @@ class Message extends Model
 {
     /** @use HasFactory<MessageFactory> */
     use HasFactory;
+
+    /**
+     * Microseconds, because `created_at` is one side of the unread comparison — decision M-15.
+     *
+     * Eloquent formats every date it writes with the query grammar's `Y-m-d H:i:s` whatever the
+     * column can hold, so a `timestamp(6)` column alone changed nothing: the fraction was gone
+     * before the INSERT. With this, a reply posted in the same second as a read is later than
+     * the read rather than equal to it, which is the difference between a badge that counts it
+     * and a message nobody is ever told about. `App\Support\UnreadLine` is where the format and
+     * the rest of the story live.
+     *
+     * Reading is unaffected: `asDateTime()` falls back to `Carbon::parse()` for a value that
+     * does not match, so rows written before the migration still hydrate.
+     *
+     * @var string
+     */
+    protected $dateFormat = UnreadLine::SQL_FORMAT;
 
     /**
      * @return BelongsTo<Conversation, $this>

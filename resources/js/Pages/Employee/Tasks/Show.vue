@@ -63,9 +63,9 @@ useFlashAsToast();
             @removed="router.visit('/employee/tasks')"
         />
 
-        <!-- The live half of this page: `task.{id}`, whose callback is the same
-             TaskPolicy::view that rendered it. It offers a reload and never performs
-             one — see the component. -->
+        <!-- The live half of this page: `task.{id}` on a socket build, a fifteen-second
+             re-read without one, and either way it is the SERVER's answer that paints —
+             the frame carries the task's id and nothing else. See the component. -->
         <LiveTaskStatus :task-id="task.id" :status="task.status" />
     </PageShell>
 </template>

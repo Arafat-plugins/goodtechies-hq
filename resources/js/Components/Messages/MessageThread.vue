@@ -15,14 +15,13 @@ import EmptyState from '@/Components/EmptyState.vue';
 import { FILE_ACCEPT, FILE_MAX_LABEL, rejectionFor } from '@/Components/Files/files';
 import MentionPicker from '@/Components/Messages/MentionPicker.vue';
 import MessageRow from '@/Components/Messages/MessageRow.vue';
+import VoiceRecorder from '@/Components/Messages/VoiceRecorder.vue';
+import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
 import {
     THREAD_POLL_MS,
     conversationChannel,
-    liveTransportIcon,
-    liveTransportLabel,
-    liveTransportWord,
     useLiveRefresh,
-} from '@/Components/Messages/live';
+} from '@/Components/Realtime/live';
 import type {
     MessagePerson,
     ThreadMessage,
@@ -36,6 +35,8 @@ import {
     threadLayout,
     useMentions,
 } from '@/Components/Messages/messages';
+import type { VoiceClip } from '@/Components/Messages/voice';
+import { VOICE_MAX_LABEL, clipFile } from '@/Components/Messages/voice';
 import { Button } from '@/Components/ui/button';
 import { Label } from '@/Components/ui/label';
 import { Textarea } from '@/Components/ui/textarea';
@@ -88,6 +89,17 @@ import { cn } from '@/lib/utils';
  * change from "only Ctrl/⌘ + Enter", it applies to the task discussion too, and the hint under
  * the composer says all three out loud rather than leaving somebody to discover it by losing a
  * paragraph.
+ *
+ * ## A message is text, a file, or a voice note — and never two of the last two
+ *
+ * The composer gained a microphone. `VoiceRecorder` owns the whole gesture, the waveform, the
+ * timer and the preview, and hands back a `VoiceClip` only once the reader has stopped and kept
+ * it; nothing reaches the network until Send, which is the same Send as before. A recording and
+ * a picked file are **mutually exclusive** — one endpoint field, one attachment per message —
+ * so whichever is in hand disables the other control and says why rather than silently winning.
+ *
+ * On a browser with no `MediaRecorder`, or none of the four containers the endpoint accepts,
+ * `VoiceRecorder` renders nothing at all and this composer is exactly what it was.
  *
  * ## The realtime seam
  *
@@ -151,6 +163,10 @@ const bodyEl = ref<InstanceType<typeof Textarea> | null>(null);
 
 const body = ref('');
 const picked = ref<File | null>(null);
+/** The finished recording, once the reader has stopped and kept it. `null` until then. */
+const voiceClip = ref<VoiceClip | null>(null);
+/** The mic is open, or a clip is sitting in the preview. Either way the paperclip is off. */
+const voiceActive = ref(false);
 const pickedError = ref<string | null>(null);
 const serverError = ref<string | null>(null);
 const posting = ref(false);
@@ -160,6 +176,17 @@ const mentions = useMentions(body);
 
 const fieldError = computed(() => pickedError.value ?? serverError.value);
 const remaining = computed(() => MESSAGE_MAX_BODY - body.value.length);
+
+/**
+ * One attachment per message, so the two ways of making one are exclusive.
+ *
+ * Each control stays on screen and says why it cannot be used — a paperclip that vanished when
+ * you started recording would read as a bug, and `StoreMessageRequest` would refuse the pair
+ * anyway. Recording in progress also holds Send: nothing is uploaded mid-recording.
+ */
+const micBlocked = computed(() => (picked.value === null ? null : 'Remove the attached file first'));
+const attachBlocked = computed(() => voiceActive.value);
+const stillRecording = computed(() => voiceActive.value && voiceClip.value === null);
 
 /** The textarea grows with what is typed and then scrolls inside itself. */
 const COMPOSER_MAX_PX = 160;
@@ -194,6 +221,9 @@ function resetComposer(): void {
     serverError.value = null;
     mentions.reset();
     clearPicked();
+    // `VoiceRecorder` watches both: it revokes the object URL and hands the microphone back.
+    voiceClip.value = null;
+    voiceActive.value = false;
 
     void nextTick(grow);
 }
@@ -495,10 +525,6 @@ const live = useLiveRefresh(
     },
 );
 
-const liveWord = computed(() => liveTransportWord(live.transport.value, THREAD_POLL_MS));
-const liveLabel = computed(() => liveTransportLabel(live.transport.value, THREAD_POLL_MS));
-const liveIcon = computed(() => liveTransportIcon(live.transport.value));
-
 watch(
     () => [props.thread.conversation_id, props.thread] as const,
     ([id, payload], [previousId]) => {
@@ -604,10 +630,17 @@ function post(): void {
         return;
     }
 
+    // Enter is still a send, and it must not send half a sentence out from under a recording
+    // that is still running. Stop it first; the clip is then a press away.
+    if (stillRecording.value) {
+        return;
+    }
+
     posting.value = true;
     serverError.value = null;
 
     const file = picked.value;
+    const clip = voiceClip.value;
     const named = mentions.ids();
     const data: Record<string, FormDataConvertible> = { body: body.value };
 
@@ -615,12 +648,20 @@ function post(): void {
         data[`mentions[${index}]`] = id;
     });
 
-    if (file !== null) {
+    // A recording wins only because the two cannot both exist: `micBlocked` and `attachBlocked`
+    // are what make that true, and this order is the safety net rather than the rule.
+    if (clip !== null) {
+        // The filename carries the extension that matches the blob's own MIME type — the
+        // server validates the pair, so `voice.webm` holding `audio/mp4` is a 422.
+        data.file = clipFile(clip);
+        data.kind = 'voice';
+        data.duration = clip.seconds;
+    } else if (file !== null) {
         data.file = file;
     }
 
     mutateMessage(props.routes.store, data, {
-        forceFormData: file !== null,
+        forceFormData: file !== null || clip !== null,
         onAccepted: () => {
             resetComposer();
             // Posting marked the thread read server-side; this is what brings the message back
@@ -670,14 +711,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     icon or by colour alone (DESIGN.md §5.6). It is **never** "Live" on a
                     polling build.
                 -->
-                <span
-                    class="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
-                    :title="liveLabel"
-                >
-                    <component :is="liveIcon" class="size-3.5 shrink-0" aria-hidden="true" />
-                    <span aria-hidden="true" class="hidden sm:inline">{{ liveWord }}</span>
-                    <span class="sr-only">{{ liveLabel }}</span>
-                </span>
+                <LiveIndicator :transport="live.transport.value" :interval-ms="THREAD_POLL_MS" />
 
                 <!--
                     Not disabled while it works: disabling the control somebody just pressed
@@ -752,7 +786,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 tabindex="0"
                 :class="
                     cn(
-                        'min-w-0 rounded-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
+                        'min-w-0 rounded-md focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
                         scroll && 'min-h-0 flex-1 overflow-y-auto pr-1',
                     )
                 "
@@ -859,7 +893,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     ref="pickerEl"
                     type="file"
                     :accept="FILE_ACCEPT"
-                    :disabled="posting"
+                    :disabled="posting || attachBlocked"
                     :aria-describedby="hintId"
                     class="sr-only"
                     @change="choose"
@@ -896,6 +930,28 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 </p>
 
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
+                    <!--
+                        Two roots: the strip, which takes the line above this row (`order-first
+                        basis-full`), and the mic button, which sits at the head of it. It is
+                        **first in the DOM** and not merely first visually, because the strip
+                        holds the preview's four controls and tab order has to walk the composer
+                        the way the eye does (WCAG 2.4.3): strip, then mic, then the paperclip.
+                        On a browser that cannot record, both roots are nothing and this row is
+                        exactly what it was.
+                    -->
+                    <VoiceRecorder
+                        v-model:clip="voiceClip"
+                        v-model:active="voiceActive"
+                        :disabled="posting"
+                        :blocked="micBlocked"
+                    />
+
+                    <!--
+                        The paperclip stays on screen while a recording is in hand and says why
+                        it is off. A control that disappeared would read as a bug, and §5.12's
+                        "hide rather than disable" is about controls that are *never* available
+                        here — this one is available the moment the recording is discarded.
+                    -->
                     <TooltipProvider :delay-duration="150">
                         <Tooltip>
                             <TooltipTrigger as-child>
@@ -903,14 +959,20 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                                     type="button"
                                     variant="ghost"
                                     size="icon-sm"
-                                    :disabled="posting"
-                                    aria-label="Attach a file"
+                                    :disabled="posting || attachBlocked"
+                                    :aria-label="
+                                        attachBlocked
+                                            ? 'Attach a file (unavailable: discard the voice message first)'
+                                            : 'Attach a file'
+                                    "
                                     @click="pickerEl?.click()"
                                 >
                                     <Paperclip aria-hidden="true" />
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Attach a file</TooltipContent>
+                            <TooltipContent>
+                                {{ attachBlocked ? 'Discard the voice message first' : 'Attach a file' }}
+                            </TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
 
@@ -922,7 +984,17 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
 
                     <span class="flex-1" aria-hidden="true" />
 
-                    <Button type="submit" size="sm" class="shrink-0" :disabled="posting">
+                    <!--
+                        Held while the microphone is open: nothing is uploaded mid-recording, and
+                        Enter is blocked on the same condition so the shortcut cannot get round it.
+                    -->
+                    <Button
+                        type="submit"
+                        size="sm"
+                        class="shrink-0"
+                        :disabled="posting || stillRecording"
+                        :aria-label="stillRecording ? 'Send (unavailable while recording)' : undefined"
+                    >
                         <Send aria-hidden="true" />
                         {{ posting ? 'Sending…' : 'Send' }}
                     </Button>
@@ -935,7 +1007,8 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 -->
                 <p :id="hintId" class="min-w-0 text-xs text-muted-foreground">
                     Enter sends · Shift + Enter starts a new line · Ctrl or ⌘ with Enter also
-                    sends · up to {{ FILE_MAX_LABEL }} per file ·
+                    sends · up to {{ FILE_MAX_LABEL }} per file · voice messages up to
+                    {{ VOICE_MAX_LABEL }} ·
                     <span :class="remaining < 0 ? 'text-destructive' : undefined">
                         <span class="tabular-nums">{{ remaining }}</span> characters left
                     </span>

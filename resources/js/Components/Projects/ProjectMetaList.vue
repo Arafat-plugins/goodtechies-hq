@@ -40,7 +40,7 @@ const rows = computed(() => [
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4 shadow-xs">
+    <Card class="min-w-0 gap-4">
         <CardHeader>
             <CardTitle class="text-sm font-medium">Details</CardTitle>
         </CardHeader>

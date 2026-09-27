@@ -41,7 +41,14 @@ it('lets an admin change another employee\'s role with audit and activity rows',
 
     $employee->refresh();
     $audit = AuditLog::where('event', 'role.changed')->sole();
-    $activity = ActivityLog::where('object_id', $employee->id)->sole();
+    // Scoped on `object_type` as well as `object_id`, because `activity_logs` is polymorphic and
+    // an id is only unique WITHIN a type. Yaseen's employee id is 4 and `MeetingSeeder` cancels
+    // meeting id 4, so an unscoped `sole()` found two rows and failed — on a clean tree, with
+    // nothing in the diff, the day the meeting seeder happened to line up. The test three below
+    // this one already scopes on the type and carries a comment about this exact hazard.
+    $activity = ActivityLog::where('object_type', $employee->getMorphClass())
+        ->where('object_id', $employee->id)
+        ->sole();
 
     expect($employee->role->name)->toBe(RoleName::ACCOUNTANT)
         ->and($employee->tracking_mode)->toBe(TrackingMode::OfficeAttendance)
@@ -62,7 +69,12 @@ it('refuses an admin changing their own role', function () {
 
     expect($employee->fresh()->role->name)->toBe(RoleName::ADMIN)
         ->and(AuditLog::count())->toBe(0)
-        ->and(ActivityLog::count())->toBe(0);
+        // Scoped to THIS employee's trail rather than the whole table: from Phase 7 the seeded
+        // database has activity rows of its own (MeetingSeeder creates its demo meetings
+        // through MeetingService, so they arrive with a history like any other meeting). The
+        // claim this test makes — a refused role change writes nothing — is about the employee,
+        // and this is that claim said exactly.
+        ->and(ActivityLog::where('object_type', $employee->getMorphClass())->count())->toBe(0);
 })->group('phase0');
 
 it('refuses an admin deactivating themselves', function () {

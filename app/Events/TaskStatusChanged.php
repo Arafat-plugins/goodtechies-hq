@@ -7,6 +7,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Support\TaskStatus;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 
 /**
  * A task moved along the status machine.
@@ -22,7 +23,7 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
  * "waiting for your review" and "status changed to In review" would have been told the same
  * thing twice, and the second one would be the less useful of the two.
  */
-class TaskStatusChanged implements ShouldBroadcast
+class TaskStatusChanged implements ShouldBroadcast, ShouldDispatchAfterCommit
 {
     use BroadcastsTaskStatus;
 

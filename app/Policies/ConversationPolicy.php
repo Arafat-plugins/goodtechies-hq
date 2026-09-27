@@ -137,6 +137,55 @@ class ConversationPolicy extends Policy
     }
 
     /**
+     * May this person open a direct message with that one? — decision 6-16.
+     *
+     * ## Why an ability that takes two Users and no Conversation
+     *
+     * Every other ability here is asked about a row. This one cannot be: the DM does not exist
+     * yet. It is the question two screens ask before they offer the door —
+     * `MessageController::direct()` before it creates the thread, and `TeamMemberResource::dmUrl()`
+     * before it draws the button — and it was written out twice, once in each file, because two
+     * agents needed it in the same hour and neither owned the other's file. Two copies of
+     * *"active, and holding the messaging key"* is two places for the rule to change once.
+     *
+     * So it is asked through the Gate with the CLASS leading:
+     * `Gate::forUser($actor)->allows('dm', [Conversation::class, $subject])`. Laravel resolves the
+     * policy from the class name and drops it from the arguments, which is the same mechanism a
+     * `create` ability uses, and it keeps the answer in the policy layer where the rest of this
+     * file's answers live rather than in a service both callers would have to know about.
+     *
+     * ## The rule
+     *
+     * **Both** people, symmetrically: active, and holding `messages.use`. A DM has two ends and
+     * either end failing means there is no conversation to have — which is why `dmUrl()` already
+     * asked about the viewer as well as the subject, and why `MessageController` asking only about
+     * the target was the looser of the two copies (its route group gates the actor's key, so no
+     * answer changes; the rule is simply now stated once and completely).
+     *
+     * A role is never named. The ACCOUNTANT falls out of every picker and loses every DM button
+     * by holding no `messages.use` — decisions 2-13 and 2-31 — and this file still says
+     * "Accountant" nowhere.
+     *
+     * **Not yourself.** There is no DM with one person in it: `conversations_dm_pair_is_ordered`
+     * requires `dm_one_id < dm_two_id`, so the row could not exist, and a picker offering your own
+     * name is offering a button that would 404. Answered here rather than beside each caller,
+     * which is where it used to live.
+     *
+     * A deactivated counterpart is refused rather than hidden, and the CALLER turns that into the
+     * right answer for its surface: the directory draws no button, and `direct()` is 404 so
+     * nobody learns whether the account exists (Part C).
+     */
+    public function dm(User $user, User $subject): bool
+    {
+        if ((int) $user->getKey() === (int) $subject->getKey()) {
+            return false;
+        }
+
+        return $this->allows($user, Permission::MessagesUse)
+            && $this->allows($subject, Permission::MessagesUse);
+    }
+
+    /**
      * The record a conversation's access is DELEGATED to, or null when there is not one.
      *
      * Null for a task or project conversation whose subject has gone, which ends at a denial:

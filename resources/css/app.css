@@ -52,7 +52,7 @@
     --primary-hover: oklch(0.50 0.205 34.4);        /* #BC0A00 — 6.34:1 on background */
     --primary-foreground: oklch(0.99 0 0);          /* #FCFCFC — 4.99:1 on primary */
     --destructive: oklch(0.577 0.245 27.325);       /* #E7000B — shadcn default, unchanged */
-    --ring: var(--brand);                           /* #F04E27 — focus ring is brand */
+    --ring: var(--brand);                           /* #F04E27 — focus ring is brand, painted opaque */
 
     /* ── Charts — T8 / decision 0.5-4 ──────────────────────────────────────
      * Series 1 is the brand: the number being read. The other four are
@@ -146,8 +146,20 @@
     --status-cancelled-border: oklch(0.88 0.04 27); /* #F1CEC9 */
 
     /* ── Elevation ─────────────────────────────────────────────────────────
-     * One surface may not sit on another at the same elevation. */
-    --elevation-flat: none;                         /* table rows, list items, nav */
+     * One surface may not sit on another at the same elevation.
+     *
+     * `--elevation-flat` is a TRANSPARENT shadow, not the keyword `none`, and that is load-bearing.
+     * Tailwind v4 composes one `box-shadow` out of five custom properties —
+     * `var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow),
+     * var(--tw-ring-shadow), var(--tw-shadow)` — and `none` is only legal as the SOLE value of
+     * `box-shadow`. So `--elevation-flat: none` made the whole list invalid on every control
+     * carrying `shadow-flat`, the declaration was dropped, and the computed value fell back to
+     * `none` — which silently deleted the focus ring from every input, textarea, select, checkbox,
+     * radio, switch, toggle and outline button. Measured 2026-09-26: `:focus-visible` matched, the
+     * ring classes were on the element, and `getComputedStyle(el).boxShadow` was `none`.
+     * `0 0 #0000` is what Tailwind's own `shadow-none` sets for exactly this reason.
+     * `tests/Unit/DesignVocabularyTest.php` fails if any `--elevation-*` goes back to `none`. */
+    --elevation-flat: 0 0 #0000;                    /* table rows, list items, nav */
     --elevation-raised:
         0 1px 2px 0 oklch(0 0 0 / 0.05),
         0 1px 3px 0 oklch(0 0 0 / 0.06);            /* cards, panels */
@@ -255,8 +267,10 @@
     --status-cancelled-border: oklch(0.38 0.04 27); /* #563A37 */
 
     /* ── Elevation ─────────────────────────────────────────────────────────
-     * Deeper on the dark canvas, where a 5 % black shadow reads as nothing. */
-    --elevation-flat: none;
+     * Deeper on the dark canvas, where a 5 % black shadow reads as nothing.
+     * Flat is a transparent shadow rather than `none` for the reason in the light block: `none`
+     * inside the composed list invalidates it and takes the focus ring with it. */
+    --elevation-flat: 0 0 #0000;
     --elevation-raised:
         0 1px 2px 0 oklch(0 0 0 / 0.30),
         0 1px 3px 0 oklch(0 0 0 / 0.36);
@@ -353,9 +367,24 @@
     --color-status-cancelled-border: var(--status-cancelled-border);
 }
 
+/*
+ * The focus ring is painted OPAQUE. `outline-ring/50` — shadcn's generated default, and what
+ * this file shipped from Phase 0.5 to Phase 12 — composites --brand at 50 % over the surface
+ * behind it and measures 1.90:1 on the canvas, 1.93:1 on a card and 1.87:1 on --muted in light
+ * mode (2.44 / 2.42 / 2.31 in dark). WCAG 2.2 §1.4.11 wants 3:1 for a focus indicator, so every
+ * one of those was a failure, and DESIGN.md §2.2 recorded the ring measured opaque and marked it
+ * ✅ for eleven phases. At full opacity the same token is 3.45 / 3.61 / 3.30 light and
+ * 6.75 / 6.15 / 5.39 dark. The arithmetic is in tests/Unit/FocusRingContrastTest.php, which
+ * parses the oklch values out of THIS file and fails under 3:1 — a table nobody recomputes is
+ * how this was wrong for so long.
+ *
+ * The one surface --ring cannot clear is --primary (1.43:1 light, 1.08:1 dark): a control inside
+ * a DM's own bubble paints `ring-primary-foreground` instead (5.01:1 / 7.31:1). See
+ * Components/Messages/MessageBody.vue.
+ */
 @layer base {
     * {
-        @apply border-border outline-ring/50;
+        @apply border-border outline-ring;
     }
 
     body {

@@ -42,7 +42,7 @@ const targetLabel = computed(() =>
 </script>
 
 <template>
-    <Card class="gap-4 p-6 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+    <Card class="gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
         <div class="flex min-w-0 flex-col gap-2">
             <p class="flex items-center gap-2 text-sm text-muted-foreground">
                 <Timer class="size-4 shrink-0" aria-hidden="true" />

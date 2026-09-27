@@ -1,20 +1,63 @@
 <?php
 
 use App\Http\Controllers\Shared\AttendanceController;
+use App\Http\Controllers\Shared\ExpenseController;
 use App\Http\Controllers\Shared\FileDownloadController;
+use App\Http\Controllers\Shared\FinanceCategoryController;
+use App\Http\Controllers\Shared\FinanceReportController;
+use App\Http\Controllers\Shared\IncomeController;
 use App\Http\Controllers\Shared\LeaveController;
+use App\Http\Controllers\Shared\MeetingController;
+use App\Http\Controllers\Shared\MeetingDetailController;
 use App\Http\Controllers\Shared\MessageController;
 use App\Http\Controllers\Shared\NotificationController;
+use App\Http\Controllers\Shared\PayrollController;
+use App\Http\Controllers\Shared\PayslipController;
 use App\Http\Controllers\Shared\ProfileController;
 use App\Http\Controllers\Shared\ProfilePasswordController;
 use App\Http\Controllers\Shared\ProfileSessionController;
 use App\Http\Controllers\Shared\ProfileTwoFactorController;
+use App\Http\Controllers\Shared\SalaryController;
+use App\Http\Controllers\Shared\SearchController;
 use App\Http\Controllers\Shared\TeamController;
 use App\Models\Notification;
 use App\Support\Permission;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
+// See routes/admin.php for what `throttle:authenticated` is.
+Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->group(function () {
+    // ── Global search (master prompt Part D §17, Phase 10) ──────────────────────────
+    //
+    // One route, and the ONLY group in this file with no `can:` on it. Every neighbour below
+    // carries one — `can:messages.use`, `can:meetings.use`, `can:finance.view`,
+    // `can:payroll.view_own` — so the absence here is a statement rather than an omission:
+    // **every signed-in role may search.** What differs between them is what they FIND, not
+    // whether they may look, and a gate would have to name a `search.use` key that every role
+    // holds, which is not a capability.
+    //
+    // Shared rather than one copy per shell, for the reason Messages, Leave, Attendance,
+    // Meetings and Finance are shared: what a person can find is a fact about the PERSON, not
+    // about the shell they are in. The deep link in each result is resolved for the viewer's
+    // own surface on the server (`SearchService::surfaceBase()`), so an employee is never
+    // handed `/admin/projects/12` — a 403 dressed up as a link, which the Meetings slice hit.
+    //
+    // The whole privacy rule lives in `SearchService`: the requester's accessible ids scope
+    // every query BEFORE the term ranks anything, reusing each model's existing `visibleTo()`
+    // rather than a second access rule. The Accountant reaching this route is correct — they
+    // find their finance records and nothing else, because of the keys they hold and not
+    // because anything here names them.
+    //
+    // JSON, because the command palette fetches it on a keystroke; an Inertia visit would push
+    // a history entry per letter. A short or empty `q` is 200 with an empty envelope, never
+    // 422 (decision M-4) — a search-as-you-type box must not flash an error on the first key.
+    //
+    // `throttle:search`: this is the most expensive read in the application per request —
+    // one tsvector query per searchable type. 120 a minute; the palette's 180 ms debounce
+    // and its abort-the-previous-request mean a human is nowhere near it.
+    Route::get('/search', [SearchController::class, 'index'])
+        ->middleware('throttle:search')
+        ->name('search.index');
+
     Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::put('/profile/password', ProfilePasswordController::class)->name('profile.password.update');
@@ -91,7 +134,9 @@ Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
             // The scope is the requester's own inbox and it is built BEFORE the term is: see
             // ConversationService::search(). A term that appears only in a project channel they
             // are not on is not discoverable, not even as a count (Part C).
-            Route::get('/search', [MessageController::class, 'search'])->name('search');
+            Route::get('/search', [MessageController::class, 'search'])
+                ->middleware('throttle:search')
+                ->name('search');
 
             // Declared before `{conversation}` for readability; they cannot collide, because
             // this one is two segments deep and that one is numeric.
@@ -112,6 +157,7 @@ Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
                 ->whereNumber('conversation')
                 ->name('context');
             Route::post('/{conversation}', [MessageController::class, 'store'])
+                ->middleware('throttle:posting')
                 ->whereNumber('conversation')
                 ->name('store');
             Route::post('/{conversation}/read', [MessageController::class, 'read'])
@@ -178,9 +224,331 @@ Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
     // The id is re-resolved through `LeaveRequest::visibleTo()` before the policy is asked, so
     // somebody else's request is **404** and never 403 — the requester never learns whether the
     // id existed (Part C).
+    //
+    // `POST /leave/{leaveRequest}/withdraw` is the employee's SECOND move (decision 5-19): taking
+    // their own request back while it is still waiting on somebody. It is here rather than in
+    // `routes/admin.php` beside approve/reject/correction for the reason the three routes above are
+    // here — it is a fact about the applicant, not about an approver, and the Accountant may do it
+    // too. It resolves the id the same way `update` does, so somebody else's request is 404.
     Route::get('/leave', [LeaveController::class, 'show'])->name('leave.show');
     Route::post('/leave', [LeaveController::class, 'store'])->name('leave.store');
     Route::put('/leave/{leaveRequest}', [LeaveController::class, 'update'])->name('leave.update');
+    Route::post('/leave/{leaveRequest}/withdraw', [LeaveController::class, 'withdraw'])
+        ->whereNumber('leaveRequest')
+        ->name('leave.withdraw');
+
+    // Meetings (master prompt Part D §12, Phase 7): the list, the month and week calendar, and
+    // the create/edit form. Shared rather than one set per surface for the reason the Messages
+    // group above is: **whose calendar a meeting is on belongs to the PERSON**, not to the shell
+    // they happen to be looking at. Both Admins book meetings, so do the employees, and three
+    // copies of these routes would have been three places for "may this person see this
+    // meeting" to be answered differently — with one of the three the copy nobody tested.
+    // `Pages/Shared/Meetings/*.vue` pick their layout from `auth.user.surface`, exactly as
+    // Profile, Attendance, Leave and Messages do.
+    //
+    // **`can:meetings.use` on the group is Part D §12's "the Accountant has no meetings".** It
+    // is a rule about a capability rather than about a person, so it is spelled as a permission
+    // and the Accountant is refused by holding none of it — the same shape `can:messages.use`
+    // has above, and the reason nothing in this group names a role. The Meetings nav row is
+    // absent from `navigation/accountant.ts` for the same reason.
+    //
+    // `{meeting}` is `whereNumber`ed, so `meetings/create` can never be read as a meeting
+    // called "create". A meeting this person may not see is **404** from the controller, never
+    // 403: they do not learn whether the id exists (Part C). One they can see and may not edit
+    // is **403** — the act is refused, not the record.
+    Route::prefix('meetings')
+        ->name('meetings.')
+        ->middleware('can:'.Permission::MeetingsUse->value)
+        ->group(function () {
+            Route::get('/', [MeetingController::class, 'index'])->name('index');
+
+            // Declared before `{meeting}` for readability; they cannot collide, because that
+            // one is numeric and this is a word.
+            Route::get('/create', [MeetingController::class, 'create'])->name('create');
+            Route::post('/', [MeetingController::class, 'store'])->name('store');
+
+            Route::get('/{meeting}/edit', [MeetingController::class, 'edit'])
+                ->whereNumber('meeting')
+                ->name('edit');
+            Route::put('/{meeting}', [MeetingController::class, 'update'])
+                ->whereNumber('meeting')
+                ->name('update');
+
+            // ── The meeting itself (Phase 7 slice 3) ────────────────────────────────────
+            //
+            // One screen and the four things it does: answer the invitation, write the
+            // meeting up, turn what was agreed into a task, and call it off. They sit INSIDE
+            // this group rather than in one of their own, so "the Accountant has no meetings"
+            // is said once — a second group behind the same key would be a second place for
+            // that sentence to be edited, and the one that got missed.
+            //
+            // `{meeting}` is `whereNumber`ed on every one of them, like the two above.
+            // `MeetingDetailController` resolves each id through `Meeting::visibleTo($user)`
+            // BEFORE asking any ability, so a meeting this person is not in is **404** and one
+            // they are in but may not act on is **403** — see that controller's docblock for
+            // why swapping the two would tell an employee that a meeting with that id exists
+            // and that they were not invited.
+            Route::get('/{meeting}', [MeetingDetailController::class, 'show'])
+                ->whereNumber('meeting')
+                ->name('show');
+            Route::post('/{meeting}/cancel', [MeetingDetailController::class, 'cancel'])
+                ->whereNumber('meeting')
+                ->name('cancel');
+            Route::post('/{meeting}/rsvp', [MeetingDetailController::class, 'rsvp'])
+                ->whereNumber('meeting')
+                ->name('rsvp');
+            Route::put('/{meeting}/notes', [MeetingDetailController::class, 'notes'])
+                ->whereNumber('meeting')
+                ->name('notes');
+            Route::post('/{meeting}/action-items', [MeetingDetailController::class, 'actionItem'])
+                ->whereNumber('meeting')
+                ->name('action-items');
+        });
+
+    // ── Finance (Phase 8) ───────────────────────────────────────────────────────────
+    //
+    // The company's books. Shared rather than one copy per shell, for the reason Messages,
+    // Leave, Attendance and Meetings are shared: **whose money it is belongs to the agency,
+    // not to the shell somebody is looking at.** Part E's Phase 8 heading reads "Screens
+    // (Accountant shell + Admin → Finance)", and an Admin reading September and the Accountant
+    // reading September are the same rows asked the same way — two sets of routes would be two
+    // places for "what is September" to be answered differently, and both of them are about
+    // money. `Pages/Shared/Finance/*.vue` pick their layout from `auth.user.surface`, exactly
+    // as Profile, Attendance, Leave, Messages and Meetings do.
+    //
+    // **`can:finance.view` on the group is the phase's own security line**, *"Employees/Remote
+    // get 403 on every finance route"*, spelled as a capability rather than as a role: they
+    // hold neither finance key, so they are refused here before a controller runs. Nothing in
+    // this group names a role, which is also what would let a future bookkeeper role get these
+    // screens by being granted the key in `RolePermissionSeeder` and nothing else.
+    //
+    // A write in here is refused a second time, by `IncomePolicy` / `ExpensePolicy` through
+    // `FinanceService` — this gate is `finance.view`, and reading the books is not permission
+    // to change them.
+    Route::prefix('finance')
+        ->name('finance.')
+        ->middleware('can:'.Permission::FinanceView->value)
+        ->group(function () {
+            // "This month income / expense / net, by category" (Part D §13). The month is in
+            // the URL — `?month=YYYY-MM` — so a month is a link somebody can send.
+            Route::get('/', [FinanceReportController::class, 'dashboard'])->name('dashboard');
+
+            // The Monthly financial report's three cuts: by category, by project, trend. Its
+            // window is in the URL too, length included (`?month=…&months=…`), so a trend is
+            // something a reader can cite.
+            Route::get('/report', [FinanceReportController::class, 'report'])->name('report');
+
+            // ── The ledgers (slice 2a) ──────────────────────────────────────────────
+            //
+            // A month of money in, a month of money out, and the list of names it is filed
+            // under. `?month=YYYY-MM` on both ledgers, for the reason the dashboard above
+            // carries one: a month is the unit Part D's rollup and every report are
+            // denominated in, and which month you are reading is a link somebody can send
+            // (DESIGN.md §5 rule 10).
+            //
+            // **`create` and `edit` are real GET routes rendering the same page component as
+            // the index.** The form is a dialog over the ledger and its state lives in the
+            // URL, not in component state: a validation failure then redirects back to an
+            // address that renders the form again with the errors on it, the back button
+            // closes it, and a half-written income survives a refresh.
+            //
+            // Every id is `whereNumber`ed, so `/finance/income/create` can never be read as an
+            // income called "create".
+            Route::get('/income', [IncomeController::class, 'index'])->name('income.index');
+            Route::get('/income/create', [IncomeController::class, 'create'])->name('income.create');
+            Route::post('/income', [IncomeController::class, 'store'])->name('income.store');
+            Route::get('/income/{income}/edit', [IncomeController::class, 'edit'])
+                ->whereNumber('income')
+                ->name('income.edit');
+            Route::put('/income/{income}', [IncomeController::class, 'update'])
+                ->whereNumber('income')
+                ->name('income.update');
+            Route::delete('/income/{income}', [IncomeController::class, 'destroy'])
+                ->whereNumber('income')
+                ->name('income.destroy');
+
+            Route::get('/expenses', [ExpenseController::class, 'index'])->name('expenses.index');
+            Route::get('/expenses/create', [ExpenseController::class, 'create'])->name('expenses.create');
+            Route::post('/expenses', [ExpenseController::class, 'store'])->name('expenses.store');
+            Route::get('/expenses/{expense}/edit', [ExpenseController::class, 'edit'])
+                ->whereNumber('expense')
+                ->name('expenses.edit');
+            Route::put('/expenses/{expense}', [ExpenseController::class, 'update'])
+                ->whereNumber('expense')
+                ->name('expenses.update');
+            Route::delete('/expenses/{expense}', [ExpenseController::class, 'destroy'])
+                ->whereNumber('expense')
+                ->name('expenses.destroy');
+
+            // The category list. It is INSIDE this group, so reading it takes `finance.view`
+            // like every other finance screen — the Accountant lives in the pickers these
+            // names fill, and a list they could not read would make both forms unusable.
+            //
+            // **Writing it is `settings.manage`, not `finance.manage`** — decision 8-12, Part
+            // D §13's *"Admin-editable"*. That is `FinanceCategoryPolicy`'s answer and the
+            // controller asks it per act; it is deliberately NOT restated as a second
+            // middleware here, because a rule spelled in two places is a rule that can be
+            // changed in one of them.
+            Route::get('/categories', [FinanceCategoryController::class, 'index'])->name('categories.index');
+            Route::post('/categories', [FinanceCategoryController::class, 'store'])->name('categories.store');
+            Route::put('/categories/{category}', [FinanceCategoryController::class, 'update'])
+                ->whereNumber('category')
+                ->name('categories.update');
+            Route::delete('/categories/{category}', [FinanceCategoryController::class, 'destroy'])
+                ->whereNumber('category')
+                ->name('categories.destroy');
+        });
+
+    // ── My Payslip (Phase 9, slice 2b) ──────────────────────────────────────────────
+    //
+    // This person's own pay. Shared rather than one copy per shell, for the reason My Leave
+    // above is shared and stated in the same place: Part C §1 gives *View own payslip* a ✅ in
+    // **every** column of the matrix, and the note under it says outright that *"the Accountant
+    // shell therefore carries My Leave and My Payslip"*. Whose pay it is belongs to the PERSON,
+    // not to the shell they are looking at, so three copies of these three routes would have
+    // been three places for "whose payslip is this" to be answered differently — and the
+    // Accountant's copy would have been the one nobody tested. `Pages/Shared/Payslip/*.vue`
+    // pick their layout from `auth.user.surface`, exactly as Profile, Attendance, Leave,
+    // Messages, Meetings and Finance do, so the Accountant reads their payslip in the
+    // **Accountant** shell.
+    //
+    // `can:payroll.view_own` on the group is the whole gate, and every role holds that key —
+    // the Accountant included. It is deliberately NOT `can:view,item`: the item is not a bound
+    // model here.
+    //
+    // **`{item}` is a payroll item id and it is resolved through
+    // `PayrollService::findItemFor($viewer, $id)`, never by route-model binding.** That single
+    // call is all three halves of Part B §3 rule 1 at once — the listing omits other people's
+    // rows, a direct id is **404** rather than 403 (a 403 would confirm the id exists), and the
+    // attempt is written to `audit_logs`. The PDF goes through the very same call on the line
+    // above the renderer, because a download endpoint that forgot the scope would be the one
+    // hole in an otherwise airtight rule.
+    //
+    // `whereNumber` on both id routes, so nothing word-shaped can ever be read as an item id.
+    Route::prefix('payslip')
+        ->name('payslip.')
+        ->middleware('can:'.Permission::PayrollViewOwn->value)
+        ->group(function () {
+            Route::get('/', [PayslipController::class, 'index'])->name('index');
+
+            // `/{item}/pdf` is declared before `/{item}` only for readability; they cannot
+            // collide, because that one is two segments deep.
+            Route::get('/{item}/pdf', [PayslipController::class, 'pdf'])
+                ->whereNumber('item')
+                ->name('pdf');
+            Route::get('/{item}', [PayslipController::class, 'show'])
+                ->whereNumber('item')
+                ->name('show');
+        });
+
+    // ── Salary settings per employee (Phase 9, slice 2b) ─────────────────────────────
+    //
+    // What each person is paid, from a date. Part D §14 puts *"salary settings per employee
+    // (base salary, allowances — audit-logged)"* under **Admin → Payroll**, and
+    // `can:payroll.approve` is how that is said: `RolePermissionSeeder` grants that key to
+    // ADMIN and to nobody else, so the Accountant — who holds `payroll.view_own`,
+    // `payroll.view_others` and `payroll.draft` — gets **403** here, along with every Manager,
+    // Employee and Remote employee. A whole screen a role may not use is a 403 and not a 404:
+    // Part B §3 rule 1 keeps the 404 for somebody's RECORD, and a route's existence is not
+    // sensitive.
+    //
+    // The Accountant being refused is the plan's own division of labour, not an oversight:
+    // their half of Part D §14 is *"fills/adjusts base salary, allowance, bonus, deduction,
+    // advance"* on **this month's payroll item**, which is the payroll workbench. This screen
+    // changes what somebody is paid from now on, which is every future month.
+    //
+    // **The write is a new effective-dated ROW, never an edit of an old one** (decision 9-1):
+    // `PayrollService::setSalary()` is the only writer, it audits the change as
+    // `salary.changed` in the same transaction, and nothing about that is restated in the
+    // controller. It is `PUT` because it sets one employee's salary — the thing being
+    // addressed is the person, and the row that records it is an implementation detail of how
+    // this application remembers history.
+    Route::prefix('salaries')
+        ->name('salaries.')
+        ->middleware('can:'.Permission::PayrollApprove->value)
+        ->group(function () {
+            Route::get('/', [SalaryController::class, 'index'])->name('index');
+            Route::put('/{employee}', [SalaryController::class, 'update'])
+                ->whereNumber('employee')
+                ->name('update');
+        });
+
+    // ── Payroll (Phase 9, slice 2a) ─────────────────────────────────────────────────
+    //
+    // The payroll workbench: the month list, the month itself, and every move the month can
+    // make. Shared rather than one copy per shell, for the reason Finance above is shared —
+    // **whose pay it is belongs to the agency, not to the shell somebody is looking at.**
+    // Part E's Phase 9 heading splits the VERBS across two surfaces ("Accountant → Payroll:
+    // … Calculate, submit for review. Admin → Payroll: Review, Approve, Lock, Reverse lock,
+    // Mark paid") and not the screens: an Admin reading September and the Accountant reading
+    // September are the same rows with the same figures. Two sets of routes would be two
+    // places for "may this person lock a month" to be answered differently.
+    // `Pages/Shared/Payroll/*.vue` pick their layout from `auth.user.surface`, exactly as
+    // Profile, Attendance, Leave, Messages, Meetings and Finance do.
+    //
+    // **`can:payroll.draft` on the group is Phase 9's security line.** ADMIN and ACCOUNTANT
+    // hold that key and nobody else does (`RolePermissionSeeder`), so an Employee, a Remote
+    // employee and a Manager get **403** here before a controller runs — refused by the
+    // absence of a key rather than by being named, like every other group in this file. It is
+    // deliberately the DRAFT key and not the APPROVE one: reading the month and calculating it
+    // are the Accountant's (Part C §1's "🟡 draft/calculate only"), and each of the five
+    // Admin-only verbs is refused a second time by `PayrollPeriodPolicy` inside.
+    //
+    // My Payslip is NOT here. An employee reaches their own line through `PayrollItem`, never
+    // through a period, and `payroll.view_own` — which every role holds — buys nothing at this
+    // gate.
+    //
+    // Both ids are `whereNumber`ed. `{period}` is route-model bound and a period nobody has is
+    // 404 from the binding; a period somebody may not ACT on is **403**, because a month is not
+    // a secret from anybody holding the key above. `{item}` is deliberately NOT bound: one
+    // person's salary IS a secret, so `PayrollController` resolves it through
+    // `PayrollService::findItemFor()`, whose 404 is Part B §3 rule 1 and whose audit row is
+    // Part C §3's "every access attempt to another employee's salary is logged".
+    Route::prefix('payroll')
+        ->name('payroll.')
+        ->middleware('can:'.Permission::PayrollDraft->value)
+        ->group(function () {
+            Route::get('/', [PayrollController::class, 'index'])->name('index');
+
+            // Drafting this month by hand, for a month that missed the 1st. Declared before
+            // `/{period}` for readability; they cannot collide, because that one is numeric
+            // and this is the collection itself.
+            Route::post('/', [PayrollController::class, 'store'])->name('store');
+
+            Route::get('/{period}', [PayrollController::class, 'show'])
+                ->whereNumber('period')
+                ->name('show');
+
+            Route::put('/{period}/items/{item}', [PayrollController::class, 'updateItem'])
+                ->whereNumber('period')
+                ->whereNumber('item')
+                ->name('items.update');
+
+            // The state machine, one route per verb. They are POSTs rather than one
+            // `POST /{period}/transition` taking a target, for the reason Phase 2's task
+            // status routes are separate: each one is a different act with a different
+            // policy method, a different audit consequence and a different confirmation —
+            // and a single endpoint switching on a body value would put the state machine's
+            // map into a request parameter.
+            Route::post('/{period}/calculate', [PayrollController::class, 'calculate'])
+                ->whereNumber('period')
+                ->name('calculate');
+            Route::post('/{period}/review', [PayrollController::class, 'review'])
+                ->whereNumber('period')
+                ->name('review');
+            Route::post('/{period}/approve', [PayrollController::class, 'approve'])
+                ->whereNumber('period')
+                ->name('approve');
+            Route::post('/{period}/lock', [PayrollController::class, 'lock'])
+                ->whereNumber('period')
+                ->name('lock');
+            Route::post('/{period}/reverse-lock', [PayrollController::class, 'reverseLock'])
+                ->whereNumber('period')
+                ->name('reverse-lock');
+            Route::post('/{period}/paid', [PayrollController::class, 'markPaid'])
+                ->whereNumber('period')
+                ->name('paid');
+        });
 
     // Downloading a file. Shared rather than one route per surface, because who may fetch a
     // file is a fact about the requester and the record it hangs off, not about the shell they
@@ -194,6 +562,6 @@ Route::middleware(['auth', 'active', 'two-factor'])->group(function () {
     // valid. An expiring URL that works for anybody holding it is a different security model
     // and not the one this application has.
     Route::get('/files/{file}', FileDownloadController::class)
-        ->middleware('signed')
+        ->middleware(['signed', 'throttle:downloads'])
         ->name('files.download');
 });

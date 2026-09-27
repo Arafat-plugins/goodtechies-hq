@@ -4,6 +4,7 @@ use App\Http\Controllers\Employee\DashboardController;
 use App\Http\Controllers\Employee\FileController;
 use App\Http\Controllers\Employee\MyTaskController;
 use App\Http\Controllers\Employee\ProjectController;
+use App\Http\Controllers\Employee\ReportController;
 use App\Http\Controllers\Employee\TagController;
 use App\Http\Controllers\Employee\TaskController;
 use App\Http\Controllers\Employee\TaskDiscussionController;
@@ -16,7 +17,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('employee')
     ->name('employee.')
-    ->middleware(['auth', 'active', 'two-factor', 'surface:employee'])
+    // See routes/admin.php for what `throttle:authenticated` is.
+    ->middleware(['auth', 'active', 'two-factor', 'surface:employee', 'throttle:authenticated'])
     ->group(function () {
         Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
@@ -46,6 +48,11 @@ Route::prefix('employee')
             // nothing else; the scoping is Task::visibleTo()'s, not the route's.
             Route::get('/board', [TaskController::class, 'board'])->name('board');
             Route::get('/calendar', [TaskController::class, 'calendar'])->name('calendar');
+            // Phase 10. Scoped by Task::visibleTo() like every other view here, so this
+            // timeline holds the tasks this person is assigned to and nothing else. Its date
+            // handles are inert for an Employee and live for the Manager who shares this
+            // surface — TaskService::mayPlan(), the one definition.
+            Route::get('/gantt', [TaskController::class, 'gantt'])->name('gantt');
 
             Route::get('/{task}', [TaskController::class, 'show'])->name('show');
             Route::put('/{task}', [TaskController::class, 'update'])->name('update');
@@ -73,7 +80,9 @@ Route::prefix('employee')
             // is Task::visibleTo()'s doing and not this route's. A task they are not on
             // answers 404, exactly as its attachments and the task itself do.
             Route::get('/{task}/discussion', [TaskDiscussionController::class, 'index'])->name('discussion.index');
-            Route::post('/{task}/discussion', [TaskDiscussionController::class, 'store'])->name('discussion.store');
+            Route::post('/{task}/discussion', [TaskDiscussionController::class, 'store'])
+                ->middleware('throttle:posting')
+                ->name('discussion.store');
         });
 
         // The remote timer and this person's own time (master prompt Part D §7, Phase 4).
@@ -131,6 +140,24 @@ Route::prefix('employee')
         Route::get('/timesheet/{employee?}', [TimesheetController::class, 'index'])
             ->whereNumber('employee')
             ->name('timesheet');
+
+        // Employee → My Reports (Part D §15, Phase 10; docs/report-contract.md §5).
+        //
+        // Deliberately **not** `/employee/reports/{report}` and deliberately not the admin
+        // catalogue narrowed by a filter: Part D §15 names a different list for this surface —
+        // My Tasks / Completed / Pending / Overdue as linked counts, a Time section, and a
+        // weekly or monthly summary on `?period=week|month`.
+        //
+        // No parameter of any kind, because there is no record to name and nobody else to ask
+        // about. The counts are `TaskService` with `mine => true`, so "can this show somebody
+        // else's numbers" is answered by there being nothing to pass rather than by a scope
+        // that has to be got right — which is why there is no `{employee?}` here the way there
+        // is on the timesheet above.
+        //
+        // No `can:` either: the Time section is the only part of it that is a privilege, and
+        // it is **absent** for somebody the timer does not track rather than refused (Part C
+        // §1). A gate would have had to turn the whole screen into a 403 to hide one block.
+        Route::get('/reports', ReportController::class)->name('reports');
 
         // Tag management, here because this is the surface a MANAGER reaches — the plan gives
         // tag creation to Admin/Manager, and a route only on the Admin shell would have made

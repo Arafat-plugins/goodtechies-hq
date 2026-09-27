@@ -21,7 +21,7 @@ const emit = defineEmits<{ edit: []; remove: [] }>();
     <div class="inline-flex h-8 max-w-full min-w-0 items-center rounded-full border bg-muted/50 text-xs">
         <button
             type="button"
-            class="flex min-w-0 items-center gap-1 rounded-l-full py-1 pr-1 pl-3 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+            class="flex min-w-0 items-center gap-1 rounded-l-full py-1 pr-1 pl-3 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
             :aria-label="`Change the ${props.label} filter, currently ${props.value}`"
             @click="emit('edit')"
         >
@@ -30,7 +30,7 @@ const emit = defineEmits<{ edit: []; remove: [] }>();
         </button>
         <button
             type="button"
-            class="flex h-full shrink-0 items-center rounded-r-full pr-2 pl-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            class="flex h-full shrink-0 items-center rounded-r-full pr-2 pl-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
             :aria-label="`Remove the ${props.label} filter`"
             @click="emit('remove')"
         >

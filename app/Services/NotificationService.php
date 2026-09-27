@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Events\NotificationFeedChanged;
 use App\Http\Resources\NotificationResource;
 use App\Models\Notification;
+use App\Models\NotificationPreference;
 use App\Models\User;
 use App\Support\NotificationChannel;
 use App\Support\NotificationTab;
@@ -62,6 +63,12 @@ use Illuminate\Support\Facades\DB;
  * (Part H) — and the `channels` list on the type is carried through so that Phase 12 has
  * somewhere to hang a second delivery. Today it resolves to exactly one channel and one row.
  *
+ * Phase 12 added the other half of that list: `notification_preferences` (Part D §20 — *"global
+ * defaults set by Admin … the engine reads them"*) can switch a channel off for a kind, and
+ * deliver() is the one place it is read, because deliver() was already the one place
+ * `channels()` was read. A kind switched off writes no row at all. Absent means default, so a
+ * type nobody has configured behaves exactly as it did before the table existed.
+ *
  * The Phase 6 broadcast is **not** a second channel in that sense and deliberately is not in
  * that list: it delivers nothing new, it tells a bell that is already entitled to the row that
  * the row is there. Putting it in `channels()` would have made "in-app" mean two things.
@@ -70,6 +77,20 @@ class NotificationService
 {
     /** The settings key §11 names. Read through SettingsService; never inlined as a number. */
     public const WINDOW_SETTING = 'notification_group_window_minutes';
+
+    /**
+     * The Admin's notification defaults, read once per instance of this service.
+     *
+     * `notification_preferences` is a handful of rows — one per switch somebody has touched —
+     * and `deliver()` asks about it once per recipient, so it is loaded whole and kept rather
+     * than queried per person. This service is not bound as a singleton or as scoped, so a
+     * request, a queued job and a console command each get their own copy and each reads the
+     * table once: a default changed in Admin → Notifications applies to the next event, with
+     * no cache to clear.
+     *
+     * @var array<string, bool>|null
+     */
+    private ?array $preferences = null;
 
     public function __construct(private readonly SettingsService $settings) {}
 
@@ -126,16 +147,27 @@ class NotificationService
         $body = $this->payload($target, $payload, $actor);
         $since = $this->windowStart();
 
-        return $recipients->map(function (User $user) use ($type, $groupKey, $body, $since): Notification {
-            $notification = $this->deliver($type, $user, $groupKey, $body, $since);
+        return $recipients
+            ->map(function (User $user) use ($type, $groupKey, $body, $since): ?Notification {
+                $notification = $this->deliver($type, $user, $groupKey, $body, $since);
 
-            // One announcement per recipient, after the row is written. A grouped delivery
-            // announces too: the row did not appear, but its count went up and its summary now
-            // reads "12 new comments in …", which is a different sentence on the same bell.
-            $this->announce($user);
+                // Null means deliver() had no channel left to write on — an Admin has switched
+                // this kind off (Admin → Notifications). Nothing was written, so there is
+                // nothing for the bell to be told about, and nothing to return.
+                if ($notification === null) {
+                    return null;
+                }
 
-            return $notification;
-        });
+                // One announcement per recipient, after the row is written. A grouped delivery
+                // announces too: the row did not appear, but its count went up and its summary
+                // now reads "12 new comments in …", which is a different sentence on the same
+                // bell.
+                $this->announce($user);
+
+                return $notification;
+            })
+            ->filter()
+            ->values();
     }
 
     /**
@@ -417,11 +449,33 @@ class NotificationService
     */
 
     /**
-     * Write the row, or grow the one this event belongs with.
+     * Write the row, or grow the one this event belongs with — unless this kind is switched off.
      *
      * The lookup and the write are one transaction with the candidate row locked, because two
      * comments posted in the same second must not each decide there is nothing to group with
      * and produce two rows of one. The row is re-read under the lock for the same reason.
+     *
+     * ## The Admin's defaults are applied HERE, and only here
+     *
+     * `NotificationType::channels()` is the per-type default: which channels this kind may go
+     * out on. `notification_preferences` (Part D §20, Phase 12 — *"global defaults set by Admin
+     * … the engine reads them"*) overrides that default per pair, and this is the one place in
+     * the application that reads either. Every event, every job and every command reaches
+     * delivery through this method, so switching a kind off in Admin → Notifications is
+     * **one** change to what the application does rather than a rule each caller has to
+     * remember. A second place that decided whether to deliver would be a second place that
+     * could disagree.
+     *
+     * ## Off means the row is never written
+     *
+     * Not written-and-hidden, not written-and-filtered-at-read: there is no row. A notification
+     * is a request for somebody's attention, and a kind the agency has turned off is not asking
+     * for it — so it does not sit in the table waiting to reappear if the switch is flipped
+     * back, and it does not count towards anybody's badge in the meantime. Switching a kind
+     * back on affects the next event and nothing before it, which is the same promise
+     * `settings` makes.
+     *
+     * Returns null in exactly that case, and notify() drops it from what it hands back.
      */
     private function deliver(
         NotificationType $type,
@@ -429,21 +483,25 @@ class NotificationService
         string $groupKey,
         array $payload,
         Carbon $since,
-    ): Notification {
-        // In-app only, and said out loud rather than assumed. Phase 12 turns a channel on by
-        // adding it to NotificationType::channels() and giving it a branch here; until then the
-        // list has exactly one entry and this is the whole of delivery.
-        $channels = $type->channels();
+    ): ?Notification {
+        $channels = $this->channelsFor($type);
 
-        return DB::transaction(function () use ($type, $user, $groupKey, $payload, $since, $channels): Notification {
-            $existing = in_array(NotificationChannel::InApp, $channels, true)
-                ? Notification::query()
-                    ->forUser($user)
-                    ->groupable($groupKey, $since)
-                    ->orderByDesc('id')
-                    ->lockForUpdate()
-                    ->first()
-                : null;
+        // This method writes the in-app row, and the in-app row is what it returns. A second
+        // channel would be dispatched here beside it once a sender exists; until then, no
+        // in-app channel means nothing is delivered at all. Asserted once, up here, rather than
+        // per query below — the create used to be unguarded, so a future channels list holding
+        // a channel that is *not* in-app would have written an in-app row anyway.
+        if (! in_array(NotificationChannel::InApp, $channels, true)) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($type, $user, $groupKey, $payload, $since): Notification {
+            $existing = Notification::query()
+                ->forUser($user)
+                ->groupable($groupKey, $since)
+                ->orderByDesc('id')
+                ->lockForUpdate()
+                ->first();
 
             if ($existing !== null) {
                 $existing->forceFill([
@@ -475,6 +533,34 @@ class NotificationService
                 'read_at' => null,
             ]);
         });
+    }
+
+    /**
+     * The channels this kind may actually be delivered on right now.
+     *
+     * `NotificationType::channels()` first, because it is the default and the only statement of
+     * which channels are real for a kind; then the Admin's `notification_preferences`, which may
+     * switch one of them off. **Absent means default, not off** — the table holds exceptions
+     * only and nothing seeds it, so a kind nobody has ever configured is delivered exactly as it
+     * was before this table existed. The alternative would make a `NotificationType` added in a
+     * later phase silently undeliverable until somebody found the screen.
+     *
+     * Order is preserved, so the list a future sender iterates is still the type's own order.
+     *
+     * @return list<NotificationChannel>
+     */
+    private function channelsFor(NotificationType $type): array
+    {
+        $this->preferences ??= NotificationPreference::overrides();
+
+        return array_values(array_filter(
+            $type->channels(),
+            fn (NotificationChannel $channel): bool => NotificationPreference::enabledIn(
+                $this->preferences,
+                $type,
+                $channel,
+            ),
+        ));
     }
 
     /**

@@ -7,6 +7,7 @@ use App\Services\NotificationService;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
@@ -44,7 +45,7 @@ use Illuminate\Queue\SerializesModels;
  * `feed()` is scoped to the one user this event names. There is no path here to somebody
  * else's mail.
  */
-class NotificationFeedChanged implements ShouldBroadcast
+class NotificationFeedChanged implements ShouldBroadcast, ShouldDispatchAfterCommit
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 

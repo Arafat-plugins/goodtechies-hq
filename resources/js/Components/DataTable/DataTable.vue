@@ -532,7 +532,7 @@ const stickyClass = 'sticky top-0 z-10 bg-card';
 
         <SkeletonTable v-if="loading" :columns="Math.max(visibleColumns.length, 2)" />
 
-        <Card v-else class="min-w-0 gap-0 overflow-hidden py-0 shadow-xs">
+        <Card v-else class="min-w-0 gap-0 overflow-hidden py-0">
             <CardContent class="px-0">
                 <EmptyState
                     v-if="isEmpty"
@@ -554,7 +554,7 @@ const stickyClass = 'sticky top-0 z-10 bg-card';
                             <li v-if="grouped" class="bg-muted">
                                 <button
                                     type="button"
-                                    class="flex w-full min-w-0 items-center gap-2 rounded-md px-4 py-2.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                                    class="flex w-full min-w-0 items-center gap-2 rounded-md px-4 py-2.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring"
                                     :aria-expanded="isGroupOpen(group)"
                                     @click="toggleGroup(group)"
                                 >
@@ -713,7 +713,7 @@ const stickyClass = 'sticky top-0 z-10 bg-card';
                                             type="button"
                                             :class="
                                                 cn(
-                                                    'inline-flex w-full items-center gap-1 rounded-md outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50',
+                                                    'inline-flex w-full items-center gap-1 rounded-md outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring',
                                                     ALIGN_JUSTIFY[alignOf(column)],
                                                 )
                                             "
@@ -741,7 +741,7 @@ const stickyClass = 'sticky top-0 z-10 bg-card';
                                         <TableCell :colspan="columnCount" class="bg-muted p-0">
                                             <button
                                                 type="button"
-                                                class="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                                                class="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring"
                                                 :aria-expanded="isGroupOpen(group)"
                                                 @click="toggleGroup(group)"
                                             >
