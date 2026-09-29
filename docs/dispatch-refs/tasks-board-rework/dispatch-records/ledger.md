@@ -3,3 +3,4 @@
 003 | 2026-09-29 | board-drawer-pan-hint | general-purpose(dispatch-frontend) | M | 6830226 | 69fda59 | accept | 1 | js 45/45; pest Tasks 87/87 (agent); browser checks R1/R5/R6 | pending (task end) | ~15
 004 | 2026-09-29 | task-live-update | general-purpose(dispatch-implementer) | L | 4fc7a36 | 70d1595 | accept | 1 | flow TaskLiveUpdateFlowTest 22/22 (16F+3E at BASE); Realtime+Tasks+Perf+Perms 191/191; js 45/45; browser proof | pending (task end) | ~54
 --- | 2026-09-29 | main-session fix (when-not-to-dispatch) | TaskServiceTest filter-key list + 2 stale '20 s' comments in Board pages | S | 70d1595 | - | done | - | TaskServiceTest 18/18 | - | 2
+007 | 2026-09-29 | board-round2-chips-menu-priority-text | general-purpose(dispatch-frontend) | S | 796fd0a | 2814fb7(-png) | accept | 1 | vue-tsc, build, js 45/45; browser DOM/drag/widths | skipped (UI only) | ~13

@@ -9,7 +9,7 @@ import TaskFilterBar, { taskFiltersActive } from '@/Components/Tasks/TaskFilterB
 import type { TaskFilters, TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
 import TaskStatusActions from '@/Components/Tasks/TaskStatusActions.vue';
 import type { BoardCard, BoardColumn, BoardPayload, TransitionMap } from '@/Components/Tasks/taskBoard';
-import { asDetail, cloneColumns, moveCard, movesFor, neighbours } from '@/Components/Tasks/taskBoard';
+import { asDetail, cloneColumns, moveCard, movesFor } from '@/Components/Tasks/taskBoard';
 import type { TaskSurface } from '@/Components/Tasks/taskDetail';
 import { mutateTask, taskRoutes } from '@/Components/Tasks/taskDetail';
 import { useDragPan } from '@/lib/dragPan';
@@ -265,7 +265,10 @@ function onDismissed(): void {
 /* ----------------------------------------------------------- giving focus back */
 
 /**
- * The card whose menu started this move, so focus can go back to it.
+ * The card to give focus back to once a move's dialog closes — the card itself, which is a tab
+ * stop. Nothing sets it since the card's ⋯ menu went (brief 007): a mouse drag deliberately
+ * leaves it `null`, because pulling focus across the board after one would scroll it out from
+ * under the pointer. It stays as the hook a keyboard move would set.
  *
  * It is an **id**, not an element. The dialogs live on the Board rather than in the card — one
  * modal can be open at a time, and forty mounted copies of a focus trap is forty too many — so
@@ -286,7 +289,7 @@ function restoreFocus(): void {
     void nextTick(() => {
         // After reka has finished its own restore, or it puts focus back on `body` over ours.
         setTimeout(() => {
-            strip.value?.querySelector<HTMLElement>(`[data-task-id="${id}"] [data-card-menu]`)?.focus();
+            strip.value?.querySelector<HTMLElement>(`[data-task-id="${id}"]`)?.focus();
         }, 0);
     });
 }
@@ -388,50 +391,9 @@ function onDrop(columnKey: string, event: DragEvent): void {
     move(held.id, held.from, columnKey, at?.column === columnKey ? at.index : 0);
 }
 
-/* ------------------------------------------------------- the keyboard's own path */
-
-/**
- * The menu's moves, down the same two code paths the drag uses.
- *
- * `returnTo` is set here and not in the drag handlers: this move started from a keyboard on a
- * known control, so focus has somewhere to go back to. A mouse drag did not, and pulling focus
- * across the board after one would scroll it out from under the pointer.
- */
-function moveTo(card: BoardCard, from: string, to: string): void {
-    const column = local.value.find((item) => item.key === to);
-
-    returnTo.value = card.id;
-    move(card.id, from, to, column?.tasks.length ?? 0);
-}
-
-function nudge(card: BoardCard, columnKey: string, direction: 'up' | 'down'): void {
-    const column = local.value.find((item) => item.key === columnKey);
-
-    if (column === undefined) {
-        return;
-    }
-
-    const where = neighbours(column, card.id);
-
-    returnTo.value = card.id;
-    move(card.id, columnKey, columnKey, direction === 'up' ? where.upIndex : where.downIndex);
-}
-
 /* ------------------------------------------------------------- getting around it */
 
 const strip = ref<HTMLElement | null>(null);
-
-/**
- * Eight columns do not fit on a phone, so the counts come to the reader instead: the chips
- * wrap, every column is named and counted without scrolling, and one press both scrolls its
- * column into view and moves focus to its heading.
- */
-function jumpTo(key: string): void {
-    const column = strip.value?.querySelector<HTMLElement>(`[data-column="${key}"]`);
-
-    column?.scrollIntoView({ block: 'nearest', inline: 'start', behavior: 'smooth' });
-    column?.querySelector<HTMLElement>('[data-column-heading]')?.focus();
-}
 
 /**
  * A mouse press on empty board — between lanes, below a short lane, right of the last one, or on a
@@ -446,7 +408,7 @@ const isDraggingCard = computed(() => drag.value !== null);
 /**
  * The strip reaches the bottom of the viewport, so the empty space under short lanes is board —
  * somewhere a pan can start — rather than page. Measured, because what sits above it (the filter
- * bar, the wrapped jump rail) changes height with the width and the filters.
+ * bar, the wrapped task count) changes height with the width and the filters.
  */
 const root = ref<HTMLElement | null>(null);
 const stripMinHeight = ref<string | undefined>(undefined);
@@ -561,35 +523,16 @@ watch(isPanning, (panning) => {
             </template>
         </TaskFilterBar>
 
-        <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <p class="text-xs text-muted-foreground">
-                <span class="tabular-nums">{{ board.total }}</span>
-                {{ board.total === 1 ? 'task' : 'tasks' }}
-                <template v-if="board.overdue_count > 0">
-                    ·
-                    <span class="font-medium text-destructive">
-                        <span class="tabular-nums">{{ board.overdue_count }}</span> overdue
-                    </span>
-                </template>
-            </p>
-
-            <!-- Every column, named and counted, without scrolling to it first. -->
-            <nav aria-label="Jump to a column" class="flex min-w-0 flex-wrap items-center gap-1">
-                <button
-                    v-for="column in local"
-                    :key="column.key"
-                    type="button"
-                    class="rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring"
-                    @click="jumpTo(column.key)"
-                >
-                    <StatusBadge
-                        :status="column.tone ?? 'todo'"
-                        :label="`${column.label} ${column.count}`"
-                        size="sm"
-                    />
-                </button>
-            </nav>
-        </div>
+        <p class="text-xs text-muted-foreground">
+            <span class="tabular-nums">{{ board.total }}</span>
+            {{ board.total === 1 ? 'task' : 'tasks' }}
+            <template v-if="board.overdue_count > 0">
+                ·
+                <span class="font-medium text-destructive">
+                    <span class="tabular-nums">{{ board.overdue_count }}</span> overdue
+                </span>
+            </template>
+        </p>
 
         <!--
             Nothing at all. A board filtered to nothing is not the same thing as a board with
@@ -685,9 +628,6 @@ watch(isPanning, (panning) => {
                                 @drag-start="onDragStart(card, column.key, $event)"
                                 @drag-end="onDragEnd"
                                 @open="emit('open-task', card.id)"
-                                @move-to="(status) => moveTo(card, column.key, status)"
-                                @move-up="nudge(card, column.key, 'up')"
-                                @move-down="nudge(card, column.key, 'down')"
                             />
                         </template>
 

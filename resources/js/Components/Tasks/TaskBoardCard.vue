@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { ArrowDown, ArrowUp, GripVertical, ListChecks, MoreHorizontal } from '@lucide/vue';
+import { GripVertical, ListChecks } from '@lucide/vue';
 import { computed } from 'vue';
 import OnLeaveFlag from '@/Components/Leave/OnLeaveFlag.vue';
-import StatusBadge from '@/Components/StatusBadge.vue';
 import DueCountdown from '@/Components/Tasks/DueCountdown.vue';
 import TaskPriorityFlag from '@/Components/Tasks/TaskPriorityFlag.vue';
 import type { BoardCard } from '@/Components/Tasks/taskBoard';
@@ -11,15 +10,6 @@ import type { TaskSurface, TaskTransition } from '@/Components/Tasks/taskDetail'
 import { initials, taskRoutes } from '@/Components/Tasks/taskDetail';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
 import { personTone } from '@/Components/Messages/people';
-import { Button } from '@/Components/ui/button';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from '@/Components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
@@ -30,24 +20,23 @@ import { cn } from '@/lib/utils';
  *
  * The card prints **no comment or attachment count**: `TaskResource` sends neither, and a zero
  * printed for a number the server never sent is a lie the card would tell on every row.
- * Priority is a flag in a `--priority-*` token with its word in the tooltip and `aria-label`
- * (DESIGN.md §1.4b), so the colour is never the only carrier.
+ * Priority is a flag in a `--priority-*` token with its word printed beside it (DESIGN.md
+ * §1.4b), so the colour is never the only carrier.
  *
  * **The card never reads the clock.** `DueCountdown` is the only subscriber to the shared minute
  * ticker, so a tick re-renders the labels and not this component (nothing below reads `now`).
  *
- * **Everything a mouse can do here, the ⋯ menu can do too.** A drag moves a card between
- * columns and reorders it inside one; the menu holds the same two moves as *Move to* and
- * *Move up* / *Move down*. That is the keyboard path, and it is on the card rather than
- * somewhere else on the page because a board of forty cards needs the alternative where the
- * card is.
+ * **The card has no ⋯ menu** (removed on the client's request, brief 007). A drag moves a card
+ * between columns and reorders it inside one; without a mouse, the status is changed from the
+ * drawer's status control, and order inside a lane has no keyboard path.
  */
 
 const props = defineProps<{
     card: BoardCard;
     surface: TaskSurface;
-    /** The moves this role may make from this card's column. Empty means the card cannot move. */
+    /** The moves this role may make from this card's column. Empty means no drag to another lane. */
     moves: TaskTransition[];
+    /** Whether a drag can reorder the card inside its lane (it has a neighbour above / below). */
     canMoveUp: boolean;
     canMoveDown: boolean;
     /** True while this card is the one being dragged. */
@@ -57,9 +46,6 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-    'move-to': [status: string];
-    'move-up': [];
-    'move-down': [];
     'drag-start': [event: DragEvent];
     'drag-end': [];
     /** Open this card in the Board's detail drawer. */
@@ -67,10 +53,10 @@ const emit = defineEmits<{
 }>();
 
 /**
- * What a press on the card is NOT for: the ⋯ menu and its items, the grip, and any other control
- * inside the card keep their own meaning. The title link is handled separately below.
+ * What a press on the card is NOT for: the grip and any other control inside the card keep their
+ * own meaning. The title link is handled separately below.
  */
-const OWN_CONTROLS = 'a, button, input, textarea, select, label, [role="menuitem"], [data-card-grip]';
+const OWN_CONTROLS = 'a, button, input, textarea, select, label, [data-card-grip]';
 
 /**
  * A plain left-click anywhere on the card opens the drawer — on the title too, whose `href` stays
@@ -134,7 +120,7 @@ const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || prop
 <template>
     <!--
         The card is one tab stop that opens the drawer on Enter or Space (nothing on the card binds
-        a key to reordering — that is the ⋯ menu's Move up / Move down), named by its title.
+        a key to reordering), named by its title.
     -->
     <li
         :draggable="canDrag"
@@ -170,80 +156,17 @@ const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || prop
                 {{ card.title }}
             </Link>
 
-            <div class="flex shrink-0 items-center gap-0.5">
-                <!--
-                    A grip that says the card is draggable. It is `aria-hidden` because it is
-                    not the keyboard's way in — the ⋯ menu beside it is, and a second focus
-                    stop that only works with a mouse is a stop that wastes a Tab.
-                -->
-                <GripVertical
-                    v-if="canDrag"
-                    data-card-grip
-                    class="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                    aria-hidden="true"
-                />
-
-                <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                        <!--
-                            `data-card-menu` is how the Board finds this button again after a
-                            move: the dialog a move opens is mounted on the Board, not in the
-                            card, and the card itself is re-rendered by the optimistic move —
-                            so focus cannot be restored to an element reference, only to a
-                            card id and this marker.
-                        -->
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            data-card-menu
-                            :aria-label="`Actions for ${card.title}`"
-                        >
-                            <MoreHorizontal aria-hidden="true" />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" class="w-56">
-                        <DropdownMenuItem as-child>
-                            <Link :href="href">Open task</Link>
-                        </DropdownMenuItem>
-
-                        <template v-if="canMoveUp || canMoveDown">
-                            <DropdownMenuSeparator />
-                            <DropdownMenuLabel class="text-xs font-normal text-muted-foreground">
-                                Order in this column
-                            </DropdownMenuLabel>
-                            <DropdownMenuItem :disabled="!canMoveUp" @select="emit('move-up')">
-                                <ArrowUp aria-hidden="true" />
-                                Move up
-                            </DropdownMenuItem>
-                            <DropdownMenuItem :disabled="!canMoveDown" @select="emit('move-down')">
-                                <ArrowDown aria-hidden="true" />
-                                Move down
-                            </DropdownMenuItem>
-                        </template>
-
-                        <template v-if="moves.length > 0">
-                            <DropdownMenuSeparator />
-                            <!--
-                                The same list the drag offers, because it is the same list:
-                                the role half of the rule, from `transitions`. A per-task
-                                refusal can still come back, and the board puts the card back
-                                when it does.
-                            -->
-                            <DropdownMenuLabel class="text-xs font-normal text-muted-foreground">
-                                Change status
-                            </DropdownMenuLabel>
-                            <DropdownMenuItem
-                                v-for="move in moves"
-                                :key="move.value"
-                                @select="emit('move-to', move.value)"
-                            >
-                                <StatusBadge :status="move.tone" :label="move.label" size="sm" />
-                            </DropdownMenuItem>
-                        </template>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            </div>
+            <!--
+                A grip that says the card is draggable. It is `aria-hidden` because it is not a
+                keyboard control, and a focus stop that only works with a mouse wastes a Tab.
+                `mt-0.5` centres it on the title's first line.
+            -->
+            <GripVertical
+                v-if="canDrag"
+                data-card-grip
+                class="mt-0.5 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                aria-hidden="true"
+            />
         </div>
 
         <p v-if="card.description" class="line-clamp-2 min-w-0 text-xs text-muted-foreground">
