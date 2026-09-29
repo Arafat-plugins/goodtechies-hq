@@ -1,3 +1,4 @@
+import { http } from '@inertiajs/vue3';
 import type EchoClass from 'laravel-echo';
 import type { Ref } from 'vue';
 import { readonly, ref } from 'vue';
@@ -149,6 +150,17 @@ function echo(): Promise<EchoClient | null> {
             // about on its own; `unavailable` and `failed` are, and so is a deliberate
             // disconnect.
             connectionState.value = next === 'connecting' || next === 'initialized' ? 'connecting' : 'disconnected';
+        });
+
+        // `X-Socket-ID` on every Inertia request, so the server's `toOthers()` can skip the tab
+        // that made a change (flow F1). Echo adds it to axios, jQuery and Turbo when it finds them
+        // on `window`, and Inertia 3 uses none of them — its own XHR client runs `http.onRequest`
+        // handlers instead, for visits and `useForm` alike. Before the socket has an id there is
+        // nothing to send, and the request goes as it was.
+        http.onRequest((config) => {
+            const socketId = client.socketId();
+
+            return socketId ? { ...config, headers: { ...config.headers, 'X-Socket-ID': socketId } } : config;
         });
 
         return client;

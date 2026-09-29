@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Events\TaskAssigned;
+use App\Events\TaskChanged;
 use App\Events\TaskCompleted;
 use App\Events\TaskDeleted;
 use App\Events\TaskReassigned;
@@ -53,6 +54,18 @@ use Illuminate\Support\Facades\Gate;
  */
 class TaskService
 {
+    /**
+     * The Tasks toolbar's scopes (`?scope=`) and the bucket each one narrows to. Every scope
+     * also sets `mine`; `mine` alone is My Tasks. Absent or unknown is All tasks.
+     *
+     * @var array<string, TaskBucket|null>
+     */
+    public const SCOPES = [
+        'mine' => null,
+        'due-today' => TaskBucket::DueToday,
+        'overdue' => TaskBucket::Overdue,
+    ];
+
     /**
      * The relations a task payload needs, so a list is not a query per row.
      *
@@ -632,6 +645,8 @@ class TaskService
                 $this->applyAssignees($actor, $task, $assigneeIds, $primaryId, AuditEvent::TaskAssigned);
             }
 
+            $this->announceChange($task, 'created');
+
             return $task->refresh();
         });
     }
@@ -672,10 +687,16 @@ class TaskService
             }
 
             // After the save, so both of these see the project the task is in NOW.
+            $tagged = false;
+
             if (array_key_exists('tag_ids', $attributes)) {
-                $this->applyTags($actor, $task, (array) $attributes['tag_ids']);
+                $tagged = $this->applyTags($actor, $task, (array) $attributes['tag_ids']);
             } elseif ($moved) {
                 $this->dropForeignTags($actor, $task);
+            }
+
+            if ($changed !== [] || $tagged) {
+                $this->announceChange($task, 'updated');
             }
 
             return $task->refresh();
@@ -804,6 +825,7 @@ class TaskService
             );
 
             $this->announceTransition($actor, $task, $from, $to, $reason);
+            $this->announceChange($task, 'status');
 
             return $task;
         });
@@ -850,6 +872,11 @@ class TaskService
         return DB::transaction(function () use ($actor, $task, $assigneeIds, $primaryId): Task {
             $had = $task->assignees()->exists();
 
+            // Flow F1: who could see it BEFORE, so the person coming off it is told too. Read
+            // fresh, not off a relation the caller may have loaded earlier.
+            $before = $this->assigneeSnapshot((clone $task)->unsetRelation('assignees'));
+            $viewersBefore = $this->viewerIds($task);
+
             $this->applyAssignees(
                 $actor,
                 $task,
@@ -857,6 +884,19 @@ class TaskService
                 $primaryId,
                 $had ? AuditEvent::TaskReassigned : AuditEvent::TaskAssigned,
             );
+
+            $after = $this->assigneeSnapshot($task);
+
+            if ($before !== $after) {
+                $added = array_diff($after['assignee_ids'], $before['assignee_ids']);
+                $removed = array_diff($before['assignee_ids'], $after['assignee_ids']);
+
+                $this->announceChange(
+                    $task,
+                    $added !== [] ? 'assigned' : ($removed !== [] ? 'unassigned' : 'updated'),
+                    $viewersBefore,
+                );
+            }
 
             return $task->refresh();
         });
@@ -927,6 +967,8 @@ class TaskService
 
             event(new TaskReassigned($task, $actor, $ids, $ids, $from?->id, (int) $to->id));
 
+            $this->announceChange($task, 'updated');
+
             return $task->refresh();
         });
     }
@@ -955,6 +997,8 @@ class TaskService
             // is SOFT, so the row, its assignees and its policy answers are all still there for
             // the dispatcher to ask about.
             event(new TaskDeleted($task, $actor));
+
+            $this->announceChange($task, 'deleted');
         });
     }
 
@@ -984,6 +1028,8 @@ class TaskService
                 $task->status?->label() ?? 'unknown',
             ), $actor);
 
+            $this->announceChange($task, 'archived');
+
             return $task->refresh();
         });
     }
@@ -1006,6 +1052,8 @@ class TaskService
             $task->forceFill(['archived_at' => null])->save();
 
             $this->activity->record($task, 'Task unarchived', $actor);
+
+            $this->announceChange($task, 'restored');
 
             return $task->refresh();
         });
@@ -1034,6 +1082,8 @@ class TaskService
         return DB::transaction(function () use ($task, $after): Task {
             $this->place($task, $after);
 
+            $this->announceChange($task, 'reordered');
+
             return $task->refresh();
         });
     }
@@ -1061,6 +1111,8 @@ class TaskService
             ]);
 
             $this->activity->record($task, 'Checklist item added: '.$title, $actor);
+
+            $this->announceChange($task, 'updated');
 
             return $item;
         });
@@ -1102,6 +1154,8 @@ class TaskService
                 $this->activity->record($task, $ticked
                     ? sprintf('Checklist item %s: %s', $item->is_done ? 'ticked' : 'unticked', $item->title)
                     : 'Checklist item renamed: '.$item->title, $actor);
+
+                $this->announceChange($task, 'updated');
             }
 
             return $item;
@@ -1122,6 +1176,8 @@ class TaskService
             $item->delete();
 
             $this->activity->record($task, 'Checklist item removed: '.$title, $actor);
+
+            $this->announceChange($task, 'updated');
         });
     }
 
@@ -1142,6 +1198,8 @@ class TaskService
 
             $this->activity->record($task, 'Link added: '.$link->displayLabel(), $actor);
 
+            $this->announceChange($task, 'updated');
+
             return $link;
         });
     }
@@ -1160,6 +1218,8 @@ class TaskService
             $link->delete();
 
             $this->activity->record($task, 'Link removed: '.$label, $actor);
+
+            $this->announceChange($task, 'updated');
         });
     }
 
@@ -1196,6 +1256,8 @@ class TaskService
 
             $this->activity->record($task, 'Now waiting for: '.$dependsOn->title, $actor);
 
+            $this->announceChange($task, 'updated');
+
             return $task->refresh();
         });
     }
@@ -1213,8 +1275,70 @@ class TaskService
 
             $this->activity->record($task, 'No longer waiting for: '.$dependsOn->title, $actor);
 
+            $this->announceChange($task, 'updated');
+
             return $task->refresh();
         });
+    }
+
+    /**
+     * Flow F1: tell every Tasks screen that can see this task that it changed.
+     *
+     * ONE `TaskChanged` per change, fired inside the caller's transaction and delivered after
+     * its commit (`ShouldDispatchAfterCommit`), so a write that rolls back tells nobody. The
+     * recipients are `viewerIds()` now plus `$viewersBefore` — whoever could see it before the
+     * change — so a person just taken off a task still hears that it left their board.
+     *
+     * Public for the one caller outside this class: a task's discussion is written by
+     * `MessageService`, and the discussion controllers ring for it once the post has landed.
+     *
+     * @param  list<int>  $viewersBefore
+     */
+    public function announceChange(Task $task, string $kind, array $viewersBefore = []): void
+    {
+        $userIds = array_values(array_unique([...$viewersBefore, ...$this->viewerIds($task)]));
+        sort($userIds);
+
+        event(new TaskChanged((int) $task->getKey(), $kind, $userIds));
+    }
+
+    /**
+     * Everyone who may see this task right now — `TaskPolicy::view`, asked of each candidate.
+     *
+     * The policy is the rule, and it is asked rather than restated: SQL only narrows the
+     * question to the people it could possibly say yes to (active users whose role sees every
+     * task, and the task's own assignees), so a policy change reaches the broadcast with no edit
+     * here. The assignees are read fresh and handed to the policy on a CLONE of the task, so the
+     * policy does not query per candidate and the caller's instance keeps its relations.
+     *
+     * Four statements plus one permission read per candidate — a handful for this team.
+     *
+     * @return list<int>
+     */
+    public function viewerIds(Task $task): array
+    {
+        $assignees = $task->assignees()->get();
+        $probe = (clone $task)->setRelation('assignees', $assignees);
+
+        $employeeIds = $assignees->pluck('id')->map('intval')->all();
+
+        return User::query()
+            ->where('status', UserStatus::Active)
+            ->whereHas('employee', fn (Builder $employee) => $employee->where(
+                fn (Builder $either) => $either
+                    ->whereIn('employees.id', $employeeIds)
+                    ->orWhereHas('role', fn (Builder $role) => $role->whereIn('name', [
+                        RoleName::ADMIN->value,
+                        RoleName::MANAGER->value,
+                    ])),
+            ))
+            ->with('employee.role')
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (User $user): bool => Gate::forUser($user)->allows('view', $probe))
+            ->map(fn (User $user): int => (int) $user->getKey())
+            ->values()
+            ->all();
     }
 
     /**
@@ -1414,7 +1538,7 @@ class TaskService
      *
      * @throws TaskStateException
      */
-    private function applyTags(User $actor, Task $task, array $tagIds): void
+    private function applyTags(User $actor, Task $task, array $tagIds): bool
     {
         $ids = array_values(array_unique(array_map('intval', $tagIds)));
 
@@ -1435,7 +1559,7 @@ class TaskService
         $after = $usable->pluck('id')->map('intval')->sort()->values()->all();
 
         if ($before === $after) {
-            return;
+            return false;
         }
 
         $task->tags()->sync($ids);
@@ -1448,6 +1572,8 @@ class TaskService
             $names === [] ? 'Tags cleared' : 'Tagged: '.implode(', ', $names),
             $actor,
         );
+
+        return true;
     }
 
     /**
@@ -1943,22 +2069,31 @@ class TaskService
      * Either end may stand alone: `date_from` on its own is an open-ended "from here on".
      *
      * @param  array<string, mixed>  $filters
-     * @return array{search: string|null, project_id: int|null, status: string|null, priority: string|null, assignee_id: int|null, tag_id: int|null, bucket: string|null, mine: bool, date_from: Carbon|null, date_to: Carbon|null, overdue: bool, archived: bool, as_of: Carbon}
+     * @return array{search: string|null, project_id: int|null, status: string|null, scope: string|null, priority: string|null, assignee_id: int|null, tag_id: int|null, bucket: string|null, mine: bool, date_from: Carbon|null, date_to: Carbon|null, overdue: bool, archived: bool, as_of: Carbon}
      */
     public function filters(array $filters): array
     {
         $search = trim((string) ($filters['search'] ?? ''));
         $asOf = $filters['as_of'] ?? null;
+        $scope = is_string($filters['scope'] ?? null) && array_key_exists($filters['scope'], self::SCOPES)
+            ? $filters['scope']
+            : null;
+        $scopeBucket = $scope === null ? null : self::SCOPES[$scope];
 
         return [
             'search' => $search === '' ? null : $search,
             'project_id' => $this->id($filters['project_id'] ?? null),
             'status' => TaskStatus::tryFrom((string) ($filters['status'] ?? ''))?->value,
+            // The Tasks toolbar's scope dropdown, mapped here and nowhere else so all four views
+            // on both surfaces read it the same way. An unknown value is All tasks, not a 500.
+            'scope' => $scope,
             // An unrecognised bucket becomes null rather than an error, exactly as an
             // unrecognised status does — a stale link asks a question that no longer exists,
-            // and the honest answer is the unnarrowed list, not a 500.
-            'bucket' => TaskBucket::tryFrom((string) ($filters['bucket'] ?? ''))?->value,
-            'mine' => (bool) ($filters['mine'] ?? false),
+            // and the honest answer is the unnarrowed list, not a 500. A date scope's bucket
+            // wins over a `?bucket=` sent beside it.
+            'bucket' => $scopeBucket?->value ?? TaskBucket::tryFrom((string) ($filters['bucket'] ?? ''))?->value,
+            // Every scope is personal — the date scopes too, exactly as the sidebar rows were.
+            'mine' => $scope !== null || (bool) ($filters['mine'] ?? false),
             'priority' => TaskPriority::tryFrom((string) ($filters['priority'] ?? ''))?->value,
             'assignee_id' => $this->id($filters['assignee_id'] ?? null),
             'tag_id' => $this->id($filters['tag_id'] ?? null),
@@ -1970,6 +2105,32 @@ class TaskService
             // today() buried in the query — that is what makes it testable at a fixed date.
             'as_of' => $asOf instanceof Carbon ? $asOf : Carbon::today(),
         ];
+    }
+
+    /**
+     * The Tasks List query an old `/…/my-tasks` URL now lands on.
+     *
+     * My Tasks was a page of its own until the Tasks toolbar gained a scope dropdown; its URL
+     * still arrives from bookmarks, dashboard cards and reports, so it is translated here into
+     * EXACTLY the same set of tasks: Due today and Overdue are their own scopes, and every other
+     * bucket rides along beside `scope=mine` — Open included, because the old page's bare URL
+     * WAS the Open bucket (no bucket, or an unknown one, fell back to it), and `scope=mine` alone
+     * would add this person's closed tasks. Every other parameter is kept.
+     *
+     * @param  array<string, mixed>  $query
+     * @return array<string, mixed>
+     */
+    public function myTasksRedirectQuery(array $query): array
+    {
+        $bucket = TaskBucket::tryFrom(is_string($query['bucket'] ?? null) ? $query['bucket'] : '');
+        unset($query['bucket'], $query['scope']);
+
+        $bucket ??= TaskBucket::Open;
+        $scope = array_search($bucket, self::SCOPES, true);
+        $scope = is_string($scope) ? $scope : 'mine';
+        $keep = $scope === 'mine' ? ['bucket' => $bucket->value] : [];
+
+        return ['scope' => $scope, ...$keep, ...$query];
     }
 
     private function id(mixed $value): ?int

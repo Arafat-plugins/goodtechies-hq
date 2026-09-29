@@ -131,7 +131,12 @@ export interface TaskFilters {
      * same query asked twice.
      */
     bucket: string | null;
-    /** Assigned to the signed-in person. Set by the My Tasks page, never by a chip. */
+    /**
+     * The toolbar's scope dropdown (`?scope=mine|due-today|overdue`), as the server accepted
+     * it; null is All tasks. The server maps it onto `mine` and `bucket` below.
+     */
+    scope: string | null;
+    /** Assigned to the signed-in person. Set by a scope (or an old My Tasks link), never by a chip. */
     mine: boolean;
     overdue: boolean;
     archived: boolean;
@@ -261,6 +266,7 @@ export function tagTone(colour: string): StatusKey {
 <script setup lang="ts">
 import { ListChecks } from '@lucide/vue';
 import { computed, ref } from 'vue';
+import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { TableGroup } from '@/Components/DataTable/types';
 import OnLeaveFlag from '@/Components/Leave/OnLeaveFlag.vue';
@@ -361,6 +367,13 @@ function extraAssignees(task: Task): number {
 }
 
 const loading = useNavigationPending();
+
+/**
+ * Somebody else's change lands here too, silently and only when something happened — flow F1
+ * (decision 12-69); `TaskBoard.vue` says the whole of it. The list holds no gesture of its own; an open menu or dialog
+ * holds the refresh until it closes.
+ */
+useLiveTaskProps(['tasks']);
 </script>
 
 <template>
@@ -378,7 +391,15 @@ const loading = useNavigationPending();
             :placeholder="searchPlaceholder"
             :id-prefix="tableId"
             :clear-keeps="['group_by']"
-        />
+        >
+            <!-- The page's view switcher and New task; the bar places them (TaskFilterBar). -->
+            <template #leading>
+                <slot name="toolbar-leading" />
+            </template>
+            <template #trailing>
+                <slot name="toolbar-trailing" />
+            </template>
+        </TaskFilterBar>
 
         <DataTable
             :id="tableId"

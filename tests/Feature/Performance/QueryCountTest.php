@@ -135,7 +135,7 @@ it('answers each heavy surface within its ceiling', function (string $actor, str
     'Tasks list (employee)' => ['perfYaseen', '/employee/tasks', 55],          // 40 (was 51)
     'Tasks board (employee)' => ['perfYaseen', '/employee/tasks/board', 55],   // 40 (was 51)
     'Tasks Gantt (employee)' => ['perfYaseen', '/employee/tasks/gantt', 55],   // 40 (was 50)
-    'My tasks (admin)' => ['perfAdmin', '/admin/my-tasks', 34],                // 23 (was 25)
+    'My tasks (admin)' => ['perfAdmin', '/admin/tasks?scope=mine&bucket=open', 34], // was /admin/my-tasks, now a 302 here
     'Admin dashboard' => ['perfAdmin', '/admin/dashboard', 95],                // 64
     'Employee dashboard' => ['perfYaseen', '/employee/dashboard', 40],         // 22
     'Accountant dashboard' => ['perfAccountant', '/accountant/dashboard', 30], // 14

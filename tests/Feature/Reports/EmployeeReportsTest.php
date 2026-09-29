@@ -97,10 +97,15 @@ it('agrees with the My Tasks page it links to', function () {
     $props = myReportsProps($this->yaseen);
     $overdue = collect($props['buckets'])->firstWhere('label', 'Overdue')['count'];
 
+    // The link still reads `/employee/my-tasks?bucket=overdue`; it 302s to the scoped List.
     $this->actingAs($this->yaseen)
         ->get('/employee/my-tasks?bucket=overdue')
+        ->assertRedirect('/employee/tasks?scope=overdue');
+
+    $this->actingAs($this->yaseen)
+        ->get('/employee/tasks?scope=overdue')
         ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page->has('tasks', $overdue));
+        ->assertInertia(fn (Assert $page) => $page->where('tasks.total', $overdue));
 })->group('phase10', 'reports');
 
 it('switches between this week and this month on ?period=', function () {

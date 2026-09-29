@@ -37,11 +37,7 @@ useFlashAsToast();
 <template>
     <Head title="My Tasks — Calendar" />
 
-    <PageShell title="My Tasks" description="What you owe when, and what runs across the weeks.">
-        <template #tabs>
-            <TaskViewSwitcher surface="employee" current="calendar" />
-        </template>
-
+    <PageShell title="Tasks" title-hidden>
         <TaskCalendar
             :calendar="calendar"
             :can-plan="can_plan"
@@ -56,6 +52,10 @@ useFlashAsToast();
             search-placeholder="Search your tasks…"
             empty-title="Nothing of yours is scheduled in this window"
             empty-description="Move to another month — a task with no dates is not on a grid."
-        />
+        >
+            <template #toolbar-leading>
+                <TaskViewSwitcher surface="employee" current="calendar" />
+            </template>
+        </TaskCalendar>
     </PageShell>
 </template>

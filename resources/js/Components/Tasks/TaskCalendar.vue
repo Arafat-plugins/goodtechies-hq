@@ -74,7 +74,8 @@ export function weekdayIndex(day: number): number {
 <script setup lang="ts">
 import { router } from '@inertiajs/vue3';
 import { CalendarDays, ChevronLeft, ChevronRight, Info } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import EmptyState from '@/Components/EmptyState.vue';
 import { statusToneClass } from '@/Components/StatusBadge.vue';
 import TaskFilterBar, { taskFiltersActive } from '@/Components/Tasks/TaskFilterBar.vue';
@@ -306,6 +307,24 @@ const drag = ref<{ task: CalendarTask; grab: Grab; anchor: string } | null>(null
 const hoverDay = ref<string | null>(null);
 
 /**
+ * Somebody else's change lands here too, silently and only when something happened — flow F1
+ * (decision 12-69); `TaskBoard.vue` says the whole of it. Held while a date is being dragged or written, and delivered
+ * the moment that ends.
+ */
+const live = useLiveTaskProps(['calendar'], {
+    canRefresh: () => drag.value === null && busyId.value === null,
+});
+
+watch(
+    () => drag.value === null && busyId.value === null,
+    (idle) => {
+        if (idle) {
+            live.resume();
+        }
+    },
+);
+
+/**
  * Start a date drag.
  *
  * For a body drag the anchor is the day **under the pointer** when the bar was picked up, so a
@@ -458,7 +477,15 @@ const handleTitle = computed(() =>
             :placeholder="searchPlaceholder"
             :id-prefix="`${surface}-calendar`"
             :clear-keeps="['date_from', 'date_to']"
-        />
+        >
+            <!-- The page's view switcher and New task; the bar places them (TaskFilterBar). -->
+            <template #leading>
+                <slot name="toolbar-leading" />
+            </template>
+            <template #trailing>
+                <slot name="toolbar-trailing" />
+            </template>
+        </TaskFilterBar>
 
         <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <div class="flex min-w-0 flex-wrap items-center gap-2">

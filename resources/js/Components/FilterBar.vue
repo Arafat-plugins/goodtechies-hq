@@ -26,6 +26,7 @@ export interface FilterDef {
 
 <script setup lang="ts">
 import { usePage } from '@inertiajs/vue3';
+import { createReusableTemplate } from '@vueuse/core';
 import { ChevronLeft, Filter, Plus, Search, X } from '@lucide/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import FilterChip from '@/Components/FilterChip.vue';
@@ -74,6 +75,21 @@ const props = withDefaults(
          * the same rows back concludes the report is broken.
          */
         searchable?: boolean;
+        /**
+         * `stacked` (the default, every screen before the Tasks toolbar): search and `#extra`
+         * on one row, the chips and *Add filter* on the row below.
+         *
+         * `toolbar`: one wrapping row — `#leading` at the start, then, pushed to the end from
+         * `sm` up, the search box (if `searchable`), `#extra`, *Add filter* and `#trailing`.
+         * Active chips and *Clear all* get a row of their own below, only while one is set.
+         */
+        layout?: 'stacked' | 'toolbar';
+        /**
+         * Chip mode: the value the SERVER applied for a filter key, read instead of the URL for
+         * that key (`null` = not applied, no chip). For a filter the server may override, so a
+         * chip never names a narrowing that is not in force. Keys absent here read the URL.
+         */
+        applied?: Record<string, string | null>;
     }>(),
     {
         search: null,
@@ -82,8 +98,18 @@ const props = withDefaults(
         inputId: 'filter-bar-search',
         extraActive: false,
         searchable: true,
+        layout: 'stacked',
     },
 );
+
+/*
+ * Drawn once and placed by `layout`: the search box and the *Add filter* popover sit in
+ * different rows in the two layouts, and two copies of either would drift.
+ */
+const [DefineSearch, ReuseSearch] = createReusableTemplate();
+const [DefineAddFilter, ReuseAddFilter] = createReusableTemplate();
+
+const toolbar = computed(() => props.layout === 'toolbar');
 
 const emit = defineEmits<{
     /** Fires 300 ms after the last keystroke. */
@@ -144,6 +170,12 @@ const page = usePage();
 const query = computed(() => queryOf(page.url));
 
 function rawValue(def: FilterDef): string[] {
+    if (props.applied && def.key in props.applied) {
+        const applied = props.applied[def.key];
+
+        return applied === null || applied === '' ? [] : [applied];
+    }
+
     if (def.kind === 'date-range') {
         return [query.value[`${def.key}_from`] ?? '', query.value[`${def.key}_to`] ?? ''];
     }
@@ -281,8 +313,8 @@ function isChosen(def: FilterDef, value: string): boolean {
 
 <template>
     <div class="flex min-w-0 flex-col gap-3">
-        <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-            <div v-if="searchable" class="relative w-full sm:w-64">
+        <DefineSearch>
+            <div class="relative w-full sm:w-64">
                 <Search
                     class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                     aria-hidden="true"
@@ -296,36 +328,8 @@ function isChosen(def: FilterDef, value: string): boolean {
                     class="pl-9"
                 />
             </div>
-
-            <div v-if="$slots.extra || $slots.default" class="flex flex-wrap items-center gap-2">
-                <slot name="extra">
-                    <slot />
-                </slot>
-            </div>
-
-            <Button
-                v-if="!chipMode && anyActive"
-                type="button"
-                variant="ghost"
-                size="sm"
-                class="self-start"
-                @click="clearAll"
-            >
-                <X aria-hidden="true" />
-                Clear
-            </Button>
-        </div>
-
-        <div v-if="chipMode" class="flex min-w-0 flex-wrap items-center gap-2">
-            <FilterChip
-                v-for="def in activeDefs"
-                :key="def.key"
-                :label="def.label"
-                :value="chipValue(def)"
-                @edit="openPicker(def.key)"
-                @remove="remove(def)"
-            />
-
+        </DefineSearch>
+        <DefineAddFilter>
             <Popover v-model:open="open">
                 <PopoverTrigger as-child>
                     <Button
@@ -434,6 +438,54 @@ function isChosen(def: FilterDef, value: string): boolean {
                     </div>
                 </PopoverContent>
             </Popover>
+        </DefineAddFilter>
+
+        <div v-if="toolbar" class="flex min-w-0 flex-wrap items-center gap-2">
+            <div v-if="$slots.leading" class="flex min-w-0 flex-wrap items-center gap-2">
+                <slot name="leading" />
+            </div>
+            <div class="flex min-w-0 flex-wrap items-center gap-2 sm:ml-auto">
+                <ReuseSearch v-if="searchable" />
+                <slot name="extra">
+                    <slot />
+                </slot>
+                <ReuseAddFilter v-if="chipMode" />
+                <slot name="trailing" />
+            </div>
+        </div>
+
+        <div v-else class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <ReuseSearch v-if="searchable" />
+            <div v-if="$slots.extra || $slots.default" class="flex flex-wrap items-center gap-2">
+                <slot name="extra">
+                    <slot />
+                </slot>
+            </div>
+
+            <Button
+                v-if="!chipMode && anyActive"
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="self-start"
+                @click="clearAll"
+            >
+                <X aria-hidden="true" />
+                Clear
+            </Button>
+        </div>
+
+        <div v-if="chipMode && (!toolbar || anyActive)" class="flex min-w-0 flex-wrap items-center gap-2">
+            <FilterChip
+                v-for="def in activeDefs"
+                :key="def.key"
+                :label="def.label"
+                :value="chipValue(def)"
+                @edit="openPicker(def.key)"
+                @remove="remove(def)"
+            />
+
+            <ReuseAddFilter v-if="!toolbar" />
 
             <Button v-if="anyActive" type="button" variant="ghost" size="sm" class="h-8" @click="clearAll">
                 <X aria-hidden="true" />

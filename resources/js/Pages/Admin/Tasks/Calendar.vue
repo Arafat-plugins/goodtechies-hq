@@ -44,18 +44,7 @@ if (quickAddOpen.value) {
 <template>
     <Head title="Tasks — Calendar" />
 
-    <PageShell title="Tasks" description="What is due when, and what is running across the weeks.">
-        <template #tabs>
-            <TaskViewSwitcher surface="admin" current="calendar" />
-        </template>
-
-        <template #actions>
-            <Button type="button" @click="quickAddOpen = true">
-                <Plus aria-hidden="true" />
-                New task
-            </Button>
-        </template>
-
+    <PageShell title="Tasks" title-hidden>
         <TaskCalendar
             :calendar="calendar"
             :can-plan="can_plan"
@@ -71,7 +60,17 @@ if (quickAddOpen.value) {
             search-placeholder="Search tasks…"
             empty-title="Nothing scheduled in this window"
             empty-description="Move to another month, or give a task a start or due date."
-        />
+        >
+            <template #toolbar-leading>
+                <TaskViewSwitcher surface="admin" current="calendar" />
+            </template>
+            <template #toolbar-trailing>
+                <Button type="button" @click="quickAddOpen = true">
+                    <Plus aria-hidden="true" />
+                    New task
+                </Button>
+            </template>
+        </TaskCalendar>
     </PageShell>
 
     <QuickAddTaskModal

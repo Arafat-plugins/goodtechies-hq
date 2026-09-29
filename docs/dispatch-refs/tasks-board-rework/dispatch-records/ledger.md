@@ -1,0 +1,5 @@
+001 | 2026-09-29 | tasks-toolbar-scope | general-purpose(dispatch-frontend) | M | d08fe73 | 689f7d5 | accept | 2 | pest 48/48 (scope, my-tasks, permissions); agent 263/263 | pending (task end) | ~40
+002 | 2026-09-29 | board-card-redesign | general-purpose(dispatch-frontend) worktree ghq-d2 | M | ed84552 | 89a984a | accept | 1 | js 38/38; pest Tasks+Unit 220/221 (DesignVocabularyTest pre-existing: PlaceholderPanel.vue at HEAD) | pending (task end) | ~19
+003 | 2026-09-29 | board-drawer-pan-hint | general-purpose(dispatch-frontend) | M | 6830226 | 69fda59 | accept | 1 | js 45/45; pest Tasks 87/87 (agent); browser checks R1/R5/R6 | pending (task end) | ~15
+004 | 2026-09-29 | task-live-update | general-purpose(dispatch-implementer) | L | 4fc7a36 | 70d1595 | accept | 1 | flow TaskLiveUpdateFlowTest 22/22 (16F+3E at BASE); Realtime+Tasks+Perf+Perms 191/191; js 45/45; browser proof | pending (task end) | ~54
+--- | 2026-09-29 | main-session fix (when-not-to-dispatch) | TaskServiceTest filter-key list + 2 stale '20 s' comments in Board pages | S | 70d1595 | - | done | - | TaskServiceTest 18/18 | - | 2

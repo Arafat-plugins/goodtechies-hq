@@ -7,7 +7,6 @@ use App\Models\User;
 use App\Support\RoleName;
 use App\Support\TaskStatus;
 use Illuminate\Support\Carbon;
-use Inertia\Testing\AssertableInertia as Assert;
 
 /*
 |--------------------------------------------------------------------------
@@ -53,43 +52,19 @@ beforeEach(function () {
         ->create();
 });
 
-it('renders the seven buckets with a count and a destination each', function () {
-    $this->actingAs($this->admin)
-        ->get('/admin/my-tasks')
-        ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page
-            ->component('Admin/MyTasks', false)
-            ->has('buckets', 7)
-            // The plan's order, and its name for the umbrella bucket.
-            ->where('buckets.0.key', 'open')
-            ->where('buckets.0.label', 'My tasks')
-            ->where('buckets.0.href', '/admin/my-tasks')
-            ->where('buckets.2.key', 'overdue')
-            ->where('buckets.2.label', 'Overdue')
-            // Every count leads somewhere, and the umbrella card is the way back out.
-            ->where('buckets.2.href', '/admin/my-tasks?bucket=overdue')
-            ->where('bucket', 'open')
-            ->has('tasks')
-            ->has('limit')
-            ->has('today'),
-        );
+it('sends the old My Tasks page to the Tasks List, scoped to the admin', function () {
+    // An Admin's own plate is `?scope=mine` on the agency's Tasks List now.
+    $this->actingAs($this->admin)->get('/admin/my-tasks')->assertRedirect('/admin/tasks?scope=mine&bucket=open');
+    $this->actingAs($this->admin)->get('/admin/my-tasks?bucket=overdue')->assertRedirect('/admin/tasks?scope=overdue');
 })->group('phase2');
 
 it('shows an admin their own plate and not the agency\'s', function () {
-    $props = $this->actingAs($this->admin)
-        ->get('/admin/my-tasks?bucket=overdue')
-        ->assertOk()
-        ->inertiaPage()['props'];
+    $list = $this->actingAs($this->admin)->get('/admin/tasks?scope=overdue')->assertOk()
+        ->inertiaPage()['props']['tasks'];
+    $ids = collect($list['groups'])->flatMap(fn (array $group) => array_column($group['tasks'], 'id'))->all();
 
-    $ids = array_column($props['tasks'], 'id');
-    $overdue = collect($props['buckets'])->firstWhere('key', 'overdue');
-
-    // Checked by hand: the card's number IS the number of rows the same page lists, and the
-    // rows are exactly the Admin's own late work.
-    expect($props['bucket'])->toBe('overdue')
-        ->and($overdue['count'])->toBe(count($ids))
-        ->and($ids)->toContain(...$this->mineLate->pluck('id')->all())
-        // Somebody else's late task is in /admin/tasks and is not on this plate.
+    expect($ids)->toContain(...$this->mineLate->pluck('id')->all())
+        // Somebody else's late task is in the unscoped list and is not on this plate.
         ->and($ids)->not->toContain($this->theirsLate->id);
 
     // Every row really is one of the Admin's own — checked against the join, not the service.
@@ -100,39 +75,36 @@ it('shows an admin their own plate and not the agency\'s', function () {
 
     expect($assignedToAdmin)->toBe(count($ids));
 
-    // …and the same predicate, unnarrowed, is a bigger set on the Tasks List.
+    // …and the same predicate, unscoped, is a bigger set on the same List.
     $agency = $this->actingAs($this->admin)
         ->get('/admin/tasks?bucket=overdue')
         ->assertOk()
         ->inertiaPage()['props']['tasks']['total'];
 
-    expect($agency)->toBeGreaterThan($overdue['count']);
+    expect($agency)->toBeGreaterThan($list['total']);
 })->group('phase2');
 
-it('falls back to the umbrella bucket when the link asks for one that does not exist', function () {
+it('falls back to the whole plate when the link asks for a bucket that does not exist', function () {
     // A stale link asks a question that no longer exists; the useful answer is the plate.
     $this->actingAs($this->admin)
         ->get('/admin/my-tasks?bucket=not-a-bucket')
-        ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page->where('bucket', 'open'));
+        ->assertRedirect('/admin/tasks?scope=mine&bucket=open');
 })->group('phase2');
 
-it('keeps completed work out of the umbrella bucket and in its own', function () {
+it('keeps completed work reachable through its own bucket', function () {
     $done = Task::factory()
         ->for($this->project)
         ->status(TaskStatus::Completed)
         ->assignedTo($this->adminEmployee)
         ->create(['completed_at' => Carbon::now()]);
 
-    $props = $this->actingAs($this->admin)->get('/admin/my-tasks')->inertiaPage()['props'];
+    $this->actingAs($this->admin)->get('/admin/my-tasks?bucket=completed')
+        ->assertRedirect('/admin/tasks?scope=mine&bucket=completed');
 
-    expect(array_column($props['tasks'], 'id'))->not->toContain($done->id);
+    $list = $this->actingAs($this->admin)->get('/admin/tasks?scope=mine&bucket=completed')
+        ->inertiaPage()['props']['tasks'];
 
-    $props = $this->actingAs($this->admin)
-        ->get('/admin/my-tasks?bucket=completed')
-        ->inertiaPage()['props'];
-
-    expect(array_column($props['tasks'], 'id'))->toContain($done->id);
+    expect(collect($list['groups'])->flatMap(fn (array $group) => array_column($group['tasks'], 'id'))->all())->toContain($done->id);
 })->group('phase2');
 
 it('refuses the page to a role that holds no tasks permission', function () {
@@ -169,12 +141,12 @@ it('counts the agency on the company dashboard, not the admin\'s own plate', fun
     $overdue = collect($stats)->firstWhere('key', 'overdue')['count'];
 
     // Three late tasks were made above; one of them is somebody else's, and the Company
-    // dashboard counts it. `/admin/my-tasks` does not — that is the whole distinction.
+    // dashboard counts it. `?scope=overdue` does not — that is the whole distinction.
     $mine = $this->actingAs($this->admin)
-        ->get('/admin/my-tasks?bucket=overdue')
-        ->inertiaPage()['props']['buckets'];
+        ->get('/admin/tasks?scope=overdue')
+        ->inertiaPage()['props']['tasks']['total'];
 
-    expect($overdue)->toBeGreaterThan(collect($mine)->firstWhere('key', 'overdue')['count']);
+    expect($overdue)->toBeGreaterThan($mine);
 })->group('phase2');
 
 it('sends every dashboard card to exactly the tasks it counted', function () {

@@ -3,6 +3,7 @@
 use App\Broadcasting\ConversationChannel;
 use App\Broadcasting\NotificationChannel;
 use App\Broadcasting\TaskChannel;
+use App\Broadcasting\UserTasksChannel;
 use Illuminate\Support\Facades\Broadcast;
 
 /*
@@ -10,8 +11,9 @@ use Illuminate\Support\Facades\Broadcast;
 | Broadcast channels (Phase 6)
 |--------------------------------------------------------------------------
 |
-| The three channels master prompt Part D §10 names, and no fourth. Every one
-| of them is PRIVATE — there is no public channel in this application and
+| The three channels master prompt Part D §10 names, and a fourth for flow F1
+| (task-live-update, decision 12-69), `tasks.{user}`. Every one of them is
+| PRIVATE — there is no public channel in this application and
 | there must not be one, because a public channel is a payload with no reader
 | named, and Part C §1's whole shape is that the reader decides what is in it.
 |
@@ -21,10 +23,12 @@ use Illuminate\Support\Facades\Broadcast;
 |   conversation.{conversation}  → ConversationPolicy::view   (decision 2-24)
 |   notifications.{user}         → NotificationPolicy::viewAny + "is this you"
 |   task.{task}                  → TaskPolicy::view
+|   tasks.{user}                 → TaskPolicy::viewAny + "is this you"
 |
 | A rule that will not go through a policy is a finding, not a licence to write
-| it twice. There is exactly one such rule and it is in NotificationChannel:
-| "this channel is yours" is identity, not authorization, and the file says so.
+| it twice. There is exactly one such rule, in NotificationChannel and again in
+| UserTasksChannel: "this channel is yours" is identity, not authorization, and
+| both files say so.
 |
 | **The 403 is Laravel's, not ours.** `POST /broadcasting/auth` answers 403 when
 | a callback returns false and 403 when an implicitly bound id matches no row,
@@ -41,3 +45,4 @@ use Illuminate\Support\Facades\Broadcast;
 Broadcast::channel('conversation.{conversation}', ConversationChannel::class);
 Broadcast::channel('notifications.{user}', NotificationChannel::class);
 Broadcast::channel('task.{task}', TaskChannel::class);
+Broadcast::channel('tasks.{user}', UserTasksChannel::class);

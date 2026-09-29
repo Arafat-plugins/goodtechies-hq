@@ -5,13 +5,11 @@ import {
     BriefcaseBusiness,
     Building2,
     CalendarCheck,
-    CalendarClock,
     CalendarDays,
     CalendarOff,
     CalendarRange,
     ChartColumn,
     ChartPie,
-    CircleAlert,
     ClipboardCheck,
     Clock,
     FileText,
@@ -20,7 +18,6 @@ import {
     HandCoins,
     LayoutDashboard,
     ListChecks,
-    ListTodo,
     MessagesSquare,
     PartyPopper,
     Receipt,
@@ -42,17 +39,11 @@ export const adminNav: NavGroup[] = [
     {
         label: 'My work',
         items: [
-            // An Admin's own plate, which is not the agency's — that is the Tasks row below.
-            //
-            // Due Today and Overdue are BUCKETS of this page, not screens of their own: they
-            // ask the same question about the same tasks, narrowed by a date, and My Tasks
-            // already shows all seven counts at once. Two more routes would mean two more
-            // controllers, two more permission-matrix rows and two more chances for "overdue"
-            // to mean something slightly different — for a `where` clause that already exists.
-            // They are deep links, and `activeItem()` lights whichever one you are on.
-            { label: 'My Tasks', href: '/admin/my-tasks', icon: ListTodo },
-            { label: 'Due Today', href: '/admin/my-tasks?bucket=due_today', icon: CalendarClock },
-            { label: 'Overdue', href: '/admin/my-tasks?bucket=overdue', icon: CircleAlert },
+            // My Tasks, Due Today and Overdue used to open here. They are now the scope dropdown
+            // on the Tasks toolbar (`/admin/tasks?scope=mine|due-today|overdue`), so an Admin's
+            // own plate and the agency's are one screen read two ways; the old `/admin/my-tasks`
+            // URLs 302 there. What is left in this group is the Admin as a person, not as a
+            // manager of work.
             // An Admin's own attendance. It points at the SHARED route, because clocking in is
             // a fact about the person rather than about the shell — Part D §8's office
             // employees include both Admins — and the page picks its layout from the viewer's

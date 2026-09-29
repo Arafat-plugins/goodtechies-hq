@@ -145,6 +145,16 @@
     --status-cancelled-bg: oklch(0.96 0.030 27);    /* #FFEBE7 */
     --status-cancelled-border: oklch(0.88 0.04 27); /* #F1CEC9 */
 
+    /* ── Priority (the Board card's flag) ────────────────────────────────────
+     * A MARK, not a text colour: each is held to 3:1 on --card, not 4.5:1. No new hue — every one
+     * is a hue this palette already spends (cancelled 27, waiting 50, progress 240, the neutral
+     * ramp), and the flag always carries its word in `aria-label` and the tooltip. `high` is the
+     * only new value: --status-waiting itself is 2.81:1 on white, so light takes it at L 0.64. */
+    --priority-urgent: var(--status-cancelled);     /* #E7000B — 4.77:1 on --card */
+    --priority-high: oklch(0.64 0.165 50);          /* #D8670E — 3.58:1 on --card */
+    --priority-medium: var(--status-progress);      /* #2382BA — 4.22:1 on --card */
+    --priority-low: var(--muted-foreground);        /* #67696C — 5.51:1 on --card */
+
     /* ── People (messaging polish) ─────────────────────────────────────────
      * One tint per PERSON, so a team channel reads at a glance: `--person-N` is an avatar fill,
      * `--person-N-fg` its initials AND that person's name on the author line. Chosen by user id
@@ -296,6 +306,12 @@
     --status-cancelled-bg: oklch(0.26 0.030 27);    /* #311E1C */
     --status-cancelled-border: oklch(0.38 0.04 27); /* #563A37 */
 
+    /* ── Priority — marks, 3:1 on --card ── */
+    --priority-urgent: var(--status-cancelled);     /* #FF6467 — 6.15:1 on --card */
+    --priority-high: var(--status-waiting);         /* #EB7C33 — 6.31:1 on --card */
+    --priority-medium: var(--status-progress);      /* #4FA8E1 — 6.78:1 on --card */
+    --priority-low: var(--muted-foreground);        /* #9C9EA2 — 6.62:1 on --card */
+
     /* ── People (messaging polish) — ≥ 8.2:1 on fill, ≥ 11.6:1 on --card ── */
     --person-1: oklch(0.33 0.075 250);              /* #12375A */
     --person-1-fg: oklch(0.87 0.065 250);           /* #B5D8FE — 8.27:1 */
@@ -417,6 +433,10 @@
     --color-status-cancelled-fg: var(--status-cancelled-fg);
     --color-status-cancelled-bg: var(--status-cancelled-bg);
     --color-status-cancelled-border: var(--status-cancelled-border);
+    --color-priority-urgent: var(--priority-urgent);
+    --color-priority-high: var(--priority-high);
+    --color-priority-medium: var(--priority-medium);
+    --color-priority-low: var(--priority-low);
     --color-person-1: var(--person-1);
     --color-person-1-fg: var(--person-1-fg);
     --color-person-2: var(--person-2);

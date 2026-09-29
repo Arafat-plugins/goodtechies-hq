@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { router } from '@inertiajs/vue3';
 import { ChevronLeft, ChevronRight, GanttChartSquare, Info, Table2 } from '@lucide/vue';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
+import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import GanttArrows from '@/Components/Tasks/Gantt/GanttArrows.vue';
 import GanttBar from '@/Components/Tasks/Gantt/GanttBar.vue';
 import GanttTable from '@/Components/Tasks/Gantt/GanttTable.vue';
@@ -173,6 +174,24 @@ function setZoom(zoom: string): void {
 const draft = ref<GanttDraft | null>(null);
 const busyId = ref<number | null>(null);
 const announcement = ref('');
+
+/**
+ * Somebody else's change lands here too, silently and only when something happened — flow F1
+ * (decision 12-69); `TaskBoard.vue` says the whole of it. Held while a bar has an unsaved `draft` or a write out
+ * (decision 10-12), and delivered the moment it has neither.
+ */
+const live = useLiveTaskProps(['gantt'], {
+    canRefresh: () => draft.value === null && busyId.value === null,
+});
+
+watch(
+    () => draft.value === null && busyId.value === null,
+    (idle) => {
+        if (idle) {
+            live.resume();
+        }
+    },
+);
 
 /** What the arrow keys are holding, on the bar that is armed. */
 const grab = computed<GanttGrab>(() => draft.value?.grab ?? 'move');
@@ -509,7 +528,15 @@ function projectLabel(row: GanttRow): string {
             :placeholder="searchPlaceholder"
             :id-prefix="idPrefix"
             :clear-keeps="['date_from', 'date_to', 'zoom']"
-        />
+        >
+            <!-- The page's view switcher and New task; the bar places them (TaskFilterBar). -->
+            <template #leading>
+                <slot name="toolbar-leading" />
+            </template>
+            <template #trailing>
+                <slot name="toolbar-trailing" />
+            </template>
+        </TaskFilterBar>
 
         <!--
             The phone. Not a squashed chart and not an empty state: the notice says why, the

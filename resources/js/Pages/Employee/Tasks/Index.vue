@@ -79,11 +79,7 @@ function openTask(task: Task): void {
 <template>
     <Head title="My Tasks" />
 
-    <PageShell title="My Tasks" description="The work assigned to you, and where each piece stands.">
-        <template #tabs>
-            <TaskViewSwitcher surface="employee" current="list" />
-        </template>
-
+    <PageShell title="Tasks" title-hidden>
         <GanttNarrowNotice />
 
         <TaskList
@@ -102,7 +98,11 @@ function openTask(task: Task): void {
             empty-title="No tasks assigned to you"
             empty-description="When someone assigns you work, it lands here."
             @row-click="openTask"
-        />
+        >
+            <template #toolbar-leading>
+                <TaskViewSwitcher surface="employee" current="list" />
+            </template>
+        </TaskList>
     </PageShell>
 
     <TaskDetailDrawer v-model:open="drawerOpen" :task-id="detailId" surface="employee" />

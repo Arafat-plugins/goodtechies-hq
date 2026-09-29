@@ -45,18 +45,7 @@ if (quickAddOpen.value) {
 <template>
     <Head title="Tasks — Gantt" />
 
-    <PageShell title="Tasks" description="What runs when, project by project, and what waits on what.">
-        <template #tabs>
-            <TaskViewSwitcher surface="admin" current="gantt" />
-        </template>
-
-        <template #actions>
-            <Button type="button" @click="quickAddOpen = true">
-                <Plus aria-hidden="true" />
-                New task
-            </Button>
-        </template>
-
+    <PageShell title="Tasks" title-hidden>
         <TaskGantt
             :gantt="gantt"
             :can-plan="can_plan"
@@ -73,7 +62,17 @@ if (quickAddOpen.value) {
             search-placeholder="Search tasks…"
             empty-title="Nothing scheduled in this window"
             empty-description="Move the window, zoom out, or give a task a start or due date."
-        />
+        >
+            <template #toolbar-leading>
+                <TaskViewSwitcher surface="admin" current="gantt" />
+            </template>
+            <template #toolbar-trailing>
+                <Button type="button" @click="quickAddOpen = true">
+                    <Plus aria-hidden="true" />
+                    New task
+                </Button>
+            </template>
+        </TaskGantt>
     </PageShell>
 
     <QuickAddTaskModal

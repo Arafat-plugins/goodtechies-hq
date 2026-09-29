@@ -1,8 +1,9 @@
 # Runbook: realtime (Reverb), and the polling fallback
 
 Phase 6 gives the application one websocket: **Laravel Reverb**, self-hosted on the same VPS,
-started by Supervisor, proxied by Nginx. It carries three channels
-(`conversation.{id}`, `notifications.{user_id}`, `task.{id}`) and nothing else.
+started by Supervisor, proxied by Nginx. It carries four private channels
+(`conversation.{id}`, `notifications.{user_id}`, `task.{id}`, and `tasks.{user_id}` for the Tasks
+screens — flow F1, decision 12-69) and nothing else.
 
 **It is optional.** Master prompt Part B says a 10–15 second poll is acceptable in the MVP if
 Reverb is troublesome, so *polling* is a supported mode and not a broken one. The bell says
@@ -127,6 +128,18 @@ bell with nothing to say.
   happened while it was down was delivered to nobody.
 - A deploy restarts Reverb and therefore drops every socket. This is the path that runs every
   release, and it is why it is written down rather than discovered.
+
+---
+
+## What the Tasks screens do (flow F1)
+
+Board, List, Calendar and Gantt listen on `private-tasks.{user_id}` for `task.changed`
+(`{task_id, kind}`, sent by `App\Events\TaskChanged` after the write commits, to everyone who can
+see the task). A burst of frames becomes one silent partial reload. While the socket is connected
+they send **no** periodic requests — so a stopped queue worker means they stop updating until the
+tab is reloaded, reconnects, or comes back after 30 s hidden. On a polling build they re-read every
+60 s while the tab is visible. `POST /broadcasting/auth` for `private-tasks.{id}` is 403 for
+anybody but that user, and for somebody with no `tasks.view`.
 
 ---
 

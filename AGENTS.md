@@ -169,6 +169,7 @@ overloaded so asking for one is a compile error rather than a 404 found in stagi
 | Type-check (Vue/TS) | `npx vue-tsc --noEmit` |
 | Test | **`php vendor/bin/pest`** (all) · `php vendor/bin/pest --group=permissions`. **Not `php artisan test`** — it runs in parallel here and deadlocks on migration DDL; see *Known-failing baseline* below, which also says why two agents must not run the suite at once |
 | Build | `npm run build` |
+| Test (JS helpers) | `npm run test:js` → `node --experimental-strip-types --test "tests/js/**/*.test.ts"` (Node 22's own runner, no dependency; pure-TS helpers such as `lib/dueCountdown.ts`, cases shared with Pest via `tests/fixtures/`). A bare directory (`--test tests/js/`) is **not** accepted by Node 22 — pass the glob |
 | Migrate (dev) | `php artisan migrate:fresh --seed --database=pgsql_migrator` |
 | Dev server | `npm run build && php artisan serve --host=127.0.0.1 --port=8000` (run it in the background and kill it when done) |
 | Deploy kit test | `deploy/test/run-install-test.sh` (fresh Ubuntu 24.04 container; needs Docker) |
@@ -311,4 +312,11 @@ Measured 2026-09-17 by `/dispatch setup`:
 - `composer.lock`, `package-lock.json`: generated
 - `config/*.php` other than the file a brief names: Laravel skeleton defaults
 - `storage/`, `bootstrap/cache/`: runtime output
+## Flows
+### F1 task-live-update
+Trigger: any task mutation in TaskService / task controllers (assign, unassign, create, delete, archive, unarchive, status, priority, due date, title, tags, checklist) and a task comment/message
+Steps: mutation commits → `App\Events\TaskChanged` (ShouldBroadcast, after commit, toOthers) → private user channel(s) `tasks.{user}` of everyone who can see the task (before or after the change) → Tasks screen listener (`useLiveTaskProps`) → coalesced silent partial reload
+Payload: { task_id, kind } — ids and the kind of change only, never task text
+Invariants: one broadcast per change; never before commit; never to a user who cannot see the task; never echoed to the acting tab; zero periodic requests while the socket is connected
+Test: php vendor/bin/pest tests/Feature/Realtime/TaskLiveUpdateFlowTest.php
 <!-- /dispatch:map -->

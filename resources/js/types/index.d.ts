@@ -35,6 +35,8 @@ export interface SharedProps {
     };
     app: {
         name: string;
+        /** `config('app.timezone')`: the zone a date-only due date ends in. */
+        timezone: string;
     };
     /**
      * The shell's own live state — the announcement banner app-wide and the Messages nav row's

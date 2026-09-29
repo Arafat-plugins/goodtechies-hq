@@ -1,4 +1,4 @@
-import { Bell, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CalendarRange, ChartColumn, CircleAlert, FileText, FolderKanban, LayoutDashboard, ListChecks, ListTodo, MessagesSquare, Timer, UserRound, UsersRound, Video } from '@lucide/vue';
+import { Bell, CalendarCheck, CalendarDays, CalendarOff, CalendarRange, ChartColumn, FileText, FolderKanban, LayoutDashboard, ListChecks, MessagesSquare, Timer, UserRound, UsersRound, Video } from '@lucide/vue';
 import type { TrackingMode } from '@/types';
 import type { NavGroup, NavItem } from './types';
 
@@ -33,12 +33,9 @@ export function employeeNav(trackingMode: TrackingMode | null | undefined): NavG
             label: 'Menu',
             items: [
                 { label: 'Dashboard', href: '/employee/dashboard', icon: LayoutDashboard },
-                // The plate: seven buckets and their counts. Due Today and Overdue are buckets
-                // of it rather than routes of their own — one question, one screen, one query
-                // per count; see the same three rows on the Admin nav.
-                { label: 'My Tasks', href: '/employee/my-tasks', icon: ListTodo },
-                { label: 'Due Today', href: '/employee/my-tasks?bucket=due_today', icon: CalendarClock },
-                { label: 'Overdue', href: '/employee/my-tasks?bucket=overdue', icon: CircleAlert },
+                // My Tasks, Due Today and Overdue are the scope dropdown on the Tasks toolbar now
+                // (`/employee/tasks?scope=mine|due-today|overdue`), not rows here; the old
+                // `/employee/my-tasks` URLs 302 there, so dashboard cards still land.
                 // The List, Board and Calendar of the work this person can see — every task
                 // they are assigned to, and for the Manager who shares this surface, every
                 // task. It was labelled "My Tasks" while there was no My Tasks page to point

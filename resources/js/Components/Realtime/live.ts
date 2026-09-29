@@ -68,11 +68,12 @@ import { listenPrivate, realtimeConnection, realtimeMode, realtimeReconnects } f
  * in one place, so the two halves of this slice cannot drift by a character.
  *
  * `conversation.message` is `App\Events\ConversationActivity`; `status.changed` is the one name
- * all three status events share (`App\Events\Concerns\BroadcastsTaskStatus`). `feed.changed`
+ * all three status events share (`App\Events\Concerns\BroadcastsTaskStatus`); `task.changed` is
+ * `App\Events\TaskChanged` on `tasks.{user}` (flow F1). `feed.changed`
  * is deliberately absent: the bell owns it, it is the one frame in the application that carries
  * a payload on purpose (decision 6-8), and it has its own reader in `notifications.ts`.
  */
-export const LIVE_EVENTS = ['conversation.message', 'status.changed'] as const;
+export const LIVE_EVENTS = ['conversation.message', 'status.changed', 'task.changed'] as const;
 
 /**
  * A frame, whichever door it came through. Every field is optional because nothing reads any of
@@ -82,6 +83,8 @@ export interface LivePing {
     conversation_id?: number;
     message_id?: number;
     task_id?: number;
+    /** `task.changed` only: which kind of change — for the network tab, never for painting. */
+    kind?: string;
 }
 
 /** Kept for the Messages screens that already import it by this name. */
@@ -97,6 +100,15 @@ export function conversationChannel(conversationId: number | null | undefined): 
 /** The private channel one task broadcasts on — `app/Broadcasting/TaskChannel.php`. */
 export function taskChannel(taskId: number | null | undefined): string | null {
     return typeof taskId === 'number' && taskId > 0 ? `task.${taskId}` : null;
+}
+
+/**
+ * One person's "a task you can see changed" channel — `app/Broadcasting/UserTasksChannel.php`.
+ * Every Tasks screen listens here (flow F1): a board cannot subscribe to a task it has not been
+ * told about yet, and "assigned to me" is exactly that task.
+ */
+export function tasksChannel(userId: number | null | undefined): string | null {
+    return typeof userId === 'number' && userId > 0 ? `tasks.${userId}` : null;
 }
 
 /** The open thread's interval when it is polling. */
@@ -115,9 +127,9 @@ export const RAIL_POLL_MS = 15_000;
  *   whatever somebody is looking at, and a partial reload of it costs the current page's
  *   controller (see `reload.ts`). An announcement additionally arrives on a socket build the
  *   moment it is posted, because the announcements channel already exists.
- * - **the task board** — 20 s. Two people dragging one board is the case the client named, and
- *   twenty seconds is the longest a card should sit in the wrong column. Poll-only on both
- *   builds: see `TaskBoard.vue` on why there is no board channel.
+ * - **the Tasks screens** (Board, List, Calendar, Gantt) — event-driven, no interval at all while
+ *   the socket is up (flow F1, decision 12-69). Without a socket they poll every 60 s while the
+ *   tab is visible; they resync once after a reconnect and once after the tab was hidden 30 s.
  * - **task detail** — 15 s on a polling build; instant on a socket build, where `task.{id}` is
  *   subscribed.
  * - **attendance and time** — 30 s. A clock-in from another device is the case, and nobody
@@ -126,7 +138,7 @@ export const RAIL_POLL_MS = 15_000;
  *   clock, against the heaviest controller in the application (67 statements on the Admin's).
  */
 export const SHELL_POLL_MS = 30_000;
-export const BOARD_POLL_MS = 20_000;
+export const TASKS_POLL_MS = 60_000;
 export const TASK_DETAIL_POLL_MS = 15_000;
 export const ATTENDANCE_POLL_MS = 30_000;
 export const DASHBOARD_POLL_MS = 60_000;
@@ -148,6 +160,15 @@ export const DASHBOARD_POLL_MS = 60_000;
  * and nothing at all behind a hidden tab.
  */
 export const LIVE_SAFETY_MS = 45_000;
+
+/**
+ * Flow F1's two numbers. A burst of `task.changed` frames — a bulk reassignment, a drag that
+ * also reorders — becomes ONE partial reload this long after the last of them; and a tab that
+ * was hidden at least this long re-reads once when it comes back, because the frames it missed
+ * while hidden were dropped rather than queued.
+ */
+export const TASKS_COALESCE_MS = 400;
+export const TASKS_HIDDEN_RESYNC_MS = 30_000;
 
 /* ------------------------------------------------------------------ one subscription per channel */
 
@@ -295,16 +316,30 @@ export function liveTransportLabel(
  * `useLiveRefresh` and delivered by the next tick after the overlay closes, so nothing is lost —
  * see `canRefresh`.
  */
+const OVERLAY_SELECTOR =
+    '[data-state="open"][role="dialog"], [data-state="open"][role="alertdialog"], [data-state="open"][role="menu"], [data-state="open"][role="listbox"]';
+
 export function overlayOpen(): boolean {
     if (typeof document === 'undefined') {
         return false;
     }
 
-    return (
-        document.querySelector(
-            '[data-state="open"][role="dialog"], [data-state="open"][role="alertdialog"], [data-state="open"][role="menu"], [data-state="open"][role="listbox"]',
-        ) !== null
-    );
+    return document.querySelector(OVERLAY_SELECTOR) !== null;
+}
+
+/**
+ * `overlayOpen()`, except for an overlay that contains `marker` — one that is built to stay
+ * open while the screen behind it refreshes. The task drawer is the one: it is a modal `Sheet`,
+ * so `overlayOpen()` would hold the Board for as long as somebody reads a task, and the drawer
+ * shares nothing with the Board's props (it fetches its own and re-reads on its own frame).
+ * Every other dialog, menu and listbox still holds the refresh.
+ */
+export function overlayOpenBesides(marker: string): boolean {
+    if (typeof document === 'undefined') {
+        return false;
+    }
+
+    return [...document.querySelectorAll(OVERLAY_SELECTOR)].some((overlay) => overlay.querySelector(marker) === null);
 }
 
 /**
@@ -349,6 +384,30 @@ export interface LiveRefreshOptions {
      * pending flag is cleared by the next successful refresh either way.
      */
     canRefresh?: () => boolean;
+    /**
+     * Flow F1. Fold every reason to refresh that arrives within this many ms into ONE, fired
+     * this long after the last of them (a trailing debounce). `0`, the default, fires each at
+     * once, exactly as before. `resume()` never waits for it: a held refresh lands as soon as
+     * the gesture ends.
+     */
+    coalesceMs?: number;
+    /**
+     * Flow F1. Coming back to the tab re-reads only if it was hidden at least this long, or if
+     * a frame arrived while it was hidden. `0`, the default, re-reads on every return, as before.
+     */
+    hiddenResyncMs?: number;
+    /**
+     * Flow F1. Re-read once when the socket is back after having been up, however briefly it
+     * was down. `realtimeReconnects` only counts a drop that reached `disconnected`, and a
+     * Reverb restart inside pusher's ten-second window never does. Default `false`.
+     */
+    resyncWhenLive?: boolean;
+    /**
+     * Which channel frames concern this screen. Default: all of them. The task drawer uses it to
+     * hear only about the task it has open; the interval, reconnects and the tab coming back are
+     * not frames and are not filtered.
+     */
+    accept?: (ping: LivePing) => boolean;
 }
 
 export interface LiveRefreshHandle {
@@ -402,6 +461,10 @@ export function useLiveRefresh(
     const intervalMs = options.intervalMs ?? THREAD_POLL_MS;
     const polls = options.poll ?? true;
     const canRefresh = options.canRefresh ?? (() => true);
+    const coalesceMs = options.coalesceMs ?? 0;
+    const hiddenResyncMs = options.hiddenResyncMs ?? 0;
+    const resyncWhenLive = options.resyncWhenLive ?? false;
+    const accept = options.accept ?? (() => true);
 
     const transport = useLiveStatus(channel);
 
@@ -414,6 +477,10 @@ export function useLiveRefresh(
     let safety: ReturnType<typeof setInterval> | null = null;
     let unsubscribe: (() => void) | null = null;
     let listening = false;
+    let trailing: ReturnType<typeof setTimeout> | null = null;
+    let hiddenAt: number | null = null;
+    let missedWhileHidden = false;
+    let wasLive = transport.value === 'live';
 
     function pageVisible(): boolean {
         return typeof document === 'undefined' || document.visibilityState === 'visible';
@@ -424,13 +491,39 @@ export function useLiveRefresh(
      * coming back — so the visibility rule and the caller's own guard are stated once and
      * cannot be forgotten by whichever path grows next.
      *
-     * A hidden tab is not remembered, because coming back to the tab already buys an immediate
-     * read. A `canRefresh` refusal IS remembered: see `resume()`.
+     * A hidden tab is not remembered as a refresh, because coming back to the tab already buys
+     * an immediate read — it is only noted, so `hiddenResyncMs` does not skip that read. A
+     * `canRefresh` refusal IS remembered: see `resume()`.
+     *
+     * With `coalesceMs`, this is the debounce and `deliver()` is the door.
      */
     function ping(): void {
+        if (coalesceMs <= 0) {
+            deliver();
+
+            return;
+        }
+
+        if (trailing !== null) {
+            clearTimeout(trailing);
+        }
+
+        trailing = setTimeout(() => {
+            trailing = null;
+            deliver();
+        }, coalesceMs);
+    }
+
+    function deliver(): void {
+        if (!pageVisible()) {
+            missedWhileHidden = true;
+
+            return;
+        }
+
         // A new deploy (reliability slice 3): every read would only meet the same 409, and the
         // shell is already offering "Reload now".
-        if (!pageVisible() || !isSessionLive() || hasNewVersion()) {
+        if (!isSessionLive() || hasNewVersion()) {
             return;
         }
 
@@ -483,14 +576,23 @@ export function useLiveRefresh(
 
     function onVisibilityChange(): void {
         if (!pageVisible()) {
+            hiddenAt ??= Date.now();
             stopPolling();
             stopSafety();
 
             return;
         }
 
-        // Back in front: answer with what is true now, not in ten seconds.
-        ping();
+        const hiddenFor = hiddenAt === null ? Number.POSITIVE_INFINITY : Date.now() - hiddenAt;
+        hiddenAt = null;
+
+        // Back in front: answer with what is true now, not in ten seconds — unless it was a
+        // glance away and nothing was missed (`hiddenResyncMs`, 0 by default).
+        if (hiddenFor >= hiddenResyncMs || missedWhileHidden) {
+            missedWhileHidden = false;
+            ping();
+        }
+
         startPolling();
         startSafety();
     }
@@ -504,7 +606,11 @@ export function useLiveRefresh(
             unsubscribe = null;
 
             if (name !== null && realtimeMode === 'reverb') {
-                unsubscribe = joinChannel(name, ping);
+                unsubscribe = joinChannel(name, (frame) => {
+                    if (accept(frame)) {
+                        ping();
+                    }
+                });
             }
         },
         { immediate: true },
@@ -516,6 +622,12 @@ export function useLiveRefresh(
         if (now === 'live') {
             stopPolling();
             startSafety();
+
+            if (resyncWhenLive && wasLive) {
+                ping();
+            }
+
+            wasLive = true;
 
             return;
         }
@@ -564,6 +676,11 @@ export function useLiveRefresh(
         stopSafety();
         stopReconnect();
 
+        if (trailing !== null) {
+            clearTimeout(trailing);
+            trailing = null;
+        }
+
         unsubscribe?.();
         unsubscribe = null;
 
@@ -581,10 +698,11 @@ export function useLiveRefresh(
                 return;
             }
 
-            // `ping()` clears the flag itself when it goes through, and sets it again when the
+            // `deliver()` clears the flag itself when it goes through, and sets it again when the
             // caller is still not ready — so a gesture that ends into another gesture keeps the
-            // refresh waiting rather than losing it.
-            ping();
+            // refresh waiting rather than losing it. Not through the debounce: the gesture that
+            // held it has ended, and the refresh is already late.
+            deliver();
         },
         markFresh: () => {
             // Whichever clock is running, restart it from now: a read that has just happened

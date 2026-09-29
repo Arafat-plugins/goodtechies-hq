@@ -1,7 +1,16 @@
-import { router } from '@inertiajs/vue3';
+import { router, usePage } from '@inertiajs/vue3';
 import type { MaybeRefOrGetter } from 'vue';
 import type { LiveRefreshHandle, LiveRefreshOptions } from '@/Components/Realtime/live';
-import { overlayOpen, SHELL_POLL_MS, useLiveRefresh } from '@/Components/Realtime/live';
+import {
+    overlayOpen,
+    overlayOpenBesides,
+    SHELL_POLL_MS,
+    TASKS_COALESCE_MS,
+    TASKS_HIDDEN_RESYNC_MS,
+    TASKS_POLL_MS,
+    tasksChannel,
+    useLiveRefresh,
+} from '@/Components/Realtime/live';
 import { backoff } from '@/lib/net';
 import { isSessionLive } from '@/lib/session';
 import { hasNewVersion } from '@/lib/version';
@@ -176,17 +185,64 @@ export function liveReloadBusy(): boolean {
  * channel to subscribe to and saying so once is better than five screens each passing `null`.
  * Task detail passes `task.{id}` and is therefore instant on a socket build.
  *
+ * `overlayGuard` replaces that default overlay check, for a screen with an overlay that is meant
+ * to stay open over a refresh (the Tasks screens and their drawer). Leave it out and nothing
+ * changes.
+ *
  * Returns the handle, so a screen with a gesture can `resume()` when the gesture ends and render
  * `pending` while it is held.
  */
 export function useLiveProps(
     names: readonly string[],
-    options: LiveRefreshOptions & { channel?: MaybeRefOrGetter<string | null> } = {},
+    options: LiveRefreshOptions & {
+        channel?: MaybeRefOrGetter<string | null>;
+        overlayGuard?: () => boolean;
+    } = {},
 ): LiveRefreshHandle {
-    const { channel = null, canRefresh, ...rest } = options;
+    const { channel = null, canRefresh, overlayGuard = overlayOpen, ...rest } = options;
 
     return useLiveRefresh(channel, () => liveReload(names), {
         ...rest,
-        canRefresh: () => !overlayOpen() && (canRefresh?.() ?? true),
+        canRefresh: () => !overlayGuard() && (canRefresh?.() ?? true),
+    });
+}
+
+/**
+ * The marker the task drawer carries, so a Tasks screen keeps refreshing behind it. See
+ * `overlayOpenBesides()`.
+ */
+export const TASK_DRAWER_MARKER = '[data-task-drawer]';
+
+/**
+ * Flow F1 (decision 12-69): a Tasks screen's props, re-read **only when something happened**.
+ *
+ * - **Socket up** — subscribed to `tasks.{me}`; a burst of `task.changed` frames becomes one
+ *   partial reload of `names`, `TASKS_COALESCE_MS` after the last; **no timer at all**, not even
+ *   the safety read (`safetyMs: null`).
+ * - **Socket back** after a drop — one resync, however short the drop was.
+ * - **Tab back** after `TASKS_HIDDEN_RESYNC_MS` hidden, or after a frame arrived while hidden —
+ *   one resync.
+ * - **No socket** (`VITE_REALTIME` is not `reverb`) — the same reload every `TASKS_POLL_MS`,
+ *   only while the tab is visible.
+ *
+ * Every path is `liveReload()`: an async partial reload with no progress bar, no skeleton
+ * (`useNavigationPending` ignores async visits) and preserved scroll and state. The screen's own
+ * `canRefresh` holds it during a gesture; the task drawer does not hold it.
+ */
+export function useLiveTaskProps(
+    names: readonly string[],
+    options: Pick<LiveRefreshOptions, 'canRefresh'> = {},
+): LiveRefreshHandle {
+    const page = usePage<{ auth?: { user?: { id?: number } | null } }>();
+
+    return useLiveProps(names, {
+        ...options,
+        channel: () => tasksChannel(page.props.auth?.user?.id),
+        overlayGuard: () => overlayOpenBesides(TASK_DRAWER_MARKER),
+        intervalMs: TASKS_POLL_MS,
+        safetyMs: null,
+        coalesceMs: TASKS_COALESCE_MS,
+        hiddenResyncMs: TASKS_HIDDEN_RESYNC_MS,
+        resyncWhenLive: true,
     });
 }

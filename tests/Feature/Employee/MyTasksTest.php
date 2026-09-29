@@ -4,10 +4,11 @@ use App\Models\Employee;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\TaskService;
 use App\Support\RoleName;
+use App\Support\TaskBucket;
 use App\Support\TaskStatus;
 use Illuminate\Support\Carbon;
-use Inertia\Testing\AssertableInertia as Assert;
 
 /*
 |--------------------------------------------------------------------------
@@ -47,67 +48,52 @@ beforeEach(function () {
         ->create();
 });
 
-it('renders the seven buckets for an employee', function () {
-    $this->actingAs($this->yaseen)
-        ->get('/employee/my-tasks')
-        ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page
-            ->component('Employee/MyTasks', false)
-            ->has('buckets', 7)
-            ->where('buckets.0.label', 'My tasks')
-            ->where('buckets.0.href', '/employee/my-tasks')
-            ->where('buckets.1.key', 'due_today')
-            ->where('buckets.1.href', '/employee/my-tasks?bucket=due_today')
-            ->where('bucket', 'open')
-            ->has('tasks'),
-        );
+it('sends the old My Tasks page to the Tasks List, scoped to this person', function () {
+    // The page is the `?scope=` dropdown on the Tasks toolbar now; the URL keeps working.
+    $this->actingAs($this->yaseen)->get('/employee/my-tasks')->assertRedirect('/employee/tasks?scope=mine&bucket=open');
+    $this->actingAs($this->yaseen)->get('/employee/my-tasks?bucket=due_today')
+        ->assertRedirect('/employee/tasks?scope=due-today');
 })->group('phase2');
 
-it('lists exactly the tasks its overdue card counted', function () {
-    $props = $this->actingAs($this->yaseen)
-        ->get('/employee/my-tasks?bucket=overdue')
-        ->assertOk()
-        ->inertiaPage()['props'];
+it('lands the overdue link on exactly this person\'s late tasks', function () {
+    $this->actingAs($this->yaseen)->get('/employee/my-tasks?bucket=overdue')
+        ->assertRedirect('/employee/tasks?scope=overdue');
 
-    $ids = array_column($props['tasks'], 'id');
-    $card = collect($props['buckets'])->firstWhere('key', 'overdue');
+    $list = $this->actingAs($this->yaseen)->get('/employee/tasks?scope=overdue')->assertOk()
+        ->inertiaPage()['props']['tasks'];
+    $tasks = collect($list['groups'])->flatMap(fn (array $group) => $group['tasks']);
+    $ids = $tasks->pluck('id')->all();
 
-    expect($card['count'])->toBe(count($ids))
-        ->and($ids)->toContain(...$this->mineLate->pluck('id')->all())
+    expect($ids)->toContain(...$this->mineLate->pluck('id')->all())
         // Tapu's late task is absent, not refused — the rule this whole surface is built on.
         ->and($ids)->not->toContain($this->theirsLate->id);
 
     // Every row is late by the server's own definition, computed at query time.
-    foreach ($props['tasks'] as $task) {
+    foreach ($tasks as $task) {
         expect($task['is_overdue'])->toBeTrue();
     }
 
-    // And the bucket agrees with the Tasks List under the same filter. On this surface
-    // Task::visibleTo() has already narrowed to this person, so the two are the same set —
-    // which is the check that the bucket did not invent a second definition of late.
-    $list = $this->actingAs($this->yaseen)
-        ->get('/employee/tasks?overdue=1')
-        ->assertOk()
+    // And the scope agrees with the Overdue-only checkbox. On this surface Task::visibleTo()
+    // has already narrowed to this person, so the two are the same set — which is the check
+    // that the bucket did not invent a second definition of late.
+    $overdueOnly = $this->actingAs($this->yaseen)->get('/employee/tasks?overdue=1')->assertOk()
         ->inertiaPage()['props']['tasks'];
 
-    $listIds = collect($list['groups'])->flatMap(fn (array $group) => array_column($group['tasks'], 'id'));
-
-    expect($list['total'])->toBe($card['count'])
-        ->and($listIds->all())->toEqualCanonicalizing($ids);
+    expect($overdueOnly['total'])->toBe($list['total'])
+        ->and(collect($overdueOnly['groups'])->flatMap(fn (array $group) => array_column($group['tasks'], 'id'))->all())
+        ->toEqualCanonicalizing($ids);
 })->group('phase2');
 
-it('answers zero rather than nothing when a bucket is empty', function () {
-    $props = $this->actingAs($this->yaseen)
-        ->get('/employee/my-tasks?bucket=in_review')
-        ->assertOk()
-        ->inertiaPage()['props'];
+it('carries any other bucket through beside the personal scope', function () {
+    $this->actingAs($this->yaseen)->get('/employee/my-tasks?bucket=in_review')
+        ->assertRedirect('/employee/tasks?scope=mine&bucket=in_review');
 
-    $card = collect($props['buckets'])->firstWhere('key', 'in_review');
+    $total = $this->actingAs($this->yaseen)->get('/employee/tasks?scope=mine&bucket=in_review')->assertOk()
+        ->inertiaPage()['props']['tasks']['total'];
+    $counted = app(TaskService::class)->bucketCounts($this->yaseen, [TaskBucket::InReview], ['mine' => true]);
 
-    // The card is present and reads 0; it is not withheld and not an empty state. Only the
-    // LIST below is empty, which is where an EmptyState belongs.
-    expect($card)->not->toBeNull()
-        ->and($card['count'])->toBe(count($props['tasks']));
+    // The dashboard card's number and the list its link opens are the same query.
+    expect($total)->toBe($counted['in_review']);
 })->group('phase2');
 
 it('gives a manager their own plate, not the whole board they can otherwise see', function () {
@@ -119,12 +105,9 @@ it('gives a manager their own plate, not the whole board they can otherwise see'
         ->assignedTo($manager)
         ->create();
 
-    $props = $this->actingAs($manager->user)
-        ->get('/employee/my-tasks?bucket=overdue')
-        ->assertOk()
-        ->inertiaPage()['props'];
-
-    $ids = array_column($props['tasks'], 'id');
+    $list = $this->actingAs($manager->user)->get('/employee/tasks?scope=overdue')->assertOk()
+        ->inertiaPage()['props']['tasks'];
+    $ids = collect($list['groups'])->flatMap(fn (array $group) => array_column($group['tasks'], 'id'))->all();
 
     expect($ids)->toBe([$mine->id])
         // A Manager's Task::visibleTo() is every task, so this is the `mine` filter working.
@@ -164,13 +147,16 @@ it('sends every dashboard card to exactly the tasks it counted', function () {
         ->inertiaPage()['props']['taskStats'];
 
     foreach ($stats as $stat) {
-        $buckets = $this->actingAs($this->yaseen)
-            ->get($stat['href'])
-            ->assertOk()
-            ->inertiaPage()['props']['buckets'];
+        // The card still links to `/employee/my-tasks…`, which 302s to the scoped Tasks List;
+        // the list it lands on must hold exactly the number the card printed.
+        $location = $this->actingAs($this->yaseen)->get($stat['href'])->assertRedirect()->headers->get('Location');
 
-        expect(collect($buckets)->firstWhere('key', $stat['key'])['count'])
-            ->toBe($stat['count'], "card {$stat['key']} leads somewhere else");
+        $total = $this->actingAs($this->yaseen)
+            ->get($location)
+            ->assertOk()
+            ->inertiaPage()['props']['tasks']['total'];
+
+        expect($total)->toBe($stat['count'], "card {$stat['key']} leads somewhere else");
     }
 })->group('phase2');
 

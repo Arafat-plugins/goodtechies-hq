@@ -277,6 +277,18 @@ latent shape — harmless only because its frame is the whole feed, re-read by t
 Flipping the config fixes the class in one place and changes the timing of every existing queued
 job, so it is a decision rather than a quiet fix.
 
+**2026-09-29 — partly fixed, per event (flow F1, decision 12-69).** The task-side broadcasts now
+all wait for the commit: the three status events already declared `ShouldDispatchAfterCommit`
+(`BroadcastsTaskStatus`), and the new `TaskChanged` — which every task mutation and task comment
+fires inside `TaskService`'s transactions — declares it too, with a Pest test that a rolled-back
+assignment broadcasts nothing. **Still open:** `config/queue.php` is untouched (`after_commit =>
+false` on every connection), so any future `ShouldBroadcast` or queued job dispatched inside a
+transaction without the marker keeps the old shape; `NotificationFeedChanged` already opts in.
+The global flip was not proven safe here — it would re-time every existing queued job — and
+remains the decision this entry describes. Note too that the dev `.env` runs `QUEUE_CONNECTION=sync`,
+which hides nothing for these events (dispatch is deferred to the commit either way) but would hide
+it for an event that forgot the marker.
+
 ### E.5 Two Messages-page defects found while wiring the refresh — **low**
 
 - `Pages/Admin/Projects/Show.vue` builds `:thread="emptyThread(...)"` in the template, so every

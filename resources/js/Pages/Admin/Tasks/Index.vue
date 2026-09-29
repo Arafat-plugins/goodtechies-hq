@@ -91,18 +91,7 @@ function openTask(task: Task): void {
 <template>
     <Head title="Tasks" />
 
-    <PageShell title="Tasks" description="Every task across the agency, grouped however you read it.">
-        <template #tabs>
-            <TaskViewSwitcher surface="admin" current="list" />
-        </template>
-
-        <template #actions>
-            <Button type="button" @click="quickAddOpen = true">
-                <Plus aria-hidden="true" />
-                New task
-            </Button>
-        </template>
-
+    <PageShell title="Tasks" title-hidden>
         <GanttNarrowNotice />
 
         <TaskList
@@ -122,7 +111,17 @@ function openTask(task: Task): void {
             empty-title="No tasks yet"
             empty-description="Tasks appear here as soon as work is planned on a project."
             @row-click="openTask"
-        />
+        >
+            <template #toolbar-leading>
+                <TaskViewSwitcher surface="admin" current="list" />
+            </template>
+            <template #toolbar-trailing>
+                <Button type="button" @click="quickAddOpen = true">
+                    <Plus aria-hidden="true" />
+                    New task
+                </Button>
+            </template>
+        </TaskList>
     </PageShell>
 
     <TaskDetailDrawer v-model:open="drawerOpen" :task-id="detailId" surface="admin" />

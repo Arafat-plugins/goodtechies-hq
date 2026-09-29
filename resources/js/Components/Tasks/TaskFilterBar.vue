@@ -2,7 +2,10 @@
 import type { TaskFilters } from '@/Components/Tasks/TaskList.vue';
 
 /**
- * The chip bar every Tasks view wears — List, Board and Calendar.
+ * The toolbar every Tasks view wears — List, Board, Calendar and Gantt: `#leading` (the page's
+ * view switcher) and the scope dropdown on the left; Overdue only, Show archived, Manage tags,
+ * Add filter and `#trailing` (the page's New task) on the right. There is no search box: the
+ * top bar's Ctrl K is the search, and the server still reads `search` from a URL.
  *
  * It exists because there are now three screens reading one `TaskService::filters()`, and a
  * second copy of the filter definitions is a copy that drifts (DESIGN.md §5.8). The bar owns
@@ -30,6 +33,8 @@ export function taskFiltersActive(filters: TaskFilters): boolean {
         // tasks must say it was narrowed, or the empty case reads as "there is no work" rather
         // than "nothing is late", and there is no way back to the whole list.
         filters.bucket !== null ||
+        // A scope narrows too: an empty "Overdue" must offer the way back to All tasks.
+        filters.scope !== null ||
         filters.overdue ||
         filters.archived
     );
@@ -47,6 +52,7 @@ import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskL
 import { Button } from '@/Components/ui/button';
 import { Checkbox } from '@/Components/ui/checkbox';
 import { Label } from '@/Components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { pushQuery, resetQuery } from '@/lib/tableState';
 
 const props = withDefaults(
@@ -136,6 +142,42 @@ const filterDefs = computed<FilterDef[]>(() => {
     return defs;
 });
 
+/* ------------------------------------------------------------------ scope */
+
+/**
+ * The scope dropdown, `?scope=`. What each one means is `TaskService::SCOPES`, mapped on the
+ * server onto the `mine` and `bucket` filters; this side only writes the key. "All tasks" is
+ * the absence of the parameter.
+ */
+const SCOPES: { value: string; label: string }[] = [
+    { value: 'all', label: 'All tasks' },
+    { value: 'mine', label: 'My Tasks' },
+    { value: 'due-today', label: 'Due Today' },
+    { value: 'overdue', label: 'Overdue' },
+];
+
+/**
+ * The bucket chip reads what the server APPLIED (`filters.bucket`), never the raw `?bucket=`.
+ * Under a date scope the applied bucket is the scope's own, which the dropdown already says —
+ * so no chip then, rather than a duplicate "Due today" or a stale `?bucket=` the server ignored.
+ */
+const appliedFilters = computed<Record<string, string | null>>(() => ({
+    bucket: props.filters.scope === 'due-today' || props.filters.scope === 'overdue' ? null : props.filters.bucket,
+}));
+
+const scopeValue = computed(() => SCOPES.find((option) => option.value === props.filters.scope)?.value ?? 'all');
+
+/**
+ * A date scope brings its own bucket and the server lets it win over `?bucket=`, so picking one
+ * drops a bucket chip that would otherwise sit there naming a narrowing that is not applied.
+ */
+function chooseScope(value: unknown): void {
+    const scope = typeof value === 'string' && value !== 'all' ? value : null;
+    const dated = scope === 'due-today' || scope === 'overdue';
+
+    pushQuery(dated ? { scope, bucket: null } : { scope });
+}
+
 function clearFilters(): void {
     resetQuery(props.clearKeeps);
 }
@@ -174,7 +216,25 @@ const tagBase = computed(() => `/${page.props.auth.user?.surface ?? 'admin'}/tag
         :extra-active="filters.overdue || filters.archived"
         :placeholder="placeholder"
         :input-id="`${idPrefix}-search`"
+        :searchable="false"
+        :applied="appliedFilters"
+        layout="toolbar"
     >
+        <template #leading>
+            <slot name="leading" />
+
+            <Select :model-value="scopeValue" @update:model-value="chooseScope">
+                <SelectTrigger :id="`${idPrefix}-scope`" aria-label="Task scope" class="w-36">
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem v-for="option in SCOPES" :key="option.value" :value="option.value">
+                        {{ option.label }}
+                    </SelectItem>
+                </SelectContent>
+            </Select>
+        </template>
+
         <template #extra>
             <div class="flex h-9 items-center gap-2">
                 <Checkbox
@@ -215,6 +275,10 @@ const tagBase = computed(() => `/${page.props.auth.user?.surface ?? 'admin'}/tag
                     :projects="projects"
                 />
             </template>
+        </template>
+
+        <template #trailing>
+            <slot name="trailing" />
         </template>
     </FilterBar>
 </template>

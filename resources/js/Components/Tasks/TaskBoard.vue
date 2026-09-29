@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { KanbanSquare } from '@lucide/vue';
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
-import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
-import { BOARD_POLL_MS } from '@/Components/Realtime/live';
-import { useLiveProps } from '@/Components/Realtime/reload';
+import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import TaskBoardCard from '@/Components/Tasks/TaskBoardCard.vue';
 import TaskFilterBar, { taskFiltersActive } from '@/Components/Tasks/TaskFilterBar.vue';
@@ -14,6 +12,7 @@ import type { BoardCard, BoardColumn, BoardPayload, TransitionMap } from '@/Comp
 import { asDetail, cloneColumns, moveCard, movesFor, neighbours } from '@/Components/Tasks/taskBoard';
 import type { TaskSurface } from '@/Components/Tasks/taskDetail';
 import { mutateTask, taskRoutes } from '@/Components/Tasks/taskDetail';
+import { useDragPan } from '@/lib/dragPan';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 
@@ -68,6 +67,11 @@ const props = defineProps<{
     searchPlaceholder: string;
     emptyTitle: string;
     emptyDescription: string;
+}>();
+
+const emit = defineEmits<{
+    /** A card asked to be opened; the page owns the detail drawer. */
+    'open-task': [taskId: number];
 }>();
 
 /* --------------------------------------------------------------- the local board */
@@ -429,51 +433,112 @@ function jumpTo(key: string): void {
     column?.querySelector<HTMLElement>('[data-column-heading]')?.focus();
 }
 
+/**
+ * A mouse press on empty board — between lanes, below a short lane, right of the last one, or on a
+ * lane's header — drags the strip sideways, so nobody has to reach for the scrollbar
+ * (`lib/dragPan.ts` says what never starts a pan: cards, links, buttons, anything draggable).
+ */
+const { isPanning } = useDragPan(strip);
+
+/** Whether a card is in the air — `drag` above, as a flag a caller can read. */
+const isDraggingCard = computed(() => drag.value !== null);
+
+/**
+ * The strip reaches the bottom of the viewport, so the empty space under short lanes is board —
+ * somewhere a pan can start — rather than page. Measured, because what sits above it (the filter
+ * bar, the wrapped jump rail) changes height with the width and the filters.
+ */
+const root = ref<HTMLElement | null>(null);
+const stripMinHeight = ref<string | undefined>(undefined);
+
+function fillViewport(): void {
+    const element = strip.value;
+
+    if (element === null) {
+        return;
+    }
+
+    const main = document.getElementById('main-content');
+    const below = main === null ? 0 : Number.parseFloat(getComputedStyle(main).paddingBottom) || 0;
+    const top = element.getBoundingClientRect().top + window.scrollY;
+    const height = Math.floor(window.innerHeight - top - below);
+
+    stripMinHeight.value = height > 0 ? `${height}px` : undefined;
+}
+
+let resizeObserver: ResizeObserver | null = null;
+
+onMounted(() => {
+    window.addEventListener('resize', fillViewport);
+
+    if (typeof ResizeObserver !== 'undefined' && root.value !== null) {
+        resizeObserver = new ResizeObserver(() => fillViewport());
+        resizeObserver.observe(root.value);
+    }
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('resize', fillViewport);
+    resizeObserver?.disconnect();
+});
+
+watch(strip, () => fillViewport(), { flush: 'post' });
+
+defineExpose({ isPanning, isDraggingCard });
+
 /* ------------------------------------------------------------- somebody else's move */
 
 /**
- * A card moved by somebody else moves here too — POLISH-BACKLOG §A.3, whose note on this line is
- * *"today two people dragging the same board overwrite each other silently"*.
+ * A card changed by somebody else changes here too — silently, and only when something happened
+ * (flow F1, decision 12-69).
  *
- * ## Why this is a poll on BOTH builds, and not a channel
+ * ## Only when something happened
  *
- * There is no board channel, and there is no honest way to add one. A channel needs an audience a
- * policy can answer for, and a board's audience is *"everyone whose `Task::visibleTo()` plus these
- * filter parameters include this card"* — which is a query per reader, not a room. The nearest
- * real thing is `task.{id}` per visible card: forty subscriptions for one screen, re-authorised on
- * every reconnect, and it still would not deliver the case that matters, because a card moving
- * INTO this board was never on it to be subscribed to. So the board re-asks the server, every
- * twenty seconds, on a socket build and on a polling one alike. That is not the fallback here; it
- * is the design, and it is the third rule of §A.4 answered rather than worked around.
+ * Every committed task change broadcasts one `task.changed` frame on the private `tasks.{user}`
+ * channel of each person who may see that task, before or after the change — so a card newly
+ * assigned to this reader arrives too, which a per-task channel could never deliver. A burst of
+ * frames becomes ONE `only: ['board']` partial reload (`useLiveTaskProps`). While the socket is up
+ * there is no timer at all; without one (a polling build) the same reload runs every 60 s while
+ * the tab is visible, and a reconnect or a tab hidden for 30 s buys one resync.
  *
- * Twenty seconds is the answer to *how long may a card sit in the wrong column* — long enough
- * that the board is not a chat, short enough that two people planning a sprint together are
- * looking at the same board.
+ * ## Silently
+ *
+ * The reload is async: no progress bar, no skeleton (`useNavigationPending` skips async visits),
+ * scroll and component state preserved. `local` is replaced from the new payload, and because
+ * lanes are keyed by `column.key` and cards by `card.id`, Vue patches only the cards whose data
+ * changed — an unchanged card keeps its DOM node, a lane is never re-mounted. The task drawer
+ * does not hold it (`TASK_DRAWER_MARKER`); it re-reads its own task when a frame names it.
  *
  * ## It never lands mid-gesture
  *
  * `board` is a prop and `local` is a copy of it, so a fresh payload REPLACES the columns — which
- * is exactly right after somebody else's move and exactly wrong while a card is in the air or a
- * write is unanswered. So the refresh is refused while `drag` holds a card, while `busyId` has a
- * write out, and while `restorePoint` is holding the board it would have to restore to on a
- * refusal. A refusal is not dropped: `useLiveRefresh` remembers it, the indicator says *Update
- * waiting*, and `resume()` delivers it the moment the gesture or the write finishes.
+ * is exactly right after somebody else's move and exactly wrong while a card is in the air, the
+ * strip is being panned, or a write is unanswered. So the refresh is refused while `drag` holds a
+ * card, while `isPanning`, while `busyId` has a write out, and while `restorePoint` is holding the
+ * board it would have to restore to on a refusal. A refusal is not dropped: `useLiveRefresh`
+ * remembers it and `resume()` delivers it the moment the gesture or the write finishes.
  *
  * ## What is still not solved, and cannot be from here
  *
- * This ends *silent* overwriting, not simultaneous editing. Two people who drop the same card in
- * the same second still race, and the second write wins — `POST …/status` has no version check to
- * lose on. Closing that needs an `If-Unmodified-Since`-shaped precondition on the task, which is
- * a server change with its own refusal to draw and is not this slice.
+ * This ends *silent* overwriting, not simultaneous editing (decision 12-46). Two people who drop
+ * the same card in the same second still race, and the second write wins — `POST …/status` has no
+ * version check to lose on. The loser's board corrects itself on the winner's frame.
  */
-const live = useLiveProps(['board'], {
-    intervalMs: BOARD_POLL_MS,
-    canRefresh: () => drag.value === null && busyId.value === null && restorePoint.value === null,
+const live = useLiveTaskProps(['board'], {
+    canRefresh: () =>
+        drag.value === null && !isPanning.value && busyId.value === null && restorePoint.value === null,
+});
+
+// A pan that ends lets the refresh it held through. (A drop and a write resume by themselves.)
+watch(isPanning, (panning) => {
+    if (!panning) {
+        live.resume();
+    }
 });
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-4">
+    <div ref="root" class="flex min-w-0 flex-col gap-4">
         <TaskFilterBar
             ref="filterBar"
             :filters="filters"
@@ -486,7 +551,15 @@ const live = useLiveProps(['board'], {
             :employees="employees"
             :placeholder="searchPlaceholder"
             :id-prefix="`${surface}-board`"
-        />
+        >
+            <!-- The page's view switcher and New task; the bar places them (TaskFilterBar). -->
+            <template #leading>
+                <slot name="toolbar-leading" />
+            </template>
+            <template #trailing>
+                <slot name="toolbar-trailing" />
+            </template>
+        </TaskFilterBar>
 
         <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <p class="text-xs text-muted-foreground">
@@ -499,18 +572,6 @@ const live = useLiveProps(['board'], {
                     </span>
                 </template>
             </p>
-
-            <!--
-                How this board is keeping itself current. It says `Every 20s` on the client's
-                build and `Live` on nothing, because there is no board channel — see `live`
-                above — and it says `Update waiting` while a drag is holding a refresh off.
-            -->
-            <LiveIndicator
-                :transport="live.transport.value"
-                :interval-ms="BOARD_POLL_MS"
-                :pending="live.pending.value"
-                subject="cards other people move"
-            />
 
             <!-- Every column, named and counted, without scrolling to it first. -->
             <nav aria-label="Jump to a column" class="flex min-w-0 flex-wrap items-center gap-1">
@@ -554,7 +615,13 @@ const live = useLiveProps(['board'], {
         <div
             v-else
             ref="strip"
-            class="-mx-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6"
+            :class="
+                cn(
+                    '-mx-4 cursor-grab overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6',
+                    isPanning && 'cursor-grabbing select-none **:cursor-grabbing',
+                )
+            "
+            :style="{ minHeight: stripMinHeight }"
             :aria-busy="busyId !== null || undefined"
         >
             <div class="flex min-w-max snap-x snap-proximity items-start gap-4">
@@ -617,6 +684,7 @@ const live = useLiveProps(['board'], {
                                 :data-task-id="card.id"
                                 @drag-start="onDragStart(card, column.key, $event)"
                                 @drag-end="onDragEnd"
+                                @open="emit('open-task', card.id)"
                                 @move-to="(status) => moveTo(card, column.key, status)"
                                 @move-up="nudge(card, column.key, 'up')"
                                 @move-down="nudge(card, column.key, 'down')"
@@ -644,17 +712,6 @@ const live = useLiveProps(['board'], {
                 </section>
             </div>
         </div>
-
-        <!--
-            One line, because a board that mixes projects in a lane raises the question. A lane
-            is ordered by the manual order and nothing else; the due date only settles cards
-            nobody has dragged yet. The List is the view ordered by date — that is the whole
-            difference between the two.
-        -->
-        <p v-if="board.total > 0" class="text-xs text-muted-foreground">
-            Drag inside a lane to set its order — it is kept. Drag across lanes to change the
-            status. Cards nobody has moved sit in due-date order.
-        </p>
 
         <!--
             The dialogs, and only the dialogs. Cancelling one writes nothing, so the board

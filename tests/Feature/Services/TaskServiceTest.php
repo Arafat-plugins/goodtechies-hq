@@ -315,6 +315,8 @@ it('defaults every filter key so the payload shape never varies', function () {
         // asks for no window gets the same array shape as one that does.
         'date_from', 'date_to',
         'overdue', 'archived', 'as_of',
+        // The Tasks toolbar's scope dropdown (`?scope=`), echoed so every view can show it.
+        'scope',
     ]);
 })->group('phase2');
 

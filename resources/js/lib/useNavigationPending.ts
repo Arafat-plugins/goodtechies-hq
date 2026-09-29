@@ -19,6 +19,12 @@ const skeletonOwners = ref(0);
  *
  * It lives here rather than in `app.ts` because it is per-screen state: `app.ts`
  * mounts one root and has nowhere to put a value each page needs to read.
+ *
+ * **A background read never flips it.** An `async` visit (every `router.reload()` a live screen
+ * sends — flow F1's included) and a prefetch are skipped on start AND on finish, so a slow poll
+ * cannot paint a skeleton over a list nobody navigated away from, and a poll finishing in the
+ * middle of a slow click cannot clear the click's skeleton early. Same rule as
+ * `useShellNavigationPending` below.
  */
 export function useNavigationPending(delay = 200): Readonly<Ref<boolean>> {
     const pending = ref(false);
@@ -37,14 +43,22 @@ export function useNavigationPending(delay = 200): Readonly<Ref<boolean>> {
         }
     }
 
-    const stopStart = router.on('start', () => {
+    const stopStart = router.on('start', (event) => {
+        if (event.detail.visit.async || event.detail.visit.prefetch) {
+            return;
+        }
+
         clearTimer();
         timer = setTimeout(() => {
             pending.value = true;
         }, delay);
     });
 
-    const stopFinish = router.on('finish', () => {
+    const stopFinish = router.on('finish', (event) => {
+        if (event.detail.visit.async || event.detail.visit.prefetch) {
+            return;
+        }
+
         clearTimer();
         pending.value = false;
     });

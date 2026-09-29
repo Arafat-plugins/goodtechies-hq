@@ -603,11 +603,10 @@ function permissionMatrix(): array
         // open a payslip, and they are still 403 here. The log is a different question from the
         // data it describes.
         ['GET', 'admin/audit-log', $admin],
-        // An Admin's own plate. One route for all seven buckets — Due Today and Overdue are
-        // `?bucket=` on this, not routes of their own, so there is one row here and not three.
-        // The Accountant holds no tasks.* permission, so `viewAny` refuses them before the
-        // surface middleware would have.
-        ['GET', 'admin/my-tasks', $admin],
+        // The old address of an Admin's own plate. It is a redirect now: My Tasks is the
+        // `?scope=mine` of the Tasks List, so the Admin's cell is a 302 to exactly there (with the Open bucket the old page showed). The
+        // Accountant holds no tasks.* permission, so `viewAny` still refuses them first.
+        ['GET', 'admin/my-tasks', [...$admin, 'ADMIN' => '302 /admin/tasks?scope=mine&bucket=open']],
 
         // Admin surface — clients. A body-less mutating call stops at the validation
         // redirect, which is proof enough that it got past every gate.
@@ -906,10 +905,9 @@ function permissionMatrix(): array
 
         // Employee surface
         ['GET', 'employee/dashboard', $employee],
-        // The same one-route-seven-buckets page on this surface. A 200 for everyone who may
-        // reach the surface: a plate with nothing on it is still a plate, so an employee with
-        // no tasks gets the page and seven zeroes, not a refusal.
-        ['GET', 'employee/my-tasks', $employee],
+        // The same old address on this surface, now a 302 to `/employee/tasks?scope=mine` for
+        // everyone who may reach the surface, and still a 403 for everyone who may not.
+        ['GET', 'employee/my-tasks', [...$employee, 'MANAGER' => '302 /employee/tasks?scope=mine&bucket=open', 'EMPLOYEE' => '302 /employee/tasks?scope=mine&bucket=open', 'REMOTE_EMPLOYEE' => '302 /employee/tasks?scope=mine&bucket=open']],
         ['GET', 'employee/projects', $employee],
         // Tapu (REMOTE_EMPLOYEE) is on this project and Yaseen (EMPLOYEE) is not: a project
         // an employee is not on is missing, not forbidden.

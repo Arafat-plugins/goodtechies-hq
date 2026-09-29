@@ -25,6 +25,11 @@ const props = defineProps<{
      * the title and description. `today` is 'YYYY-MM-DD'.
      */
     greeting?: { name: string; today: string };
+    /**
+     * Keep the `<h1>` for screen readers and draw no visible head: no title, no description,
+     * no `actions` slot. For a screen whose own toolbar is its head (the Tasks views).
+     */
+    titleHidden?: boolean;
 }>();
 
 /* The greeting reads the browser clock; `today` comes from the server as 'YYYY-MM-DD'. */
@@ -55,7 +60,10 @@ const crumbs = computed<Crumb[]>(() => props.breadcrumb ?? []);
 
 <template>
     <div class="flex min-w-0 flex-col gap-6">
-        <div class="flex min-w-0 flex-col gap-4">
+        <!-- Absolutely positioned by `sr-only`, so it is not a flex item and adds no gap. -->
+        <h1 v-if="titleHidden" class="sr-only">{{ heading }}</h1>
+
+        <div v-if="!titleHidden || crumbs.length > 0 || $slots.tabs" class="flex min-w-0 flex-col gap-4">
             <Breadcrumb v-if="crumbs.length > 0">
                 <BreadcrumbList>
                     <template v-for="(crumb, index) in crumbs" :key="`${crumb.label}-${index}`">
@@ -71,7 +79,7 @@ const crumbs = computed<Crumb[]>(() => props.breadcrumb ?? []);
             </Breadcrumb>
 
             <!-- Actions sit right of the title from sm up, and wrap under it at 375. -->
-            <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div v-if="!titleHidden" class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div class="flex min-w-0 flex-col gap-1">
                     <h1 class="text-2xl font-semibold tracking-tight">{{ heading }}</h1>
                     <p v-if="subline" class="text-sm text-muted-foreground">{{ subline }}</p>

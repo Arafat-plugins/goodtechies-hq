@@ -3,6 +3,7 @@ import { router, usePage } from '@inertiajs/vue3';
 import { ExternalLink } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import DetailDrawer from '@/Components/DetailDrawer.vue';
+import { TASKS_COALESCE_MS, TASKS_HIDDEN_RESYNC_MS, tasksChannel, useLiveRefresh } from '@/Components/Realtime/live';
 import SkeletonDetail from '@/Components/Skeletons/SkeletonDetail.vue';
 import TaskDetailBody from '@/Components/Tasks/TaskDetailBody.vue';
 import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
@@ -163,6 +164,34 @@ watch(
     { immediate: true },
 );
 
+/**
+ * Somebody else changed the task that is open here (flow F1): re-read it in place.
+ *
+ * The same `tasks.{me}` frame the screen behind listens to, filtered to this task. `load()`
+ * swaps the props under a body keyed by the task id, so nothing re-mounts: a summary being
+ * written (`TaskSummaryPanel`'s draft) and a comment being composed (`MessageThread`'s) are
+ * local state and survive, and the thread keeps itself current on its own channel as before.
+ * No timer — the screen behind polls on a socket-less build, and this rides its frames only.
+ */
+const me = computed(() => (page.props as { auth?: { user?: { id?: number } | null } }).auth?.user?.id);
+
+useLiveRefresh(
+    () => (props.open && props.taskId !== null ? tasksChannel(me.value) : null),
+    () => {
+        if (props.open && detail.value !== null && !loading.value) {
+            void load();
+        }
+    },
+    {
+        poll: false,
+        safetyMs: null,
+        coalesceMs: TASKS_COALESCE_MS,
+        hiddenResyncMs: TASKS_HIDDEN_RESYNC_MS,
+        resyncWhenLive: true,
+        accept: (frame) => frame.task_id === props.taskId,
+    },
+);
+
 /** A write inside the drawer refreshes the drawer; the list behind it refreshed itself. */
 function refresh(): void {
     void load();
@@ -190,6 +219,9 @@ function close(): void {
                 </a>
             </Button>
         </template>
+
+        <!-- Lets the screen behind keep refreshing while this is open (`overlayOpenBesides`). -->
+        <span data-task-drawer hidden />
 
         <SkeletonDetail v-if="loading || detail === null" />
 

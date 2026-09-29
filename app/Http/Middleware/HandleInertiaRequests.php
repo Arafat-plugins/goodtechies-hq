@@ -92,6 +92,10 @@ class HandleInertiaRequests extends Middleware
             ],
             'app' => [
                 'name' => config('app.name'),
+                // The agency's zone. A date-only due date runs out at the end of its day HERE,
+                // which is how `Task::isOverdue()` reads it, so the Board's countdown
+                // (`lib/dueCountdown.ts`) needs it rather than the browser's own zone.
+                'timezone' => config('app.timezone'),
             ],
             // The chrome's own live state — the announcement banner and the Messages row's
             // unread indicator, app-wide (decision 6-18, POLISH-BACKLOG §A.3 and §C.1).

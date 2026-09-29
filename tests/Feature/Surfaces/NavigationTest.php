@@ -89,8 +89,8 @@ it('points every sidebar row at a route that exists', function (): void {
         // deletes. Asking the router is also the same resolution the application performs, so
         // this cannot drift from it.
         //
-        // The query string stays on: `/admin/my-tasks?bucket=overdue` is the Overdue row, and
-        // `Request::create()` splits it off itself.
+        // The query string stays on: `/employee/tasks/calendar`'s siblings and any row that
+        // deep-links with `?…` are matched as written, and `Request::create()` splits it off.
         try {
             Route::getRoutes()->match(Request::create($row['href'], 'GET'));
         } catch (Throwable) {

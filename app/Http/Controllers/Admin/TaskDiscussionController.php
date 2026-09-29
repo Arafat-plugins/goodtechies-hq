@@ -8,6 +8,7 @@ use App\Http\Requests\Conversation\StoreMessageRequest;
 use App\Models\Task;
 use App\Services\ConversationService;
 use App\Services\MessageService;
+use App\Services\TaskService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,6 +29,7 @@ class TaskDiscussionController extends Controller
     public function __construct(
         private readonly ConversationService $conversations,
         private readonly MessageService $messages,
+        private readonly TaskService $tasks,
     ) {}
 
     public function index(Request $request, Task $task): JsonResponse
@@ -37,6 +39,14 @@ class TaskDiscussionController extends Controller
 
     public function store(StoreMessageRequest $request, Task $task): RedirectResponse
     {
-        return $this->discussionStore($request, $task);
+        $response = $this->discussionStore($request, $task);
+
+        // Flow F1: a comment that landed rings the task's viewers, once, after commit. A refused
+        // post flashed its `error` in THIS request and wrote nothing, so it rings nobody.
+        if (! in_array('error', (array) $request->session()->get('_flash.new', []), true)) {
+            $this->tasks->announceChange($task, 'commented');
+        }
+
+        return $response;
     }
 }

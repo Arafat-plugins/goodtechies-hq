@@ -40,11 +40,7 @@ useFlashAsToast();
 <template>
     <Head title="My Tasks — Gantt" />
 
-    <PageShell title="My Tasks" description="What you owe when, project by project, across the weeks.">
-        <template #tabs>
-            <TaskViewSwitcher surface="employee" current="gantt" />
-        </template>
-
+    <PageShell title="Tasks" title-hidden>
         <TaskGantt
             :gantt="gantt"
             :can-plan="can_plan"
@@ -60,6 +56,10 @@ useFlashAsToast();
             search-placeholder="Search your tasks…"
             empty-title="Nothing of yours is scheduled in this window"
             empty-description="Move the window or zoom out — a task with no dates is not on a timeline."
-        />
+        >
+            <template #toolbar-leading>
+                <TaskViewSwitcher surface="employee" current="gantt" />
+            </template>
+        </TaskGantt>
     </PageShell>
 </template>
