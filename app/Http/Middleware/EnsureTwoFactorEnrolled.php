@@ -21,13 +21,7 @@ class EnsureTwoFactorEnrolled
     {
         $user = $request->user();
 
-        if (
-            TwoFactorService::isEnforced()
-            && $user instanceof User
-            && $user->requiresTwoFactor()
-            && ! $user->hasConfirmedTwoFactor()
-            && ! $request->is('two-factor/*', 'logout')
-        ) {
+        if (self::mustEnrol($user) && ! $request->is('two-factor/*', 'logout')) {
             if ($request->expectsJson()) {
                 abort(403, 'Two-factor enrolment required.');
             }
@@ -36,5 +30,17 @@ class EnsureTwoFactorEnrolled
         }
 
         return $next($request);
+    }
+
+    /**
+     * Is this person held at the enrolment page? Also asked by `App\Http\ErrorResponses`, which
+     * must not hand the shell to somebody this middleware would have stopped.
+     */
+    public static function mustEnrol(mixed $user): bool
+    {
+        return TwoFactorService::isEnforced()
+            && $user instanceof User
+            && $user->requiresTwoFactor()
+            && ! $user->hasConfirmedTwoFactor();
     }
 }

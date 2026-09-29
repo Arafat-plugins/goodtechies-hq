@@ -4,9 +4,11 @@ import { CircleAlert, FolderOpen, ListChecks, RefreshCw, Users } from '@lucide/v
 import { computed, onMounted } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import AttachmentCard from '@/Components/Messages/AttachmentCard.vue';
+import { personTone } from '@/Components/Messages/people';
 import StatusBadge, { type StatusKey } from '@/Components/StatusBadge.vue';
 import { initialsOf, conversationContextState, loadConversationContext } from '@/Components/Messages/messages';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
+import { cn } from '@/lib/utils';
 import { Button } from '@/Components/ui/button';
 import { Skeleton } from '@/Components/ui/skeleton';
 
@@ -123,7 +125,7 @@ function badge(
                         class="flex min-w-0 items-center gap-2"
                     >
                         <Avatar class="size-6">
-                            <AvatarFallback class="text-xs font-medium">
+                            <AvatarFallback :class="cn('text-xs font-medium', personTone(person.id).avatar)">
                                 {{ initialsOf(person.name) }}
                             </AvatarFallback>
                         </Avatar>

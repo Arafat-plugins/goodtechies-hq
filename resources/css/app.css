@@ -145,6 +145,36 @@
     --status-cancelled-bg: oklch(0.96 0.030 27);    /* #FFEBE7 */
     --status-cancelled-border: oklch(0.88 0.04 27); /* #F1CEC9 */
 
+    /* ── People (messaging polish) ─────────────────────────────────────────
+     * One tint per PERSON, so a team channel reads at a glance: `--person-N` is an avatar fill,
+     * `--person-N-fg` its initials AND that person's name on the author line. Chosen by user id
+     * (`Components/Messages/people.ts`), so a person keeps their colour everywhere and across
+     * reloads. Eight hues ≥ 20° apart, none within 40° of --brand (34.4, which is YOU: your own
+     * rows wear --brand-tint). Every fg clears 6:1 on its own fill and 7:1 on --card, in both
+     * themes — the colour is never the only carrier: the name is always written out beside it. */
+    --person-1: oklch(0.93 0.055 250);              /* #CDECFF */
+    --person-1-fg: oklch(0.44 0.125 250);           /* #005494 — 6.29:1 on fill */
+    --person-2: oklch(0.93 0.055 155);              /* #CCF3D8 */
+    --person-2-fg: oklch(0.44 0.110 155);           /* #006436 — 6.10:1 */
+    --person-3: oklch(0.93 0.055 300);              /* #EDE0FF */
+    --person-3-fg: oklch(0.44 0.140 300);           /* #603B93 — 6.60:1 */
+    --person-4: oklch(0.93 0.055 200);              /* #BDF4F6 */
+    --person-4-fg: oklch(0.44 0.075 200);           /* #005F63 — 6.21:1 */
+    --person-5: oklch(0.93 0.055 75);               /* #FEE3C0 */
+    --person-5-fg: oklch(0.44 0.090 75);            /* #6F4A06 — 6.39:1 */
+    --person-6: oklch(0.93 0.055 350);              /* #FFDAED */
+    --person-6-fg: oklch(0.44 0.140 350);           /* #87285D — 6.59:1 */
+    --person-7: oklch(0.93 0.055 275);              /* #DDE6FF */
+    --person-7-fg: oklch(0.44 0.140 275);           /* #3F479E — 6.47:1 */
+    --person-8: oklch(0.93 0.055 125);              /* #DFEFC7 */
+    --person-8-fg: oklch(0.44 0.110 125);           /* #455C01 — 6.21:1 */
+
+    /* ── Scrollbars (messaging polish) ─────────────────────────────────────
+     * A thin neutral thumb on a track that is the surface itself. `color-scheme` below is what
+     * stops a browser drawing its own light-theme bar on the dark canvas. */
+    --scrollbar-thumb: oklch(0.83 0.006 260.6);     /* #C8CBD0 */
+    --scrollbar-thumb-hover: oklch(0.70 0.006 260.6); /* #9C9EA2 */
+
     /* ── Elevation ─────────────────────────────────────────────────────────
      * One surface may not sit on another at the same elevation.
      *
@@ -266,6 +296,28 @@
     --status-cancelled-bg: oklch(0.26 0.030 27);    /* #311E1C */
     --status-cancelled-border: oklch(0.38 0.04 27); /* #563A37 */
 
+    /* ── People (messaging polish) — ≥ 8.2:1 on fill, ≥ 11.6:1 on --card ── */
+    --person-1: oklch(0.33 0.075 250);              /* #12375A */
+    --person-1-fg: oklch(0.87 0.065 250);           /* #B5D8FE — 8.27:1 */
+    --person-2: oklch(0.33 0.075 155);              /* #094024 */
+    --person-2-fg: oklch(0.87 0.110 155);           /* #98EAB5 — 8.31:1 */
+    --person-3: oklch(0.33 0.075 300);              /* #3C2B56 */
+    --person-3-fg: oklch(0.87 0.075 300);           /* #DBCAFF — 8.31:1 */
+    --person-4: oklch(0.33 0.055 200);              /* #023E40 */
+    --person-4-fg: oklch(0.87 0.110 200);           /* #6FEAF1 — 8.38:1 */
+    --person-5: oklch(0.33 0.070 75);               /* #4A2F00 */
+    --person-5-fg: oklch(0.87 0.110 75);            /* #FFCA80 — 8.24:1 */
+    --person-6: oklch(0.33 0.075 350);              /* #51233B */
+    --person-6-fg: oklch(0.87 0.080 350);           /* #FEBFDC — 8.27:1 */
+    --person-7: oklch(0.33 0.075 275);              /* #2B315B */
+    --person-7-fg: oklch(0.87 0.060 275);           /* #C8D2FD — 8.32:1 */
+    --person-8: oklch(0.33 0.075 125);              /* #2D3C09 */
+    --person-8-fg: oklch(0.87 0.110 125);           /* #C4E190 — 8.30:1 */
+
+    /* ── Scrollbars (messaging polish) ── */
+    --scrollbar-thumb: oklch(0.34 0.006 260.6);     /* #36383C */
+    --scrollbar-thumb-hover: oklch(0.45 0.006 260.6); /* #53565A */
+
     /* ── Elevation ─────────────────────────────────────────────────────────
      * Deeper on the dark canvas, where a 5 % black shadow reads as nothing.
      * Flat is a transparent shadow rather than `none` for the reason in the light block: `none`
@@ -365,6 +417,22 @@
     --color-status-cancelled-fg: var(--status-cancelled-fg);
     --color-status-cancelled-bg: var(--status-cancelled-bg);
     --color-status-cancelled-border: var(--status-cancelled-border);
+    --color-person-1: var(--person-1);
+    --color-person-1-fg: var(--person-1-fg);
+    --color-person-2: var(--person-2);
+    --color-person-2-fg: var(--person-2-fg);
+    --color-person-3: var(--person-3);
+    --color-person-3-fg: var(--person-3-fg);
+    --color-person-4: var(--person-4);
+    --color-person-4-fg: var(--person-4-fg);
+    --color-person-5: var(--person-5);
+    --color-person-5-fg: var(--person-5-fg);
+    --color-person-6: var(--person-6);
+    --color-person-6-fg: var(--person-6-fg);
+    --color-person-7: var(--person-7);
+    --color-person-7-fg: var(--person-7-fg);
+    --color-person-8: var(--person-8);
+    --color-person-8-fg: var(--person-8-fg);
 }
 
 /*
@@ -382,9 +450,60 @@
  * a DM's own bubble paints `ring-primary-foreground` instead (5.01:1 / 7.31:1). See
  * Components/Messages/MessageBody.vue.
  */
+/*
+ * Messaging polish: the browser's own controls — scrollbars first among them — follow the theme.
+ * Without `color-scheme` a browser draws its light-theme scrollbar on the dark canvas, which is
+ * the white bar that sat beside every chat thread in dark mode.
+ */
+:root {
+    color-scheme: light;
+}
+
+.dark {
+    color-scheme: dark;
+}
+
 @layer base {
     * {
         @apply border-border outline-ring;
+    }
+
+    /*
+     * One minimal scrollbar everywhere: thin, a neutral thumb, a track that IS the surface. The
+     * standard properties cover Firefox and Chromium 121+; the `::-webkit-scrollbar` block is
+     * Safari and older Chromium, and a browser that supports the standard pair ignores it.
+     */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--scrollbar-thumb) transparent;
+    }
+
+    *:hover {
+        scrollbar-color: var(--scrollbar-thumb-hover) transparent;
+    }
+
+    ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        border: 2px solid transparent;
+        border-radius: 9999px;
+        background-clip: padding-box;
+        background-color: var(--scrollbar-thumb);
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background-color: var(--scrollbar-thumb-hover);
+    }
+
+    ::-webkit-scrollbar-corner {
+        background: transparent;
     }
 
     body {

@@ -10,6 +10,7 @@ import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/Components/ui/native-select';
 import { Textarea } from '@/Components/ui/textarea';
+import { useUnsavedGuard } from '@/lib/unsavedGuard';
 
 /**
  * Applying for leave, and answering a correction request by amending and resubmitting.
@@ -95,8 +96,12 @@ watch(
         form.start_date = props.editing?.start_date ?? '';
         form.end_date = props.editing?.end_date ?? '';
         form.reason = props.editing?.reason ?? '';
+        form.defaults();
     },
 );
+
+/** Reliability slice 3: a half-filled request is not lost to a sidebar click or an F5. */
+useUnsavedGuard(() => form.isDirty);
 
 const selected = computed<LeaveTypeOption | null>(
     () => props.types.find((type) => type.id === Number(form.leave_type_id)) ?? null,
@@ -118,7 +123,11 @@ const window = computed<string | null>(() =>
 
 function submit(): void {
     if (props.editing) {
-        form.put(leaveRoutes.resubmit(props.editing.id), { preserveScroll: true });
+        form.put(leaveRoutes.resubmit(props.editing.id), {
+            preserveScroll: true,
+            // Sent: what is in the fields is now what the server has.
+            onSuccess: () => form.defaults(),
+        });
 
         return;
     }
@@ -127,6 +136,7 @@ function submit(): void {
         preserveScroll: true,
         onSuccess: () => {
             form.reset('start_date', 'end_date', 'reason');
+            form.defaults();
         },
     });
 }

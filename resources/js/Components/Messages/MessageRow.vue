@@ -5,6 +5,7 @@ import AttachmentCard from '@/Components/Messages/AttachmentCard.vue';
 import MessageBody from '@/Components/Messages/MessageBody.vue';
 import type { ThreadLayout, ThreadMessage } from '@/Components/Messages/messages';
 import { formatClockTime, initialsOf } from '@/Components/Messages/messages';
+import { personTone } from '@/Components/Messages/people';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -86,6 +87,13 @@ const onAccent = computed(() => sided.value && mine.value);
 const author = computed(() =>
     props.message.is_mine ? 'You' : (props.message.author?.name ?? 'Somebody who has since left'),
 );
+
+/**
+ * Messaging polish: one colour per person (`people.ts`), on the avatar and on the name, so a
+ * team channel reads by who is talking. Your own rows keep the neutral name — they already
+ * wear the brand tint and say "You".
+ */
+const tone = computed(() => personTone(props.message.author?.id));
 
 const clock = computed(() => formatClockTime(props.message.created_at));
 
@@ -253,7 +261,7 @@ async function copy(): Promise<void> {
         "
     >
         <Avatar v-if="startsRun" class="mt-0.5 size-8">
-            <AvatarFallback class="text-xs font-medium">
+            <AvatarFallback :class="cn('text-xs font-medium', tone.avatar)">
                 {{ initialsOf(message.author?.name) }}
             </AvatarFallback>
         </Avatar>
@@ -268,7 +276,9 @@ async function copy(): Promise<void> {
                     A name reads as a name: full foreground and weight, so it is not mistaken for
                     the clock sitting next to it at the same grey.
                 -->
-                <span class="text-sm font-semibold break-words text-foreground">{{ author }}</span>
+                <span
+                    :class="cn('text-sm font-semibold break-words', message.is_mine ? 'text-foreground' : tone.name)"
+                >{{ author }}</span>
                 <span class="text-xs tabular-nums text-muted-foreground">{{ clock }}</span>
                 <span v-if="message.mentions_me" :class="mentionChipClass">Mentions you</span>
             </p>

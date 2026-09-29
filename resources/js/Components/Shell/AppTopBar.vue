@@ -2,6 +2,7 @@
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import GlobalSearch from '@/Components/Shell/GlobalSearch.vue';
+import MessagesButton from '@/Components/Shell/MessagesButton.vue';
 import MobileNavSheet from '@/Components/Shell/MobileNavSheet.vue';
 import NotificationBell from '@/Components/Shell/NotificationBell.vue';
 import QuickCreate from '@/Components/Shell/QuickCreate.vue';
@@ -19,7 +20,7 @@ import type { NavGroup } from '@/navigation/types';
 
 /**
  * The app's navigation surface: where you are (breadcrumb) on the left, and the four ways
- * to move or act on the right — search, create, notifications, account.
+ * to move or act on the right — search, create, messages, notifications, account.
  *
  * At 375 it carries the hamburger, the last breadcrumb crumb, the search icon, the bell
  * and the avatar; quick create and the leading crumbs are the two things that drop.
@@ -38,6 +39,15 @@ const props = withDefaults(
 );
 
 const page = usePage();
+
+/**
+ * Messaging polish: the Messages icon sits beside the bell on any shell whose navigation has a
+ * Messages row — read from the same `groups` the sidebar draws, so the two cannot disagree and
+ * the Accountant (no row, no `messages.use`) gets no icon that would 403.
+ */
+const hasMessages = computed(() =>
+    props.groups.some((group) => group.items.some((item) => item.href === '/messages')),
+);
 
 const crumbs = computed(() =>
     buildBreadcrumbs(props.groups, page.url, {
@@ -76,6 +86,7 @@ const crumbs = computed(() =>
         <div class="ml-auto flex shrink-0 items-center gap-1 md:gap-2">
             <GlobalSearch :groups="groups" />
             <QuickCreate />
+            <MessagesButton v-if="hasMessages" />
             <NotificationBell />
             <UserMenu />
         </div>

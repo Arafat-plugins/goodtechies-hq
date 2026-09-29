@@ -493,7 +493,7 @@ onBeforeUnmount(() => {
                     :aria-disabled="blocked !== null || undefined"
                     :aria-label="micLabel"
                     :aria-describedby="recording ? timerId : undefined"
-                    :class="blocked !== null && 'opacity-50'"
+                    :class="cn('size-8 rounded-full sm:size-9', !recording && 'text-muted-foreground hover:text-foreground', blocked !== null && 'opacity-50')"
                     @pointerdown="onPointerDown"
                     @pointerup="onPointerUp"
                     @pointercancel="voice.cancel()"

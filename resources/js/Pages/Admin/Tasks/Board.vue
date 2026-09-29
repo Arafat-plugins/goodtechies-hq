@@ -11,7 +11,6 @@ import type { BoardPayload, TransitionMap } from '@/Components/Tasks/taskBoard';
 import { Button } from '@/Components/ui/button';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
-import { usePagePoll } from '@/lib/pagePoll';
 import { queryParam, syncQuery } from '@/lib/tableState';
 
 defineOptions({ layout: AdminLayout });
@@ -31,8 +30,12 @@ defineProps<{
     employees: TaskNamedRef[];
 }>();
 
-/** Part 0.5 refresh rule: somebody else moves a card. */
-usePagePoll(['board']);
+/*
+ * Part 0.5 refresh rule (somebody else moves a card) is kept by `TaskBoard`'s own
+ * `useLiveProps(['board'])` at the same 20 s, which also stays out of the way of a drag. A second,
+ * page-level poll for the same prop had no drag guard and could replace the columns mid-drag, so
+ * it was removed (reliability slice 3).
+ */
 
 /**
  * Every move on this screen is a server round trip that answers with a sentence, refusals

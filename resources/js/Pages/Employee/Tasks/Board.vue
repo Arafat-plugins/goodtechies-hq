@@ -7,7 +7,6 @@ import TaskViewSwitcher from '@/Components/Tasks/TaskViewSwitcher.vue';
 import type { BoardPayload, TransitionMap } from '@/Components/Tasks/taskBoard';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
-import { usePagePoll } from '@/lib/pagePoll';
 
 defineOptions({ layout: EmployeeLayout });
 
@@ -33,8 +32,12 @@ defineProps<{
     canManageTags: boolean;
 }>();
 
-/** Part 0.5 refresh rule: somebody else moves a card. */
-usePagePoll(['board']);
+/*
+ * Part 0.5 refresh rule (somebody else moves a card) is kept by `TaskBoard`'s own
+ * `useLiveProps(['board'])` at the same 20 s, which also stays out of the way of a drag. A second,
+ * page-level poll for the same prop had no drag guard and could replace the columns mid-drag, so
+ * it was removed (reliability slice 3).
+ */
 
 /** Refusals come back 200 with a flashed sentence. The toaster says it once (§5.19). */
 useFlashAsToast();

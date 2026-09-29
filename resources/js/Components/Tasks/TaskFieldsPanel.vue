@@ -30,6 +30,7 @@ import {
     SelectValue,
 } from '@/Components/ui/select';
 import { Textarea } from '@/Components/ui/textarea';
+import { useUnsavedGuard } from '@/lib/unsavedGuard';
 import { cn } from '@/lib/utils';
 
 /**
@@ -106,9 +107,18 @@ function edit(): void {
         due_date: props.task.due_date ?? '',
         estimated_minutes: props.task.estimated_minutes === null ? '' : String(props.task.estimated_minutes),
     };
+    draftBaseline = JSON.stringify(draft.value);
     editing.value = true;
     void nextTick(() => focusField(firstField.value));
 }
+
+/**
+ * Reliability slice 3: an open inline edit whose fields differ from what it opened with asks
+ * before a navigation or an F5 throws the change away. Cancel and a saved edit both close it.
+ */
+let draftBaseline = '';
+
+useUnsavedGuard(() => editing.value && JSON.stringify(draft.value) !== draftBaseline);
 
 function cancel(): void {
     editing.value = false;

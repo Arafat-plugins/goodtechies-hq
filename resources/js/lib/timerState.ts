@@ -41,6 +41,12 @@ export interface BufferedSession {
     pausedSeconds: number;
     /** Set when the session ended while offline. A claim, capped at the last heartbeat. */
     stoppedAt: string | null;
+    /**
+     * Whose session this is (`auth.user.id` when it was written). A buffer is replayed only by
+     * its owner, so on a shared PC one person's tracked time is never sent as another's. `null`
+     * for a buffer written before the field existed — those still replay, as they always did.
+     */
+    userId?: number | null;
 }
 
 /**
@@ -125,6 +131,7 @@ export function readSession(): BufferedSession | null {
                 : [],
             pausedSeconds: typeof session.pausedSeconds === 'number' ? session.pausedSeconds : 0,
             stoppedAt: typeof session.stoppedAt === 'string' ? session.stoppedAt : null,
+            userId: typeof session.userId === 'number' ? session.userId : null,
         };
     } catch {
         return null;
@@ -147,15 +154,102 @@ export function writeSession(session: BufferedSession | null): void {
     );
 }
 
-/** Add an undelivered ping to the buffer, if there is a session to add it to. */
+/**
+ * Add an undelivered ping to the buffer, if there is a session to add it to.
+ *
+ * Not once the session has a `stoppedAt` (reliability slice 4): a ping after the stop would be
+ * evidence the session went on after it ended, and the server ends an entry at its latest
+ * evidence — so a tab left open offline after a Stop would add the minutes it sat there.
+ */
 export function bufferHeartbeat(at: string): void {
     const session = readSession();
 
-    if (session === null) {
+    if (session === null || session.stoppedAt !== null) {
         return;
     }
 
     writeSession({ ...session, heartbeats: [...session.heartbeats, at] });
+}
+
+/* ------------------------------------------------------------ the start intent */
+
+/** `hq.timer.start` — a Start the server has not yet confirmed. */
+const START_KEY = 'hq.timer.start';
+
+/**
+ * Reliability slice 4: one `client_uuid` per start INTENT, not per request.
+ *
+ * Minted when the person presses Start and kept — here, so a reload keeps it too — across every
+ * retry of that same start, until the server has answered. `TimerService::start()` hands back
+ * the entry a uuid already made, so a retry whose first attempt DID land (its reply was the part
+ * that got lost) lands on the same row instead of being refused as a second timer. A Start on a
+ * different task is a new intent and gets a new uuid.
+ *
+ * This is deliberately not part of `BufferedSession`: a buffered session is replayed, and
+ * replaying a start the server never confirmed would open an entry nobody saw start.
+ */
+export interface StartIntent {
+    clientUuid: string;
+    taskId: number;
+    userId: number | null;
+    /** `Date.now()` when the intent was minted. */
+    createdAt: number;
+}
+
+/**
+ * An intent older than this is discarded and the next Start mints a fresh uuid. A retry is a
+ * matter of seconds or minutes; an intent from an hour ago could name a row the watchdog has
+ * since stopped, and reusing it would "start" a timer that is already over.
+ */
+export const START_INTENT_MAX_AGE_MS = 10 * 60_000;
+
+export function readStartIntent(): StartIntent | null {
+    const raw = read(START_KEY);
+
+    if (raw === null) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(raw) as Partial<StartIntent> | null;
+
+        if (
+            parsed === null ||
+            typeof parsed.clientUuid !== 'string' ||
+            typeof parsed.taskId !== 'number' ||
+            typeof parsed.createdAt !== 'number'
+        ) {
+            return null;
+        }
+
+        // Stale (or from a clock that jumped backwards): not a retry of anything.
+        const age = Date.now() - parsed.createdAt;
+
+        if (age < 0 || age > START_INTENT_MAX_AGE_MS) {
+            remove(START_KEY);
+
+            return null;
+        }
+
+        return {
+            clientUuid: parsed.clientUuid,
+            taskId: parsed.taskId,
+            userId: typeof parsed.userId === 'number' ? parsed.userId : null,
+            createdAt: parsed.createdAt,
+        };
+    } catch {
+        return null;
+    }
+}
+
+export function writeStartIntent(intent: StartIntent | null): void {
+    if (intent === null) {
+        remove(START_KEY);
+
+        return;
+    }
+
+    write(START_KEY, JSON.stringify(intent));
 }
 
 export function readBarVisible(): boolean {

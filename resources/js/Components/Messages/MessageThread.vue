@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { FormDataConvertible } from '@inertiajs/core';
+import { usePage } from '@inertiajs/vue3';
 import {
     ChevronUp,
     CircleAlert,
@@ -17,6 +18,11 @@ import MentionPicker from '@/Components/Messages/MentionPicker.vue';
 import MessageRow from '@/Components/Messages/MessageRow.vue';
 import VoiceRecorder from '@/Components/Messages/VoiceRecorder.vue';
 import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
+import {
+    adoptConversationUnread,
+    isViewingConversation,
+    setViewingConversation,
+} from '@/Components/Realtime/shell';
 import {
     THREAD_POLL_MS,
     conversationChannel,
@@ -39,8 +45,14 @@ import type { VoiceClip } from '@/Components/Messages/voice';
 import { VOICE_MAX_LABEL, clipFile } from '@/Components/Messages/voice';
 import { Button } from '@/Components/ui/button';
 import { Label } from '@/Components/ui/label';
+import { Progress } from '@/Components/ui/progress';
 import { Textarea } from '@/Components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
+import { clearDraft, messageDraftKey, readDraft, writeDraft } from '@/lib/drafts';
+import { windowFocused } from '@/lib/attention';
+import { backoff, fetchWithTimeout, TOO_LARGE_TEXT } from '@/lib/net';
+import { isSessionLive, reportResponse, sessionState } from '@/lib/session';
+import { useUnsavedGuard } from '@/lib/unsavedGuard';
 import { cn } from '@/lib/utils';
 
 /**
@@ -117,6 +129,20 @@ import { cn } from '@/lib/utils';
  * saving: this component's `GET` is also what marks the thread read, so a hidden tab that kept
  * reading would mark messages read that nobody has looked at.
  *
+ * ## Read state — messaging polish (supersedes reliability slice 5's `X-HQ-Focused`)
+ *
+ * - **On screen** = the tab visible AND the window focused. The conversation is then left out of
+ *   the top-bar icon, the sidebar pill, the rail pill and the page description
+ *   (`setViewingConversation()` in `Realtime/shell.ts`).
+ * - **Reading** = on screen AND scrolled to the newest message. Only then does a re-read send
+ *   `read=1`; otherwise it sends `read=0` and nothing is marked. `catchUp()` posts
+ *   `through=<newest drawn id>` when focus, visibility or a scroll to the bottom turns "not
+ *   reading" into "reading" with something still unread.
+ * - **The unread line** advances only while the reader has stayed at the bottom
+ *   (`viewingStreak`): arrivals they watched get no line, arrivals while they were away keep it.
+ * - The list stays pinned to the bottom when a lazy image grows it (`@load.capture`).
+ * - **The task discussion** (`routes.read === null`) keeps the old rule: every fetch reads.
+ *
  * The other timer is older and unrelated: it re-reads when the signed attachment links are
  * about to lapse, which is the Phase 2 behaviour and also stops when the tab is hidden.
  */
@@ -134,13 +160,18 @@ const props = withDefaults(
     { heading: null, description: null, scroll: false },
 );
 
-const emit = defineEmits<{ settled: [] }>();
+const emit = defineEmits<{
+    settled: [];
+    /** Messaging polish: this thread has just marked itself read, so the list's counts moved. */
+    read: [];
+}>();
 
 const uid = useId();
 const bodyId = `${uid}-body`;
 const pickerId = `${uid}-file`;
 const hintId = `${uid}-hint`;
 const errorId = `${uid}-error`;
+const progressId = `${uid}-progress`;
 
 /** The thread on screen: the prop on first paint, this component's own fetch after that. */
 const thread = ref<ThreadPayload>(props.thread);
@@ -171,6 +202,20 @@ const pickedError = ref<string | null>(null);
 const serverError = ref<string | null>(null);
 const posting = ref(false);
 const pickerEl = ref<HTMLInputElement | null>(null);
+
+/**
+ * Reliability slice 2b. How far an attachment or a voice note has got (0-100) while it is
+ * going, and — when it got no answer or a 5xx — which of the two is still sitting here waiting
+ * for *Try again*. The composer is never reset on a failure, so the file or the clip is still
+ * the one that goes. Said here and not also as a toast (`mutateMessage`'s `onSendFailed`).
+ */
+const sendProgress = ref<number | null>(null);
+const sendFailed = ref<'voice' | 'file' | null>(null);
+
+const SEND_FAILED_TEXT = {
+    voice: 'Voice note not sent — check your connection. It is still here; try again.',
+    file: 'Upload failed — check your connection. Your file is still here; try again.',
+} as const;
 
 const mentions = useMentions(body);
 
@@ -209,6 +254,7 @@ function grow(): void {
 function clearPicked(): void {
     picked.value = null;
     pickedError.value = null;
+    sendFailed.value = null;
 
     if (pickerEl.value) {
         // A file input's value is not bound, so clearing the model is not clearing the field.
@@ -224,17 +270,123 @@ function resetComposer(): void {
     // `VoiceRecorder` watches both: it revokes the object URL and hands the microphone back.
     voiceClip.value = null;
     voiceActive.value = false;
+    sendFailed.value = null;
 
     void nextTick(grow);
 }
+
+/* ------------------------------------------------------------------ the draft */
+
+/**
+ * Reliability slice 3: the half-typed message survives an F5 and a click elsewhere.
+ *
+ * Kept per signed-in person and per conversation in sessionStorage (`lib/drafts.ts` says why not
+ * localStorage), saved ~400 ms after the last keystroke and flushed when the page is hidden, the
+ * thread switches or this unmounts. Restored on mount and on a switch, with a quiet
+ * "Draft restored." under the composer once. Cleared by a successful send and by emptying the
+ * field. Text only — a picked file or a voice clip cannot survive a reload, which is what the
+ * unsaved-changes guard below is for.
+ */
+const DRAFT_SAVE_MS = 400;
+
+const page = usePage();
+const userId = computed(() => (page.props.auth as { user?: { id?: number } | null } | undefined)?.user?.id ?? null);
+
+function draftKeyFor(conversationId: number | null | undefined): string | null {
+    return messageDraftKey(userId.value, conversationId);
+}
+
+/** The key the composer is writing to right now; moves with the thread. */
+let draftKey: string | null = draftKeyFor(props.thread.conversation_id);
+let draftTimer: ReturnType<typeof setTimeout> | null = null;
+/** What was restored, so the cue goes away as soon as the text is somebody's again. */
+let restoredText: string | null = null;
+const draftRestored = ref(false);
+
+function flushDraft(): void {
+    if (draftTimer === null) {
+        return;
+    }
+
+    clearTimeout(draftTimer);
+    draftTimer = null;
+
+    // Signed out, or moved surface (and so also during the other-user reload, which only runs
+    // from an ended session): what is on screen is not written back for the next person.
+    if (sessionState.status !== 'ok') {
+        return;
+    }
+
+    writeDraft(draftKey, body.value);
+}
+
+function restoreDraft(): void {
+    const text = readDraft(draftKey);
+
+    restoredText = text === '' ? null : text;
+    draftRestored.value = restoredText !== null;
+
+    if (restoredText !== null) {
+        body.value = restoredText;
+        void nextTick(grow);
+    }
+}
+
+watch(body, (text) => {
+    if (restoredText !== null && text !== restoredText) {
+        draftRestored.value = false;
+        restoredText = null;
+    }
+
+    if (draftTimer !== null) {
+        clearTimeout(draftTimer);
+        draftTimer = null;
+    }
+
+    // Emptied: gone now, not in 400 ms — an F5 in between must not bring it back.
+    if (text.trim() === '') {
+        clearDraft(draftKey);
+
+        return;
+    }
+
+    const key = draftKey;
+
+    draftTimer = setTimeout(() => {
+        draftTimer = null;
+
+        if (sessionState.status === 'ok') {
+            writeDraft(key, text);
+        }
+    }, DRAFT_SAVE_MS);
+});
+
+/** The page is going (F5, tab closed, sent to the background): keep what was typed. */
+function onPageHide(): void {
+    flushDraft();
+}
+
+/**
+ * A picked file, a voice clip, or typed text asks before a navigation or an F5 throws it away.
+ * The text is also drafted, but a reload still costs the file or the clip, so the guard asks.
+ */
+useUnsavedGuard(() => picked.value !== null || voiceClip.value !== null || voiceActive.value || body.value.trim() !== '');
 
 function choose(event: Event): void {
     const file = (event.target as HTMLInputElement).files?.[0] ?? null;
 
     picked.value = file;
     serverError.value = null;
+    sendFailed.value = null;
     pickedError.value = file === null ? null : rejectionFor(file);
 }
+
+// A clip discarded or re-recorded is not the one that failed.
+watch(voiceClip, () => {
+    if (sendFailed.value === 'voice') {
+        sendFailed.value = null;
+    }
+});
 
 /**
  * A name was chosen: put `@Name` where the caret was and give the caret straight back.
@@ -294,8 +446,24 @@ function parseAt(value: string | null | undefined): number | null {
     return Number.isNaN(at) ? null : at;
 }
 
-/** Where this reader's line sat when the thread opened. Deliberately old: opening marks read. */
+/** Where this reader's line sat when the thread opened. Deliberately old: reading marks read. */
 const anchor = ref<number | null>(parseAt(props.thread.last_read_at));
+
+/**
+ * Messaging polish: move the line past everything drawn — only when the reader watched it land.
+ * A line already on screen (arrivals from while they were away) is left where it is.
+ */
+function advanceAnchor(messages: ThreadMessage[]): void {
+    const newest = messages.reduce<number | null>((top, message) => {
+        const at = parseAt(message.created_at);
+
+        return at !== null && (top === null || at > top) ? at : top;
+    }, null);
+
+    if (newest !== null && (anchor.value === null || newest > anchor.value)) {
+        anchor.value = newest;
+    }
+}
 
 function isUnread(message: ThreadMessage): boolean {
     if (message.is_mine) {
@@ -372,6 +540,27 @@ function atBottom(): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_MARGIN;
 }
 
+/**
+ * Is the list at its newest message? Tracked on scroll, so a lazy image that grows the list
+ * after a message was drawn can put the reader back where they were (`onMediaLoad`).
+ */
+let pinned = true;
+
+function scrollToBottom(): void {
+    const el = listEl.value;
+
+    if (el !== null) {
+        el.scrollTop = el.scrollHeight;
+    }
+}
+
+/** A lazy image or a voice note finished loading and the list grew under the reader. */
+function onMediaLoad(): void {
+    if (pinned) {
+        scrollToBottom();
+    }
+}
+
 /** Only if they were already there. Somebody reading back through yesterday stays there. */
 function keepAtBottom(wasAtBottom: boolean): void {
     if (!wasAtBottom) {
@@ -384,7 +573,125 @@ function keepAtBottom(wasAtBottom: boolean): void {
         if (el !== null) {
             el.scrollTop = el.scrollHeight;
         }
+
+        pinned = true;
     });
+}
+
+/* ------------------------------------------------------------ on screen, and reading */
+
+/** Task discussion keeps "every fetch reads"; everything under `/messages` tracks reading. */
+const tracksReading = computed(() => props.routes.read !== null);
+
+/** The tab is visible and the window has focus. */
+function onScreen(): boolean {
+    return windowFocused();
+}
+
+/** On screen, and at the newest message. */
+function reading(): boolean {
+    return onScreen() && atBottom();
+}
+
+/**
+ * Has the reader stayed at the bottom, on screen, since the last re-read? Broken by a blur, a
+ * hidden tab or a scroll up; the next re-read starts it again.
+ */
+let viewingStreak = false;
+
+/** Tell the shell whether this conversation is the one on screen. */
+function syncViewing(): void {
+    if (!tracksReading.value) {
+        return;
+    }
+
+    const id = thread.value.conversation_id;
+
+    if (onScreen() && !threadGone.value) {
+        setViewingConversation(id);
+    } else if (isViewingConversation(id)) {
+        setViewingConversation(null);
+    }
+}
+
+function csrfToken(): string {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+let catchingUp = false;
+
+/**
+ * Mark read through the newest message on screen — the reader has just come back to it (focus,
+ * visibility) or scrolled down to it, and a background re-read left something unread. Never
+ * past what is drawn: a message that lands a moment later stays unread until it is seen.
+ */
+async function catchUp(): Promise<void> {
+    const route = props.routes.read;
+
+    if (route === null || catchingUp || posting.value || threadGone.value || !isSessionLive()) {
+        return;
+    }
+
+    if (!reading() || thread.value.unread_count < 1) {
+        return;
+    }
+
+    const through = highestId(thread.value.messages);
+    const conversationId = thread.value.conversation_id;
+
+    if (through < 1) {
+        return;
+    }
+
+    catchingUp = true;
+
+    try {
+        const response = await fetchWithTimeout(route, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify({ through }),
+        });
+
+        if (!response.ok) {
+            // 401 / 419 / a surface 403 is the session module's; anything else waits for the
+            // next re-read, which will say what is still unread.
+            await reportResponse(response);
+
+            return;
+        }
+
+        if (thread.value.conversation_id === conversationId) {
+            thread.value = { ...thread.value, unread_count: 0 };
+        }
+
+        adoptConversationUnread(conversationId, 0);
+        emit('read');
+    } catch {
+        // A dropped connection: the next re-read or return of focus tries again.
+    } finally {
+        catchingUp = false;
+    }
+}
+
+/** The list was scrolled: at the bottom (and on screen) is reading; anywhere else breaks it. */
+function onScroll(): void {
+    pinned = atBottom();
+
+    if (!pinned) {
+        viewingStreak = false;
+
+        return;
+    }
+
+    void catchUp();
 }
 
 /* ------------------------------------------------------------------ reading */
@@ -420,17 +727,40 @@ function keepLoadedHistory(current: ThreadPayload, payload: ThreadPayload): Thre
 }
 
 async function load(before: number | null = null): Promise<void> {
+    // Signed out, or moved to another surface: no read goes out, and the thread keeps what it
+    // shows. The session dialog is the one thing that says so.
+    if (!isSessionLive()) {
+        return;
+    }
+
     const mine = ++token.value;
     const wasAtBottom = before === null && atBottom();
+    const sentAt = Date.now();
+
+    // Messaging polish: read once, so the flag sent and the bookkeeping below agree. `?before=`
+    // never marks on the server; the task discussion sends no flag and every fetch reads.
+    const markRead = before === null && tracksReading.value && reading();
+    // The reader stayed at the bottom since the last re-read — what arrives now, they watched.
+    const watched = before === null && viewingStreak && markRead;
+    const hadUnread = thread.value.unread_count > 0;
 
     refreshing.value = true;
 
     try {
-        const url = before === null ? props.routes.thread : `${props.routes.thread}?before=${before}`;
+        let url = props.routes.thread;
 
-        const response = await fetch(url, {
+        if (before !== null) {
+            url = `${url}?before=${before}`;
+        } else if (tracksReading.value) {
+            url = `${url}?read=${markRead ? 1 : 0}`;
+        }
+
+        const response = await fetchWithTimeout(url, {
             credentials: 'same-origin',
-            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
         });
 
         if (mine !== token.value) {
@@ -438,6 +768,11 @@ async function load(before: number | null = null): Promise<void> {
         }
 
         if (!response.ok) {
+            // The session ended, or the role changed: not this thread's failure to report.
+            if (await reportResponse(response)) {
+                return;
+            }
+
             // 404 is "you may not see this conversation", said the way the backend says it
             // everywhere. There is no 403 to tell it apart from.
             loadError.value = response.status === 404
@@ -448,7 +783,15 @@ async function load(before: number | null = null): Promise<void> {
             // else — a dropped connection, a 500 — is worth the next tick.
             threadGone.value = response.status === 404;
 
+            if (before === null && response.status >= 500) {
+                threadGate.fail(sentAt);
+            }
+
             return;
+        }
+
+        if (before === null) {
+            threadGate.succeed();
         }
 
         const payload = (await response.json()) as ThreadPayload;
@@ -458,9 +801,28 @@ async function load(before: number | null = null): Promise<void> {
         }
 
         if (before === null) {
+            const freshFromOthers = payload.messages.some((message) => message.id > seen && !message.is_mine);
+            // Arrivals the reader watched get no unread line; a line already drawn stays.
+            const advance = watched && reading() && firstUnreadId.value === null;
+
             announce(payload.messages);
             thread.value = keepLoadedHistory(thread.value, payload);
             keepAtBottom(wasAtBottom);
+
+            if (advance) {
+                advanceAnchor(payload.messages);
+            }
+
+            viewingStreak = reading();
+
+            if (tracksReading.value) {
+                adoptConversationUnread(payload.conversation_id, payload.unread_count);
+
+                // Marked something the list still counts: let it re-read its numbers.
+                if (markRead && (hadUnread || freshFromOthers)) {
+                    emit('read');
+                }
+            }
         } else {
             // Older history, prepended. `seen` is untouched: nothing here is new.
             thread.value = {
@@ -472,6 +834,10 @@ async function load(before: number | null = null): Promise<void> {
 
         loadError.value = null;
     } catch {
+        if (before === null) {
+            threadGate.fail(sentAt);
+        }
+
         if (mine === token.value) {
             loadError.value = 'The conversation could not be loaded.';
         }
@@ -516,9 +882,21 @@ defineExpose({ refresh: () => load() });
  * would only decide the winner by network timing), and a conversation the server has already
  * refused.
  */
+/**
+ * Reliability slice 2a: the thread used to retry every ten seconds for ever against a server
+ * that was not answering. Healthy, every tick reads; after a failed read the next waits twice as
+ * long, up to five minutes, and the browser coming back online reads at once (`useLiveRefresh`
+ * pings on reconnect, and the gate opens on the same event).
+ */
+const threadGate = backoff(THREAD_POLL_MS);
+
 const live = useLiveRefresh(
     () => conversationChannel(thread.value.conversation_id),
-    () => void load(),
+    () => {
+        if (threadGate.ready()) {
+            void load();
+        }
+    },
     {
         intervalMs: THREAD_POLL_MS,
         canRefresh: () => !posting.value && !threadGone.value,
@@ -534,7 +912,11 @@ watch(
             announcement.value = '';
             actionStatus.value = '';
             loadError.value = null;
+            // The old thread keeps its draft; the new one brings its own back.
+            flushDraft();
             resetComposer();
+            draftKey = draftKeyFor(id);
+            restoreDraft();
             thread.value = payload;
 
             void load();
@@ -547,6 +929,22 @@ watch(
         announce(payload.messages);
         thread.value = payload;
         keepAtBottom(wasAtBottom);
+    },
+);
+
+// A thread switch (or a refusal) changes which conversation is on screen.
+watch(
+    () => [thread.value.conversation_id, threadGone.value] as const,
+    ([, gone], [previousId]) => {
+        if (gone || previousId !== thread.value.conversation_id) {
+            if (isViewingConversation(previousId)) {
+                setViewingConversation(null);
+            }
+
+            viewingStreak = false;
+        }
+
+        syncViewing();
     },
 );
 
@@ -596,9 +994,34 @@ function refreshIfStale(): void {
     }
 }
 
+/**
+ * Focus, blur and visibility: say whether this conversation is on screen, and — coming back to
+ * it at the bottom with something a background re-read left unread — catch up (`catchUp()`).
+ *
+ * Wired to window `focus`/`blur` AND `visibilitychange`: browsers disagree about which fires
+ * first when a tab comes back, and `focus` can arrive while the page still reports hidden.
+ * `catchingUp` and `unread_count` make the pair cost one request at most.
+ */
+function onAttentionChange(): void {
+    syncViewing();
+
+    if (!onScreen()) {
+        viewingStreak = false;
+
+        return;
+    }
+
+    void catchUp();
+}
+
 onMounted(() => {
-    // Opening the thread is what marks it read, so this runs even though the messages are
-    // already in hand. `anchor` was taken before it, which keeps the line on screen.
+    // To the bottom FIRST: whether the opening read marks the thread depends on the reader being
+    // at the newest message (`reading()`). `anchor` was taken before it, which keeps the line on
+    // screen.
+    scrollToBottom();
+    pinned = true;
+    syncViewing();
+
     void load();
 
     keepAtBottom(true);
@@ -606,11 +1029,27 @@ onMounted(() => {
 
     ticker = setInterval(refreshIfStale, TICK_MS);
     document.addEventListener('visibilitychange', refreshIfStale);
+    window.addEventListener('focus', onAttentionChange);
+    window.addEventListener('blur', onAttentionChange);
+    document.addEventListener('visibilitychange', onAttentionChange);
+
+    restoreDraft();
+    window.addEventListener('pagehide', onPageHide);
 });
 
 onBeforeUnmount(() => {
     clearInterval(ticker);
     document.removeEventListener('visibilitychange', refreshIfStale);
+    window.removeEventListener('focus', onAttentionChange);
+    window.removeEventListener('blur', onAttentionChange);
+    document.removeEventListener('visibilitychange', onAttentionChange);
+
+    if (tracksReading.value && isViewingConversation(thread.value.conversation_id)) {
+        setViewingConversation(null);
+    }
+
+    flushDraft();
+    window.removeEventListener('pagehide', onPageHide);
 });
 
 /* ------------------------------------------------------------------ writing */
@@ -638,9 +1077,13 @@ function post(): void {
 
     posting.value = true;
     serverError.value = null;
+    sendFailed.value = null;
 
     const file = picked.value;
     const clip = voiceClip.value;
+    const carrying = clip !== null ? 'voice' : file !== null ? 'file' : null;
+
+    sendProgress.value = carrying === null ? null : 0;
     const named = mentions.ids();
     const data: Record<string, FormDataConvertible> = { body: body.value };
 
@@ -662,7 +1105,30 @@ function post(): void {
 
     mutateMessage(props.routes.store, data, {
         forceFormData: file !== null || clip !== null,
+        onProgress: (percent) => {
+            if (carrying !== null) {
+                sendProgress.value = percent;
+            }
+        },
+        // Only a send that carries bytes speaks inline; a text-only send keeps the global
+        // toast, which already says nothing was saved.
+        onSendFailed: carrying === null
+            ? undefined
+            : (kind) => {
+                if (kind === 'too_large') {
+                    serverError.value = TOO_LARGE_TEXT;
+                } else {
+                    sendFailed.value = carrying;
+                }
+            },
         onAccepted: () => {
+            // Sent: the draft goes with it, before anything else can read it back.
+            if (draftTimer !== null) {
+                clearTimeout(draftTimer);
+                draftTimer = null;
+            }
+
+            clearDraft(draftKey);
             resetComposer();
             // Posting marked the thread read server-side; this is what brings the message back
             // with its author, its attachment and a live signed URL on it.
@@ -675,6 +1141,7 @@ function post(): void {
         },
         onFinish: () => {
             posting.value = false;
+            sendProgress.value = null;
         },
     });
 }
@@ -790,6 +1257,9 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         scroll && 'min-h-0 flex-1 overflow-y-auto pr-1',
                     )
                 "
+                @scroll.passive="onScroll"
+                @load.capture="onMediaLoad"
+                @loadedmetadata.capture="onMediaLoad"
             >
                 <EmptyState
                     v-if="thread.messages.length === 0"
@@ -872,19 +1342,9 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     {{ isAnnouncements ? 'Write an announcement' : 'Write a message' }}
                 </Label>
 
-                <Textarea
-                    :id="bodyId"
-                    ref="bodyEl"
-                    v-model="body"
-                    :disabled="posting"
-                    :aria-describedby="fieldError ? `${errorId} ${hintId}` : hintId"
-                    :aria-invalid="fieldError ? true : undefined"
-                    rows="1"
-                    :placeholder="isAnnouncements ? 'Tell everybody.' : 'Say something.'"
-                    class="max-h-40 min-h-9 min-w-0 resize-none overflow-y-auto py-2"
-                    @input="grow"
-                    @keydown.enter="onEnter"
-                />
+                <p v-if="draftRestored" class="text-xs text-muted-foreground" data-testid="draft-restored">
+                    Draft restored.
+                </p>
 
                 <!-- The picker itself is off-screen; the paperclip is the control. -->
                 <Label :for="pickerId" class="sr-only">Attach a file</Label>
@@ -929,60 +1389,125 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     {{ fieldError }}
                 </p>
 
-                <div class="flex min-w-0 flex-wrap items-center gap-2">
-                    <!--
-                        Two roots: the strip, which takes the line above this row (`order-first
-                        basis-full`), and the mic button, which sits at the head of it. It is
-                        **first in the DOM** and not merely first visually, because the strip
-                        holds the preview's four controls and tab order has to walk the composer
-                        the way the eye does (WCAG 2.4.3): strip, then mic, then the paperclip.
-                        On a browser that cannot record, both roots are nothing and this row is
-                        exactly what it was.
-                    -->
-                    <VoiceRecorder
-                        v-model:clip="voiceClip"
-                        v-model:active="voiceActive"
-                        :disabled="posting"
-                        :blocked="micBlocked"
-                    />
+                <!-- How far the attachment or voice note has got; the words carry the number. -->
+                <div v-if="sendProgress !== null" class="flex min-w-0 flex-col gap-1">
+                    <p :id="progressId" class="text-xs text-muted-foreground tabular-nums">
+                        Uploading… {{ sendProgress }}%
+                    </p>
+                    <Progress :model-value="sendProgress" :aria-labelledby="progressId" />
+                </div>
 
-                    <!--
-                        The paperclip stays on screen while a recording is in hand and says why
-                        it is off. A control that disappeared would read as a bug, and §5.12's
-                        "hide rather than disable" is about controls that are *never* available
-                        here — this one is available the moment the recording is discarded.
-                    -->
-                    <TooltipProvider :delay-duration="150">
-                        <Tooltip>
-                            <TooltipTrigger as-child>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    :disabled="posting || attachBlocked"
-                                    :aria-label="
-                                        attachBlocked
-                                            ? 'Attach a file (unavailable: discard the voice message first)'
-                                            : 'Attach a file'
-                                    "
-                                    @click="pickerEl?.click()"
-                                >
-                                    <Paperclip aria-hidden="true" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                {{ attachBlocked ? 'Discard the voice message first' : 'Attach a file' }}
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
+                <!-- No answer, or a 5xx. The composer was not reset: the same bytes go again. -->
+                <div
+                    v-if="sendFailed"
+                    role="alert"
+                    class="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                >
+                    <p class="flex items-start gap-2 text-xs text-destructive">
+                        <CircleAlert class="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                        {{ SEND_FAILED_TEXT[sendFailed] }}
+                    </p>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        class="shrink-0"
+                        :disabled="posting || stillRecording"
+                        @click="post"
+                    >
+                        <RefreshCw aria-hidden="true" />
+                        Try again
+                    </Button>
+                </div>
 
-                    <MentionPicker
-                        :people="thread.mentionable"
-                        :disabled="posting"
-                        @pick="mention"
-                    />
+                <!--
+                    Messaging polish: the composer is ONE pill (DESIGN.md §1.7b) — Attach, the
+                    textarea, the mic and "@ Mentions" inside it, and Send joined to its right end
+                    as a `--primary` segment. The textarea has no border or ring of its own; the
+                    focus ring is painted on the pill, opaque as always. Below `sm` the words go
+                    and the icons stay, each keeping its accessible name.
 
-                    <span class="flex-1" aria-hidden="true" />
+                    `VoiceRecorder` has two roots: its strip (`order-first basis-full`) takes a
+                    line of its own at the top of the pill while a clip is in hand, and the mic
+                    sits after the textarea.
+                -->
+                <div
+                    data-testid="composer-pill"
+                    :class="
+                        cn(
+                            'flex min-w-0 items-stretch rounded-3xl border border-input bg-card shadow-flat transition-[color,box-shadow]',
+                            'has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-3 has-[textarea:focus-visible]:ring-ring',
+                            fieldError && 'border-destructive',
+                        )
+                    "
+                >
+                    <div class="flex min-w-0 flex-1 flex-wrap items-end gap-1 py-1 pl-1 sm:pl-1.5">
+                        <!--
+                            The paperclip stays on screen while a recording is in hand and says
+                            why it is off. A control that disappeared would read as a bug, and
+                            §5.12's "hide rather than disable" is about controls that are *never*
+                            available here — this one is available the moment the recording is
+                            discarded.
+                        -->
+                        <TooltipProvider :delay-duration="150">
+                            <Tooltip>
+                                <TooltipTrigger as-child>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        class="h-8 shrink-0 gap-1.5 rounded-full px-2 text-muted-foreground hover:text-foreground sm:h-9 sm:px-2.5"
+                                        :disabled="posting || attachBlocked"
+                                        :aria-label="
+                                            attachBlocked
+                                                ? 'Attach a file (unavailable: discard the voice message first)'
+                                                : 'Attach a file'
+                                        "
+                                        @click="pickerEl?.click()"
+                                    >
+                                        <Paperclip aria-hidden="true" />
+                                        <span class="hidden sm:inline" aria-hidden="true">Attach</span>
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {{ attachBlocked ? 'Discard the voice message first' : 'Attach a file' }}
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+
+                        <Textarea
+                            :id="bodyId"
+                            ref="bodyEl"
+                            v-model="body"
+                            :disabled="posting"
+                            :aria-describedby="fieldError ? `${errorId} ${hintId}` : hintId"
+                            :aria-invalid="fieldError ? true : undefined"
+                            rows="1"
+                            :placeholder="isAnnouncements ? 'Tell everybody.' : 'Say something.'"
+                            class="max-h-40 min-h-9 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-2 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
+                            @input="grow"
+                            @keydown.enter="onEnter"
+                        />
+
+                        <!--
+                            Two roots: the strip, which takes a line of its own at the top of the
+                            pill (`order-first basis-full`), and the mic button. On a browser that
+                            cannot record, both roots are nothing.
+                        -->
+                        <VoiceRecorder
+                            v-model:clip="voiceClip"
+                            v-model:active="voiceActive"
+                            :disabled="posting"
+                            :blocked="micBlocked"
+                        />
+
+                        <MentionPicker
+                            :people="thread.mentionable"
+                            :disabled="posting"
+                            labelled
+                            @pick="mention"
+                        />
+                    </div>
 
                     <!--
                         Held while the microphone is open: nothing is uploaded mid-recording, and
@@ -990,25 +1515,22 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     -->
                     <Button
                         type="submit"
-                        size="sm"
-                        class="shrink-0"
+                        class="h-auto min-h-10 shrink-0 gap-1.5 self-stretch rounded-l-none rounded-r-3xl px-3 sm:px-4"
                         :disabled="posting || stillRecording"
-                        :aria-label="stillRecording ? 'Send (unavailable while recording)' : undefined"
+                        :aria-label="stillRecording ? 'Send (unavailable while recording)' : posting ? 'Sending' : 'Send'"
                     >
                         <Send aria-hidden="true" />
-                        {{ posting ? 'Sending…' : 'Send' }}
+                        <span class="hidden sm:inline" aria-hidden="true">{{ posting ? 'Sending…' : 'Send' }}</span>
                     </Button>
                 </div>
 
                 <!--
-                    The shortcut is stated rather than discovered. Enter sending is a CHANGE, it
-                    applies to the task discussion too, and somebody who finds it out by losing a
-                    half-written paragraph has been told by the wrong teacher.
+                    The shortcut is stated rather than discovered — shorter since the pill, but
+                    still said out loud: Enter sending applies to the task discussion too.
                 -->
                 <p :id="hintId" class="min-w-0 text-xs text-muted-foreground">
-                    Enter sends · Shift + Enter starts a new line · Ctrl or ⌘ with Enter also
-                    sends · up to {{ FILE_MAX_LABEL }} per file · voice messages up to
-                    {{ VOICE_MAX_LABEL }} ·
+                    Enter sends · Shift + Enter for a new line · up to {{ FILE_MAX_LABEL }} per file ·
+                    voice up to {{ VOICE_MAX_LABEL }} ·
                     <span :class="remaining < 0 ? 'text-destructive' : undefined">
                         <span class="tabular-nums">{{ remaining }}</span> characters left
                     </span>

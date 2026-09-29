@@ -5,6 +5,8 @@ import type { TaskNamedRef } from '@/Components/Tasks/TaskList.vue';
 import type { TaskDetail, TaskSurface } from '@/Components/Tasks/taskDetail';
 import { focusField, initials, mutateTask, taskRoutes } from '@/Components/Tasks/taskDetail';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
+import { personTone } from '@/Components/Messages/people';
+import { cn } from '@/lib/utils';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
 import { Checkbox } from '@/Components/ui/checkbox';
@@ -203,7 +205,7 @@ defineExpose({ openHandOff });
             <ul v-else class="flex min-w-0 flex-col gap-2">
                 <li v-for="assignee in task.assignees" :key="assignee.id" class="flex min-w-0 items-center gap-2">
                     <Avatar class="size-7 shrink-0">
-                        <AvatarFallback class="text-xs">{{ initials(assignee.name) }}</AvatarFallback>
+                        <AvatarFallback :class="cn('text-xs', personTone(assignee.id).avatar)">{{ initials(assignee.name) }}</AvatarFallback>
                     </Avatar>
                     <span class="min-w-0 flex-1 text-sm break-words">{{ assignee.name ?? '—' }}</span>
                     <!-- The word, not just the star: colour and shape are never the only carrier. -->

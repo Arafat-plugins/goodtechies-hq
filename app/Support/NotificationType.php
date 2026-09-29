@@ -133,6 +133,19 @@ enum NotificationType: string
     case MeetingCancelled = 'meeting.cancelled';
 
     /**
+     * The kinds that are about a message. Messaging polish: these have their own header icon
+     * (`Components/Shell/MessagesButton.vue`, counting unread conversations) and stay out of the
+     * bell, so the bell is about work and the envelope is about talk. A mention inside a TASK
+     * discussion is the exception the bell keeps — see `Notification::scopeForBell()`.
+     *
+     * @return list<self>
+     */
+    public static function messageTypes(): array
+    {
+        return [self::MessageReceived, self::MessageMentioned, self::AnnouncementPosted];
+    }
+
+    /**
      * It starts in fifteen minutes (Part D §12: *"reminder 15 min before"*).
      *
      * The only meeting type that goes to the **organiser as well**, because it is the only one

@@ -22,6 +22,7 @@ import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { Textarea } from '@/Components/ui/textarea';
+import { useUnsavedGuard } from '@/lib/unsavedGuard';
 
 /**
  * Record money, or correct a record of it. **One component for create and for edit, and one for
@@ -186,9 +187,19 @@ watch(
 
         const project = (record as IncomeRecord | null)?.project ?? null;
         form.project_id = project ? String(project.id) : NO_PROJECT;
+
+        // What the dialog opened with is the baseline for "unsaved" (reliability slice 3).
+        form.defaults();
     },
     { immediate: true },
 );
+
+/**
+ * Reliability slice 3: typed-in, unsaved figures are not lost to a sidebar click or an F5.
+ * Cancel and Esc navigate back to the ledger, so they ask too — and a "stay" keeps the dialog
+ * open, because `open` comes from the URL and the URL did not change.
+ */
+useUnsavedGuard(() => props.open && form.isDirty);
 </script>
 
 <template>

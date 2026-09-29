@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { router } from '@inertiajs/vue3';
-import { LogIn, LogOut } from '@lucide/vue';
+import { CircleAlert, LogIn, LogOut, RotateCw } from '@lucide/vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { AttendanceDay } from '@/Components/Attendance/attendance';
 import { attendanceRoutes, formatMinutes, noStatusLabel } from '@/Components/Attendance/attendance';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import { inlineUploadFailure } from '@/lib/net';
 
 /**
  * Clock In / Clock Out, and today's status.
@@ -53,6 +54,20 @@ const props = defineProps<{
 }>();
 
 const busy = ref(false);
+
+/**
+ * Reliability slice 4: the clock-in or clock-out that did not reach goodERP.
+ *
+ * Said here, beside the button, with a *Try again* that resends the same action — and not also
+ * toasted: slice 2's global handler is opted out of for this one visit (`inlineUploadFailure`,
+ * the same per-visit opt-out the uploads use), so the failure is told once. There is no offline
+ * queue on purpose: the server's time is the record, so a clock-in is only true once the server
+ * has it, and a queued one would be a time nobody can vouch for.
+ */
+const CLOCK_IN_FAILED_TEXT = "Couldn't reach goodERP, so you are not clocked in yet.";
+const CLOCK_OUT_FAILED_TEXT = "Couldn't reach goodERP, so you are not clocked out yet.";
+
+const failed = ref<{ url: string; text: string } | null>(null);
 
 /** Clocked in and not yet out. The only state in which Clock out is the next thing to do. */
 const isOpen = computed(() => props.today.clock_in !== null && props.today.clock_out === null);
@@ -114,21 +129,37 @@ function clock(url: string): void {
 
     busy.value = true;
 
+    const text = url === attendanceRoutes.clockOut ? CLOCK_OUT_FAILED_TEXT : CLOCK_IN_FAILED_TEXT;
+
     router.post(
         url,
         {},
         {
             preserveScroll: true,
+            // No answer or a 5xx: shown inline below. A 401 / 419 / 403 falls through to the
+            // global handler, so the session dialog still speaks.
+            ...inlineUploadFailure(() => {
+                failed.value = { url, text };
+            }),
+            onSuccess: () => {
+                failed.value = null;
+            },
             onFinish: () => {
                 busy.value = false;
             },
         },
     );
 }
+
+function retry(): void {
+    if (failed.value !== null) {
+        clock(failed.value.url);
+    }
+}
 </script>
 
 <template>
-    <Card v-if="canClock" class="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+    <Card v-if="canClock" class="flex flex-col gap-4 p-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:p-6">
         <div class="flex min-w-0 flex-col gap-2">
             <p class="text-sm font-medium">Today</p>
 
@@ -166,6 +197,21 @@ function clock(url: string): void {
             </Button>
 
             <p v-else class="text-sm text-muted-foreground">Clocked out for the day.</p>
+        </div>
+
+        <div
+            v-if="failed"
+            role="alert"
+            class="flex w-full flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 sm:basis-full sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+        >
+            <p class="flex items-start gap-2 text-xs text-destructive">
+                <CircleAlert class="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                {{ failed.text }}
+            </p>
+            <Button type="button" size="sm" variant="outline" class="h-11 shrink-0 sm:h-9" :disabled="busy" @click="retry">
+                <RotateCw class="size-4" aria-hidden="true" />
+                Try again
+            </Button>
         </div>
     </Card>
 </template>

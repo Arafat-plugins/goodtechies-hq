@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Requests\Finance\FinanceReportRequest;
 use App\Models\Employee;
 use App\Models\Income;
@@ -8,6 +9,7 @@ use App\Models\User;
 use App\Services\FinanceService;
 use App\Support\RoleName;
 use Database\Factories\IncomeFactory;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -113,7 +115,11 @@ function financeReportQueriesFor(User $user, string $url): array
     DB::flushQueryLog();
     DB::enableQueryLog();
 
-    $response = test()->actingAs($user)->get($url);
+    // An Inertia navigation, not a document load: a document now carries the shell's inbox, whose policy eager-load (`select * from "projects" where id in …`) matches this filter without touching the books.
+    $response = test()->actingAs($user)->get($url, [
+        'X-Inertia' => 'true',
+        'X-Inertia-Version' => (string) app(HandleInertiaRequests::class)->version(Request::create('/')),
+    ]);
 
     $touchesTheBooks = function (string $sql): bool {
         foreach (FINANCE_REPORT_TABLES as $table) {

@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -79,14 +80,14 @@ class MessageController extends Controller
         $latest = $this->conversations->latestMessages($conversations);
         $unread = $this->conversations->unreadCounts($user, $conversations);
 
-        $active = $this->requestedConversation($request, $conversations);
+        $active = $this->requestedConversation($request, $conversations, $latest, $unread);
 
-        if ($active !== null) {
-            // Opening a thread is what marks it read — the same event `last_read_at` records
-            // for a task discussion. The unread counts above were taken BEFORE this, so the
-            // list still shows the reader where they were when they arrived.
-            $this->conversations->markRead($user, $active);
-        }
+        // Messaging polish: rendering the page does NOT mark the open thread read. A page loaded
+        // into a background tab, or re-read by the rail's poll, has not been read by anybody.
+        // The thread marks itself once somebody is actually looking at it — `GET
+        // /messages/{id}?read=1` or `POST /messages/{id}/read` with `through` — which is what
+        // `MessageThread.vue` decides from focus, visibility and scroll position. This replaces
+        // reliability slice 5's `X-HQ-Focused` gating here.
 
         return Inertia::render('Shared/Messages', [
             'conversations' => $conversations
@@ -97,7 +98,14 @@ class MessageController extends Controller
                     $unread[(int) $conversation->getKey()] ?? 0,
                 ))
                 ->all(),
-            'active' => $active === null ? null : $this->threadPayload($request, $active),
+            // A closure (slow-loading slice 6): the whole thread, its mention list and a signed
+            // URL per attachment are built only when the response carries `active` — a visit, or
+            // a partial reload that names it. The rail's 15-second poll and the shell's 30-second
+            // one ask for other props and used to pay for all of it anyway (decision M-36).
+            // Which thread is open was decided above and outside this closure (so `?unread=1`
+            // picks it from the same counts either way): the inbox is the policy-checked list,
+            // so nothing here can reach a conversation that list did not already allow.
+            'active' => fn (): ?array => $active === null ? null : $this->threadPayload($request, $active),
             'announcement' => $this->banner($user),
             'people' => $this->messageablePeople($user),
         ]);
@@ -168,6 +176,15 @@ class MessageController extends Controller
      * built and never one assembled from a broadcast frame.
      *
      * `?before=` walks backwards through the history a window at a time.
+     *
+     * ## When it marks read (messaging polish)
+     *
+     * - `?read=1` — the reader is looking at the thread and is at its newest message: mark it.
+     * - `?read=0` — a background re-read (the tab is behind another window, or the reader is up
+     *   in the history): answer, and leave the unread line where it is.
+     * - `?before=` — older history is never "new", so walking back never marks anything.
+     * - no parameter — the old behaviour, which marks (decision 6-31; tests and callers that
+     *   predate the flag depend on it).
      */
     public function show(Request $request, Conversation $conversation): JsonResponse
     {
@@ -176,9 +193,11 @@ class MessageController extends Controller
 
         $conversation = $this->visibleConversation($request, $conversation);
 
-        $this->conversations->markRead($user, $conversation);
-
         $before = $request->integer('before');
+
+        if ($before < 1 && $request->query('read') !== '0') {
+            $this->conversations->markRead($user, $conversation);
+        }
 
         return response()->json($this->threadPayload($request, $conversation, $before > 0 ? $before : null));
     }
@@ -316,22 +335,28 @@ class MessageController extends Controller
     }
 
     /**
-     * Move this person's unread line to now.
+     * Move this person's unread line to now — or, with `through`, to that message.
      *
-     * Its own endpoint because reading is its own act: the page marks a thread read when it is
-     * opened, and a screen that has been sitting open while somebody else typed needs a way to
-     * say "I have seen that" that is not posting a reply.
+     * Its own endpoint because reading is its own act: a screen that has been sitting open while
+     * somebody else typed needs a way to say "I have seen that" that is not posting a reply.
+     *
+     * Messaging polish: `through=<message id>` marks read up to the newest message the screen has
+     * actually drawn and no further, and never backwards (`ConversationService::markRead()`); an
+     * id from another conversation — or anything that is not a message id — marks nothing. A
+     * JSON caller (the thread's catch-up) gets 204; a form post still goes back.
      */
-    public function read(Request $request, Conversation $conversation): RedirectResponse
+    public function read(Request $request, Conversation $conversation): RedirectResponse|HttpResponse
     {
         /** @var User $user */
         $user = $request->user();
 
-        $this->conversations->markRead($user, $this->visibleConversation($request, $conversation));
+        $through = $request->has('through') ? $request->integer('through') : null;
+
+        $this->conversations->markRead($user, $this->visibleConversation($request, $conversation), $through);
 
         // Nothing is announced. Marking something read is not news, and the count going quiet
         // is the feedback — decision 2-40, applied to the other kind of unread line.
-        return back();
+        return $request->expectsJson() ? response()->noContent() : back();
     }
 
     /**
@@ -465,9 +490,15 @@ class MessageController extends Controller
      * whole screen because one query parameter was stale. A stale `?conversation=` is what a
      * bookmark to a project you have since left looks like, and that is not an error.
      *
+     * Messaging polish: `?unread=1` (the top bar's Messages icon) opens the unread conversation
+     * whose newest message is the newest, read from the counts and latest messages the page has
+     * already fetched. With nothing unread it falls through to the default below.
+     *
      * @param  Collection<int, Conversation>  $inbox
+     * @param  Collection<int, Message>  $latest
+     * @param  array<int, int>  $unread
      */
-    private function requestedConversation(Request $request, $inbox): ?Conversation
+    private function requestedConversation(Request $request, $inbox, $latest, array $unread): ?Conversation
     {
         $id = $request->integer('conversation');
 
@@ -476,6 +507,23 @@ class MessageController extends Controller
 
             if ($found !== null) {
                 return $found;
+            }
+        }
+
+        if ($id < 1 && $request->boolean('unread')) {
+            $newest = $inbox
+                ->filter(fn (Conversation $conversation): bool => ($unread[(int) $conversation->getKey()] ?? 0) > 0)
+                ->sortByDesc(function (Conversation $conversation) use ($latest): string {
+                    /** @var Message|null $message */
+                    $message = $latest->get($conversation->getKey());
+
+                    // Zero-padded id after the timestamp keeps the order total within a second.
+                    return ($message?->created_at?->format('Y-m-d H:i:s.u') ?? '').sprintf('%020d', (int) $message?->getKey());
+                })
+                ->first();
+
+            if ($newest !== null) {
+                return $newest;
             }
         }
 

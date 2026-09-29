@@ -1,0 +1,219 @@
+import type { Ref } from 'vue';
+import { computed, ref } from 'vue';
+import { isSessionLive } from '@/lib/session';
+
+/**
+ * The chime for something new — reliability slice 5.
+ *
+ * Somebody with goodERP open behind another window hears a short chime when the bell's unread
+ * count or the Messages unread total goes UP. Off by default, switched on per person on the
+ * Profile page. The client chose this over a tab-title count and desktop pop-ups; there is no
+ * Notification API, no service worker and no push here, by design (Part H).
+ *
+ * **Stored per browser, not on the server.** There is no per-person preference store to put it
+ * in — `notification_preferences` is the Admin's global defaults and has no `user_id`, and
+ * `users` / `employees` carry no JSON column — and a new column or Settings key would need a
+ * migration or a recorded decision. So it is `localStorage` key `hq.sound.<userId>`, and the
+ * Profile hint says "Saved on this device". Every storage call is wrapped (DESIGN.md §5.9).
+ *
+ * The tone is generated with the Web Audio API — two short soft sine tones, ~250 ms, modest
+ * gain — so there is no audio file and no dependency. A browser that blocks audio until the
+ * page has had a gesture simply stays silent; the Profile page's *Play a test sound* is such a
+ * gesture, and it also resumes the one shared `AudioContext`.
+ */
+
+/* ------------------------------------------------------------------ the preference */
+
+const KEY_PREFIX = 'hq.sound.';
+
+/** `userId → on`, so every mount of the toggle reads the same answer. */
+const cache = ref<Record<number, boolean>>({});
+
+function storageKey(userId: number): string {
+    return `${KEY_PREFIX}${userId}`;
+}
+
+export function readSoundEnabled(userId: number): boolean {
+    if (userId in cache.value) {
+        return cache.value[userId];
+    }
+
+    let on = false;
+
+    try {
+        on = window.localStorage.getItem(storageKey(userId)) === '1';
+    } catch {
+        on = false;
+    }
+
+    cache.value = { ...cache.value, [userId]: on };
+
+    return on;
+}
+
+export function writeSoundEnabled(userId: number, on: boolean): void {
+    cache.value = { ...cache.value, [userId]: on };
+
+    try {
+        if (on) {
+            window.localStorage.setItem(storageKey(userId), '1');
+        } else {
+            window.localStorage.removeItem(storageKey(userId));
+        }
+    } catch {
+        // Private mode: the switch still works for this page's lifetime.
+    }
+}
+
+/** A writable ref over this person's switch. */
+export function useSoundPreference(userId: number): Ref<boolean> {
+    return computed({
+        get: () => readSoundEnabled(userId),
+        set: (on: boolean) => writeSoundEnabled(userId, on),
+    });
+}
+
+/* ------------------------------------------------------------------ the tone */
+
+let context: AudioContext | null = null;
+
+function audioContext(): AudioContext | null {
+    if (context !== null) {
+        return context;
+    }
+
+    const Ctor = typeof window === 'undefined'
+        ? undefined
+        : (window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
+
+    if (Ctor === undefined) {
+        return null;
+    }
+
+    try {
+        context = new Ctor();
+    } catch {
+        context = null;
+    }
+
+    return context;
+}
+
+function tone(ctx: AudioContext, frequency: number, startAt: number, duration: number): void {
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(frequency, startAt);
+
+    // A soft attack and an exponential fade, so neither edge clicks.
+    gain.gain.setValueAtTime(0.0001, startAt);
+    gain.gain.exponentialRampToValueAtTime(0.08, startAt + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start(startAt);
+    oscillator.stop(startAt + duration + 0.02);
+}
+
+/** Two short tones, ~250 ms. Silent — never an error — when the browser will not play. */
+export function playChime(): void {
+    try {
+        const ctx = audioContext();
+
+        if (ctx === null) {
+            return;
+        }
+
+        if (ctx.state === 'suspended') {
+            void ctx.resume().catch(() => undefined);
+        }
+
+        const now = ctx.currentTime;
+
+        tone(ctx, 880, now, 0.11);
+        tone(ctx, 1318.5, now + 0.12, 0.13);
+    } catch {
+        // Blocked or unsupported: the chime is a courtesy, not a channel.
+    }
+}
+
+/* ------------------------------------------------------------------ when it plays */
+
+export type ChimeSource = 'bell' | 'messages';
+
+/** At most one chime in this window, whichever count rose. */
+export const CHIME_QUIET_MS = 10_000;
+
+/**
+ * One DM is TWO rises: the bell gains a *message.received* notification and the Messages total
+ * goes up — read by different polls (15 s and 30 s) that can land up to one shell interval apart.
+ * So a rise in the OTHER count within this window of a chime is the same arrival and stays quiet;
+ * the same count rising again after `CHIME_QUIET_MS` is a new arrival and chimes.
+ */
+export const CHIME_SAME_ARRIVAL_MS = 30_000;
+
+let boundUser: number | null = null;
+const previous: Record<ChimeSource, number | null> = { bell: null, messages: null };
+let lastChimeAt = 0;
+let lastChimeSource: ChimeSource | null = null;
+
+/**
+ * Who is signed in on this page. Called from the shell's composables, which have the page
+ * props; a different person resets the baselines so their first read is not "new".
+ */
+export function bindChimeUser(userId: number | null): void {
+    if (userId === boundUser) {
+        return;
+    }
+
+    boundUser = userId;
+    previous.bell = null;
+    previous.messages = null;
+}
+
+/**
+ * Move a count's baseline without playing anything: the count changed for a reason that is not an
+ * arrival. Messaging polish — the Messages count leaves out the conversation on screen, so
+ * looking away from a thread with something unread in it raises the count with nothing new.
+ */
+export function rebaseUnread(source: ChimeSource, count: number): void {
+    if (previous[source] !== null) {
+        previous[source] = count;
+    }
+}
+
+/**
+ * A successful read of an unread count. Plays when it went UP compared with the previous read
+ * of the same count — never on the first read, never on a fall, at most once per
+ * `CHIME_QUIET_MS` (and not for the other half of one DM — `CHIME_SAME_ARRIVAL_MS`), never
+ * while the session is not `ok`, and only with the switch on.
+ */
+export function noteUnread(source: ChimeSource, count: number): void {
+    const before = previous[source];
+
+    previous[source] = count;
+
+    if (before === null || count <= before) {
+        return;
+    }
+
+    if (!isSessionLive() || boundUser === null || !readSoundEnabled(boundUser)) {
+        return;
+    }
+
+    const now = Date.now();
+
+    if (now - lastChimeAt < CHIME_QUIET_MS) {
+        return;
+    }
+
+    if (lastChimeSource !== null && lastChimeSource !== source && now - lastChimeAt < CHIME_SAME_ARRIVAL_MS) {
+        return;
+    }
+
+    lastChimeAt = now;
+    lastChimeSource = source;
+    playChime();
+}

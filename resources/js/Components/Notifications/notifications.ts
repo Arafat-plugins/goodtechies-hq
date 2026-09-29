@@ -3,6 +3,9 @@ import { ChevronDown, ChevronUp, Minus } from '@lucide/vue';
 import type { Component, Ref } from 'vue';
 import { computed, onScopeDispose, ref, watch } from 'vue';
 import { listenPrivate, realtimeConnection, realtimeMode, realtimeReconnects } from '@/echo';
+import { backoff, fetchWithTimeout, onReconnect } from '@/lib/net';
+import { isSessionLive, reportResponse, sessionState } from '@/lib/session';
+import { bindChimeUser, noteUnread } from '@/lib/sound';
 
 /**
  * The notification payloads, the endpoints that serve them, and the one poll behind the bell.
@@ -267,6 +270,26 @@ export type BellStatus = 'idle' | 'loading' | 'ready' | 'failed' | 'denied';
 
 const status = ref<BellStatus>('idle');
 
+/**
+ * Reliability slice 2b: the bell's own staleness. `status` stays `ready` once the bell holds
+ * rows (a failed poll must not blank a list that is still worth reading), so it cannot say the
+ * list is old. `stale` does: the latest poll failed — no answer, a timeout or a non-2xx — and
+ * what is on screen is from `lastReadAt`, the last read that landed. The next success clears it.
+ */
+const stale = ref(false);
+const lastReadAt = ref<number | null>(null);
+
+const CLOCK = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+/** `Couldn't refresh…` with the clock time of the last good read, or `null` while fresh. */
+const staleLine = computed(() => {
+    if (!stale.value || lastReadAt.value === null || recent.value.length === 0) {
+        return null;
+    }
+
+    return `Couldn't refresh. Showing what was here at ${CLOCK.format(lastReadAt.value)}.`;
+});
+
 let timer: ReturnType<typeof setInterval> | null = null;
 let listening = false;
 let inFlight = false;
@@ -341,28 +364,51 @@ function apply(payload: NotificationRecent): void {
     unreadCount.value = payload.unread_count;
     recent.value = payload.notifications;
     status.value = 'ready';
+    stale.value = false;
+    lastReadAt.value = Date.now();
 
     announce(payload.unread_count);
+    // Reliability slice 5: a rise since the last successful read may chime (`lib/sound.ts`).
+    noteUnread('bell', payload.unread_count);
 }
+
+/**
+ * Reliability slice 2a: the bell's backoff. Healthy, every tick reads; after a failed read (no
+ * answer, a timeout, a 5xx) the next waits two ticks, then four, up to five minutes. The browser
+ * coming back online reads at once.
+ */
+const gate = backoff(POLL_MS);
 
 async function read(): Promise<void> {
     // One in flight. A tick that arrives while the last answer is still coming is a tick the
     // server does not need to hear about.
-    if (inFlight || status.value === 'denied') {
+    if (inFlight || status.value === 'denied' || !isSessionLive() || !gate.ready()) {
         return;
     }
 
     inFlight = true;
+
+    const sentAt = Date.now();
 
     if (status.value === 'idle') {
         status.value = 'loading';
     }
 
     try {
-        const response = await fetch(notificationRoutes.recent, {
+        const response = await fetchWithTimeout(notificationRoutes.recent, {
             credentials: 'same-origin',
             headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         });
+
+        // The session ended, or the role changed under the page: the session module says so,
+        // once, for every reader. The bell keeps the last thing it was told and goes quiet.
+        if (await reportResponse(response)) {
+            if (status.value === 'loading') {
+                status.value = 'idle';
+            }
+
+            return;
+        }
 
         if (response.status === 403) {
             status.value = 'denied';
@@ -374,15 +420,22 @@ async function read(): Promise<void> {
         }
 
         if (!response.ok) {
-            // 401 or 419 means the session went; a poll is not the place to say so, and the
-            // next thing this person clicks will land them on the login page by itself.
             status.value = 'failed';
+            stale.value = true;
+
+            if (response.status >= 500) {
+                gate.fail(sentAt);
+            }
 
             return;
         }
 
         apply((await response.json()) as NotificationRecent);
+        gate.succeed();
     } catch {
+        gate.fail(sentAt);
+        stale.value = true;
+
         // Offline, or a request cancelled by a navigation. The badge keeps the last number it
         // was told rather than dropping to zero, which would be a lie in the quietest possible
         // direction.
@@ -392,10 +445,17 @@ async function read(): Promise<void> {
     }
 }
 
+// The network is back: one read now, while the bell is polling.
+onReconnect(() => {
+    if (timer !== null) {
+        void read();
+    }
+});
+
 function startPolling(): void {
     // Not while the socket is up. This is the one place that decides, so a bell cannot end up
     // both subscribed and polling — which would not be wrong, only wasteful and invisible.
-    if (timer !== null || !pageVisible() || status.value === 'denied' || bellTransport.value === 'live') {
+    if (timer !== null || !pageVisible() || !isSessionLive() || status.value === 'denied' || bellTransport.value === 'live') {
         return;
     }
 
@@ -408,6 +468,24 @@ function stopPolling(): void {
         timer = null;
     }
 }
+
+// Signed out, or moved to another surface: the bell's interval stops. Signed back in: one
+// immediate read, then the interval again — but only while a bell is mounted.
+watch(
+    () => sessionState.status,
+    (session) => {
+        if (session !== 'ok') {
+            stopPolling();
+
+            return;
+        }
+
+        if (watchers > 0 && pageVisible()) {
+            void read();
+            startPolling();
+        }
+    },
+);
 
 function onVisibilityChange(): void {
     if (!pageVisible()) {
@@ -437,6 +515,7 @@ export function useNotificationBell(): {
     recent: Readonly<Ref<NotificationRow[]>>;
     status: Readonly<Ref<BellStatus>>;
     transport: Readonly<Ref<BellTransport>>;
+    staleLine: Readonly<Ref<string | null>>;
     announcement: Readonly<Ref<string>>;
 } {
     watchers += 1;
@@ -447,6 +526,8 @@ export function useNotificationBell(): {
     // nothing here derives a permission from it, and a subscription somebody is not entitled to
     // is refused with 403 at `/broadcasting/auth` rather than being prevented here.
     const userId = usePage().props.auth.user?.id ?? null;
+
+    bindChimeUser(userId);
 
     if (watchers === 1) {
         if (typeof document !== 'undefined' && !listening) {
@@ -503,7 +584,7 @@ export function useNotificationBell(): {
         }
     });
 
-    return { unreadCount, recent, status, transport: bellTransport, announcement };
+    return { unreadCount, recent, status, transport: bellTransport, announcement, staleLine };
 }
 
 /** Re-read the bell now. Every write calls this; nothing adjusts the count by hand. */

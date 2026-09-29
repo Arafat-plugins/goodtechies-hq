@@ -41,7 +41,7 @@ import { Skeleton } from '@/Components/ui/skeleton';
  * is only redrawn while the popover is shut — and nothing here takes focus.
  */
 
-const { unreadCount, recent, status, transport, announcement } = useNotificationBell();
+const { unreadCount, recent, status, transport, announcement, staleLine } = useNotificationBell();
 
 const open = ref(false);
 const page = usePage();
@@ -69,7 +69,14 @@ const loading = computed(() => recent.value.length === 0 && (status.value === 'i
 <template>
     <Popover v-if="status !== 'denied'" v-model:open="open" modal>
         <PopoverTrigger as-child>
-            <Button variant="ghost" size="icon" class="relative size-9">
+            <!-- Stale is said in words on the button too (its name and its tooltip), never by a
+                 tint: the list behind it is the last one that loaded. -->
+            <Button
+                variant="ghost"
+                size="icon"
+                class="relative size-9"
+                :title="staleLine ? 'Notifications (couldn\'t refresh)' : undefined"
+            >
                 <Bell class="size-5" aria-hidden="true" />
                 <span
                     v-if="unreadCount > 0"
@@ -79,7 +86,7 @@ const loading = computed(() => recent.value.length === 0 && (status.value === 'i
                     {{ badgeLabel }}
                 </span>
                 <span class="sr-only">
-                    Notifications{{ unreadCount > 0 ? `, ${unreadCount} unread` : '' }}
+                    Notifications{{ unreadCount > 0 ? `, ${unreadCount} unread` : '' }}{{ staleLine ? ", couldn't refresh" : '' }}
                 </span>
             </Button>
         </PopoverTrigger>
@@ -105,6 +112,16 @@ const loading = computed(() => recent.value.length === 0 && (status.value === 'i
                     Mark all read
                 </Button>
             </div>
+
+            <!-- Reliability slice 2b: the latest read failed and these rows are the last good
+                 ones. Clears on the next success. Words and an icon, no tint (DESIGN.md §5.6). -->
+            <p
+                v-if="staleLine"
+                class="flex items-start gap-2 border-b px-3 py-2 text-xs text-muted-foreground"
+            >
+                <TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />
+                <span>{{ staleLine }}</span>
+            </p>
 
             <div v-if="loading" class="flex flex-col gap-3 p-4" aria-hidden="true">
                 <Skeleton v-for="line in 3" :key="line" class="h-8 w-full" />

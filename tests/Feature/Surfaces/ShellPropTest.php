@@ -55,7 +55,7 @@ use Illuminate\Support\Arr;
 const SHELL_PROP_ANNOUNCEMENT = 'Office closed on Thursday for the public holiday.';
 
 /** The keys `HandleInertiaRequests::sharedShell()` promises, whoever is asking. */
-const SHELL_PROP_KEYS = ['unreadMessages', 'announcement', 'announcementChannelId'];
+const SHELL_PROP_KEYS = ['unreadMessages', 'unreadByConversation', 'announcement', 'announcementChannelId'];
 
 /** The keys of the banner itself — the same five `MessageController@index` has always sent. */
 const SHELL_PROP_BANNER_KEYS = ['conversation_id', 'body', 'author', 'created_at', 'is_unread'];
@@ -192,6 +192,7 @@ it('gives the accountant the zero shape rather than a banner they may not open',
 
     expect($shell)->toBe([
         'unreadMessages' => 0,
+        'unreadByConversation' => [],
         'announcement' => null,
         'announcementChannelId' => null,
     ]);
@@ -346,10 +347,15 @@ it('resolves alongside a page prop in one coalesced request', function () {
  * the middleware's guard is the reason a logged-out tab left open overnight does not 500.
  */
 it('does not resolve a shell for somebody who is not signed in', function () {
-    $this->get('/admin/dashboard', [
+    // Reliability slice 1: a background Inertia visit gets a 401 the session dialog reads,
+    // rather than a redirect Inertia would follow onto the login page.
+    $response = $this->get('/admin/dashboard', [
         'X-Inertia' => 'true',
         'X-Inertia-Version' => SHELL_PROP_version(),
         'X-Inertia-Partial-Component' => 'Admin/Dashboard',
         'X-Inertia-Partial-Data' => 'shell',
-    ])->assertRedirect('/login');
+    ])->assertUnauthorized()->assertJson(['reason' => 'session']);
+
+    expect($response->json())->not->toHaveKey('props')
+        ->and($response->getContent())->not->toContain('shell');
 })->group('phase12', 'realtime');

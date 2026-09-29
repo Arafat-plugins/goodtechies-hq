@@ -211,6 +211,26 @@ row's rail. This is a full theme in both modes, not a light design with a dark a
 Active row = `--sidebar-accent` fill + 3 px `--sidebar-rail` + `font-medium`. Hover on a
 non-active row is `--sidebar-border`; hover on the active row is `--brand-tint-strong`.
 
+### 1.7b People and scrollbars — messaging polish (28 Sep 2026)
+
+**`--person-1` … `--person-8`** (fill) and **`--person-N-fg`** (initials and the person's name):
+one tint per person, chosen by user id in `Components/Messages/people.ts` (`personTone(id)`), so
+the same person is the same colour on every screen and after every reload. Eight hues at L 0.93 /
+C 0.055 light and L 0.33 dark, none within 40° of `--brand` (your own rows keep `--brand-tint`).
+Used on message avatars and author names, the conversation members list, the new-message picker
+and task assignee avatars. The name is always written beside the colour — colour never carries
+identity alone.
+
+| Token pair | Light | Dark |
+| --- | --- | --- |
+| `--person-N-fg` / `--person-N` (worst of eight) | 6.10:1 ✅ | 8.24:1 ✅ |
+| `--person-N-fg` / `--card` (worst of eight) | 7.35:1 ✅ | 11.69:1 ✅ |
+
+**`--scrollbar-thumb` / `--scrollbar-thumb-hover`**: a thin neutral thumb on a transparent track,
+set once in `@layer base` for every scroller (standard `scrollbar-color` plus the
+`::-webkit-scrollbar` fallback). `color-scheme: light | dark` on `:root` / `.dark` makes the
+browser's own controls follow the theme — without it dark mode drew a white scrollbar.
+
 ### 1.8 Spacing, type and numbers
 
 - **Spacing:** Tailwind's 4 px scale only. Page padding `p-4 md:p-6`; card padding `p-4` compact /
@@ -430,6 +450,15 @@ Three things this table is load-bearing for:
   carrier and never the only one (§6).
 - **The bubble's side and its squared tail corner** carry who spoke, so the fill is not doing that
   alone either.
+
+**Messaging polish (28 Sep 2026).** The composer is one pill (`rounded-3xl`, `border-input`,
+`bg-card`): Attach, the textarea, the mic and "@ Mentions" inside it, and **Send joined to its right
+end** as a `--primary` segment (`rounded-r-3xl`). The textarea has no border of its own; its focus
+ring is painted on the pill (`has-[textarea:focus-visible]:ring-3 ring-ring`), opaque as always.
+Below `sm` the Attach / Mentions / Send words go and the icons stay, each with its accessible name.
+An attachment is a **card of its own size** (`w-fit`, file cards `sm:max-w-xs`, images inside
+`max-w-xs × max-h-64` at their natural ratio); only the card is a link, never the message row.
+
 
 ---
 

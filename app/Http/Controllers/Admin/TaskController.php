@@ -259,7 +259,11 @@ class TaskController extends Controller
             // The task's discussion — the plan's "comments", which are the messages of this
             // task's own conversation. Inlined so the panel paints with its thread; the
             // `…/discussion` endpoint sends the identical shape for refreshes after a post.
-            'discussion' => $this->discussionPayload($request, $task),
+            //
+            // A closure (slow-loading slice 6): built only when the response carries it — the
+            // visit, the drawer's fetch, or a partial reload that names it — and not on the
+            // 15-second `task`/`activity` poll. `visible()` above has already said 404 or yes.
+            'discussion' => fn (): array => $this->discussionPayload($request, $task),
         ]);
     }
 

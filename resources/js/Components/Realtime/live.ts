@@ -1,6 +1,9 @@
 import { Timer, WifiOff, Zap } from '@lucide/vue';
 import type { Component, ComputedRef, MaybeRefOrGetter } from 'vue';
 import { computed, onScopeDispose, ref, toValue, watch } from 'vue';
+import { onReconnect } from '@/lib/net';
+import { isSessionLive, sessionState } from '@/lib/session';
+import { hasNewVersion } from '@/lib/version';
 import { listenPrivate, realtimeConnection, realtimeMode, realtimeReconnects } from '@/echo';
 
 /**
@@ -425,7 +428,9 @@ export function useLiveRefresh(
      * read. A `canRefresh` refusal IS remembered: see `resume()`.
      */
     function ping(): void {
-        if (!pageVisible()) {
+        // A new deploy (reliability slice 3): every read would only meet the same 409, and the
+        // shell is already offering "Reload now".
+        if (!pageVisible() || !isSessionLive() || hasNewVersion()) {
             return;
         }
 
@@ -450,7 +455,7 @@ export function useLiveRefresh(
         // Not while the socket is up: this is the one place that decides, so a screen cannot
         // end up both subscribed and polling — which would not be wrong, only wasteful and
         // invisible.
-        if (!polls || timer !== null || !pageVisible() || transport.value === 'live') {
+        if (!polls || timer !== null || !pageVisible() || !isSessionLive() || transport.value === 'live') {
             return;
         }
 
@@ -469,7 +474,7 @@ export function useLiveRefresh(
      * reading far more often than this, so a second timer under it would be noise.
      */
     function startSafety(): void {
-        if (safetyMs === null || safety !== null || !pageVisible() || transport.value !== 'live') {
+        if (safetyMs === null || safety !== null || !pageVisible() || !isSessionLive() || transport.value !== 'live') {
             return;
         }
 
@@ -519,8 +524,30 @@ export function useLiveRefresh(
         startPolling();
     });
 
+    // Signed out, or moved to another surface: every clock stops, so a signed-out tab sends
+    // nothing at all. Signed back in: answer with what is true now and start them again.
+    watch(
+        () => sessionState.status,
+        (status) => {
+            if (status !== 'ok') {
+                stopPolling();
+                stopSafety();
+
+                return;
+            }
+
+            ping();
+            startPolling();
+            startSafety();
+        },
+    );
+
     // A reconnect means time passed with nobody listening. Ask.
     watch(realtimeReconnects, () => ping());
+
+    // Reliability slice 2a: the network (or goodERP) is back. One read now, rather than
+    // waiting out whatever the backed-off gate in `reload.ts` or the caller's own had reached.
+    const stopReconnect = onReconnect(() => ping());
 
     if (typeof document !== 'undefined') {
         document.addEventListener('visibilitychange', onVisibilityChange);
@@ -535,6 +562,7 @@ export function useLiveRefresh(
     onScopeDispose(() => {
         stopPolling();
         stopSafety();
+        stopReconnect();
 
         unsubscribe?.();
         unsubscribe = null;

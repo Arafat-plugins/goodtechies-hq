@@ -384,8 +384,18 @@ class DashboardController extends Controller
             return null;
         }
 
+        $today = Carbon::today(config('app.timezone'));
+
+        // Today's row, fetched exactly as `/attendance` fetches it. Without it `dayFor()` reads
+        // "no record yet", and the widget offered Clock in to somebody already clocked in.
+        $record = AttendanceRecord::query()
+            ->where('employee_id', $employee->getKey())
+            ->forDate($today)
+            ->with('editor')
+            ->first();
+
         return [
-            'today' => $this->attendance->dayFor($employee, Carbon::today(config('app.timezone')))->toArray(),
+            'today' => $this->attendance->dayFor($employee, $today, $record)->toArray(),
             'can_clock' => Gate::allows('clock', [AttendanceRecord::class, $employee]),
         ];
     }

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Events\NotificationFeedChanged;
 use App\Http\Resources\NotificationResource;
+use App\Models\Conversation;
 use App\Models\Notification;
 use App\Models\NotificationPreference;
 use App\Models\User;
@@ -254,6 +255,35 @@ class NotificationService
     }
 
     /**
+     * Messaging polish: reading a conversation reads what its notifications were about.
+     *
+     * A DM, a mention in a conversation and an announcement are grouped on the CONVERSATION
+     * (`groupKey()`), so the three keys below are every message notification this person can
+     * have about it. One UPDATE, off the partial index over unread rows.
+     */
+    public function markConversationRead(User $user, Conversation $conversation): int
+    {
+        $keys = array_map(
+            fn (NotificationType $type): string => $this->groupKey($type, $conversation),
+            NotificationType::messageTypes(),
+        );
+
+        $now = now();
+
+        $marked = Notification::query()
+            ->forUser($user)
+            ->unread()
+            ->whereIn('group_key', $keys)
+            ->update(['is_read' => true, 'read_at' => $now, 'updated_at' => $now]);
+
+        if ($marked > 0) {
+            $this->announce($user);
+        }
+
+        return $marked;
+    }
+
+    /**
      * Mark everything this person has unread as read, and say how many that was.
      *
      * One UPDATE rather than a row at a time: "mark all read" on a bell that has been ignored
@@ -331,7 +361,7 @@ class NotificationService
      */
     public function unreadCount(User $user): int
     {
-        return Notification::query()->forUser($user)->unread()->count();
+        return Notification::query()->forUser($user)->forBell()->unread()->count();
     }
 
     /**
@@ -350,6 +380,7 @@ class NotificationService
     {
         return Notification::query()
             ->forUser($user)
+            ->forBell()
             ->stillOpen()
             ->newestFirst()
             ->limit(max(1, $limit))

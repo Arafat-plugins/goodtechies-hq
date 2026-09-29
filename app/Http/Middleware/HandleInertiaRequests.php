@@ -8,10 +8,12 @@ use App\Models\TimeEntry;
 use App\Models\User;
 use App\Services\ConversationService;
 use App\Support\ConversationType;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Middleware;
+use Symfony\Component\HttpFoundation\Response;
 
 class HandleInertiaRequests extends Middleware
 {
@@ -34,6 +36,40 @@ class HandleInertiaRequests extends Middleware
     public function version(Request $request): ?string
     {
         return parent::version($request);
+    }
+
+    /**
+     * A deploy while tabs are open (reliability slice 3).
+     *
+     * A person's own visit (a link, a Back) keeps Inertia's answer: 409 + `X-Inertia-Location`,
+     * which the browser follows as a full reload — the unsaved-changes guard's `beforeunload`
+     * is what protects typed input on that path.
+     *
+     * A **background** read (a poll's partial reload, `X-Inertia-Partial-Component`) must not
+     * reload the document under somebody who is typing, so it gets a small JSON 409
+     * `{reason: "version"}` with no location. The client sets its new-version flag, stops its
+     * polls and offers "Reload now" in the shell; nothing is thrown away until they choose.
+     * This is the same user-versus-background split `ErrorResponses` makes.
+     */
+    public function onVersionChange(Request $request, Response $response): Response
+    {
+        if (! $request->hasHeader('X-Inertia-Partial-Component')) {
+            return parent::onVersionChange($request, $response);
+        }
+
+        // A refusal is the more important answer: a 401 session, a surface 403 or a 404 must
+        // reach the session and error handling (slices 1 and 2) unchanged, not be hidden
+        // behind "new version". Only an answer that would have been a page becomes the 409.
+        if (! $response->isSuccessful()) {
+            return $response;
+        }
+
+        // As the parent does: the flash and the validation errors survive to the next request.
+        if ($request->hasSession()) {
+            $request->session()->reflash();
+        }
+
+        return new JsonResponse(['reason' => 'version'], 409);
     }
 
     /**
@@ -76,8 +112,42 @@ class HandleInertiaRequests extends Middleware
             // Inertia navigation does not blank the banner, and subscribes to the announcements
             // channel on a socket build. That is the bell's shape (2-39, 6-8) reused rather
             // than a second pattern beside it.
-            'shell' => Inertia::optional(fn (): array => $this->sharedShell($request)),
+            //
+            // Slow-loading slice 6: the FIRST PAINT carries it. A full document load (no
+            // `X-Inertia` header — the address bar, a reload, a new tab) used to render without
+            // it and then fire a partial reload for `shell` alone, and a partial reload runs the
+            // whole current controller again (67 statements on the Admin dashboard) to hand back
+            // 8 statements' worth of prop. Resolving it into the document costs the 8 and
+            // saves the second request outright. Every Inertia visit after that — navigations
+            // and the 30-second poll — is unchanged: optional, asked for by name.
+            'shell' => $this->shellOnFirstPaint($request)
+                ? fn (): array => $this->sharedShell($request)
+                : Inertia::optional(fn (): array => $this->sharedShell($request)),
         ];
+    }
+
+    /**
+     * Does this response resolve `shell` without being asked? Only a full document load by
+     * somebody who is fully signed in.
+     *
+     * - An `X-Inertia` request is a navigation or a poll inside a page that already holds the
+     *   shell's state in module scope (`Components/Realtime/shell.ts`); it keeps asking by name.
+     * - Nobody signed in has no shell (the zero shape would be sent for nothing).
+     * - Somebody who still has to enrol in two-factor authentication has passed the password
+     *   step only, and their pages are `AuthLayout` pages that mount no shell. Their inbox is not
+     *   put into a document they are not yet allowed past.
+     */
+    private function shellOnFirstPaint(Request $request): bool
+    {
+        if ($request->hasHeader('X-Inertia')) {
+            return false;
+        }
+
+        $user = $request->user();
+
+        return $user instanceof User
+            && ! EnsureTwoFactorEnrolled::mustEnrol($user)
+            && ! $request->is('two-factor/*');
     }
 
     /**
@@ -95,20 +165,26 @@ class HandleInertiaRequests extends Middleware
      * no screen can be typed against, which is the rule `timer`/`attendance` already follow on
      * the employee dashboard.
      *
-     * @return array{unreadMessages: int, announcement: array{conversation_id: int, body: string, author: string|null, created_at: string|null, is_unread: bool}|null, announcementChannelId: int|null}
+     * Messaging polish: `unreadByConversation` is the same grouped count kept per conversation
+     * (id => count, only where it is above zero). It is what lets the client leave out the
+     * conversation that is on screen right now — the top bar's Messages icon, the sidebar pill,
+     * the rail pill and the page description all subtract it — without a second query. It is an
+     * OBJECT on the wire even when empty, so a reader never has to tell `[]` from `{}`.
+     *
+     * @return array{unreadMessages: int, unreadByConversation: object, announcement: array{conversation_id: int, body: string, author: string|null, created_at: string|null, is_unread: bool}|null, announcementChannelId: int|null}
      */
     private function sharedShell(Request $request): array
     {
         $user = $request->user();
 
         if (! $user instanceof User) {
-            return ['unreadMessages' => 0, 'announcement' => null, 'announcementChannelId' => null];
+            return ['unreadMessages' => 0, 'unreadByConversation' => (object) [], 'announcement' => null, 'announcementChannelId' => null];
         }
 
         $inbox = $this->conversations->inboxFor($user);
 
         if ($inbox->isEmpty()) {
-            return ['unreadMessages' => 0, 'announcement' => null, 'announcementChannelId' => null];
+            return ['unreadMessages' => 0, 'unreadByConversation' => (object) [], 'announcement' => null, 'announcementChannelId' => null];
         }
 
         $unread = $this->conversations->unreadCounts($user, $inbox);
@@ -122,6 +198,8 @@ class HandleInertiaRequests extends Middleware
             // the same arithmetic the Messages page's own description does over the same rows —
             // one sum of one policy-checked list, so the badge and the page cannot disagree.
             'unreadMessages' => array_sum($unread),
+            // The same counts, per conversation. `unreadCounts()` already leaves out a zero.
+            'unreadByConversation' => (object) array_filter($unread, fn (int $count): bool => $count > 0),
             'announcement' => $channel === null
                 ? null
                 : $this->banner($channel, ($unread[(int) $channel->getKey()] ?? 0) > 0),

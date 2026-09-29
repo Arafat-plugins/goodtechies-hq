@@ -33,8 +33,10 @@ import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/Components/ui/collapsible';
 import { Label } from '@/Components/ui/label';
+import { Progress } from '@/Components/ui/progress';
 import { Skeleton } from '@/Components/ui/skeleton';
 import { flashSeq, lastFlash } from '@/lib/flashChannel';
+import { inlineUploadFailure, TOO_LARGE_TEXT, type UploadFailure } from '@/lib/net';
 
 /**
  * The attachments on one record: list, upload, replace, delete, download.
@@ -94,6 +96,7 @@ const uid = useId();
 const pickerId = `${uid}-file`;
 const hintId = `${uid}-hint`;
 const errorId = `${uid}-error`;
+const progressId = `${uid}-progress`;
 const confirmButtonId = `${uid}-confirm`;
 
 const files = ref<FileSummary[]>([]);
@@ -110,6 +113,19 @@ const pickedError = ref<string | null>(null);
 const serverError = ref<string | null>(null);
 const uploading = ref(false);
 const pickerEl = ref<HTMLInputElement | null>(null);
+
+/**
+ * Reliability slice 2b. How far the bytes have got (0-100), while they are going; `null` when
+ * nothing is. Driven by Inertia's `onProgress`, which is the XHR's own upload progress.
+ */
+const progress = ref<number | null>(null);
+/**
+ * The last upload got no answer, or a 5xx. The file stays picked and *Try again* sends it again.
+ * Said here, inline, and not also as a toast — `inlineUploadFailure` keeps `app.ts` quiet.
+ */
+const failedToSend = ref(false);
+
+const UPLOAD_FAILED_TEXT = 'Upload failed — check your connection. Your file is still here; try again.';
 
 const confirming = ref<number | null>(null);
 const busy = ref<number | null>(null);
@@ -379,6 +395,7 @@ function resetPicker(): void {
     picked.value = null;
     pickedError.value = null;
     serverError.value = null;
+    failedToSend.value = false;
 
     if (pickerEl.value) {
         // A file input's value is not bound, so clearing the model is not clearing the field.
@@ -391,6 +408,7 @@ function choose(event: Event): void {
 
     picked.value = file;
     serverError.value = null;
+    failedToSend.value = false;
     pickedError.value = file === null ? null : rejectionFor(file);
 }
 
@@ -400,6 +418,7 @@ function replace(file: FileSummary): void {
     picked.value = null;
     pickedError.value = null;
     serverError.value = null;
+    failedToSend.value = false;
 
     if (pickerEl.value) {
         pickerEl.value.value = '';
@@ -420,6 +439,8 @@ function upload(): void {
 
     uploading.value = true;
     serverError.value = null;
+    failedToSend.value = false;
+    progress.value = 0;
 
     // What the server says about THIS write. Read from the flash channel rather than from
     // `page.props.flash`, because a screen that has called `useFlashAsToast()` — the task
@@ -436,6 +457,20 @@ function upload(): void {
             forceFormData: true,
             preserveScroll: true,
             preserveState: true,
+            onProgress: (event) => {
+                if (event) {
+                    progress.value = event.percentage ?? Math.round((event.progress ?? 0) * 100);
+                }
+            },
+            // No answer or a 5xx: the file stays picked and the panel says so. A 413 is the
+            // field's own error — sending the same bytes again cannot help.
+            ...inlineUploadFailure((kind: UploadFailure) => {
+                if (kind === 'too_large') {
+                    serverError.value = TOO_LARGE_TEXT;
+                } else {
+                    failedToSend.value = true;
+                }
+            }),
             onSuccess: (page) => {
                 // A `FileStateException` comes back 200 with a flashed sentence, so a 2xx is
                 // not on its own an acceptance. The flash itself is announced elsewhere —
@@ -458,6 +493,7 @@ function upload(): void {
             },
             onFinish: () => {
                 uploading.value = false;
+                progress.value = null;
             },
         },
     );
@@ -824,6 +860,44 @@ function destroy(file: FileSummary): void {
                         <CircleAlert class="mt-0.5 size-3 shrink-0" aria-hidden="true" />
                         {{ fieldError }}
                     </p>
+
+                    <!--
+                        How far the bytes have got. The words carry the number and the bar
+                        repeats it (DESIGN.md §5.6): a slow connection reads as progress, not as
+                        a panel that hung.
+                    -->
+                    <div v-if="progress !== null" class="flex min-w-0 flex-col gap-1">
+                        <p :id="progressId" class="text-xs text-muted-foreground tabular-nums">
+                            Uploading… {{ progress }}%
+                        </p>
+                        <Progress
+                            :model-value="progress"
+                            :aria-labelledby="progressId"
+                        />
+                    </div>
+
+                    <!-- The upload got no answer, or a 5xx. The file is still in the picker. -->
+                    <div
+                        v-if="failedToSend"
+                        role="alert"
+                        class="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                    >
+                        <p class="flex items-start gap-2 text-xs text-destructive">
+                            <CircleAlert class="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                            {{ UPLOAD_FAILED_TEXT }}
+                        </p>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            class="shrink-0"
+                            :disabled="uploading || picked === null"
+                            @click="upload"
+                        >
+                            <RefreshCw aria-hidden="true" />
+                            Try again
+                        </Button>
+                    </div>
 
                     <div class="flex flex-wrap gap-2">
                         <Button

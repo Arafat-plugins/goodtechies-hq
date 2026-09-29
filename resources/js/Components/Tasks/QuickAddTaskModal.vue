@@ -19,6 +19,7 @@ import { RadioGroup, RadioGroupItem } from '@/Components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
 import { Textarea } from '@/Components/ui/textarea';
+import { useUnsavedGuard } from '@/lib/unsavedGuard';
 
 /**
  * The quick-add task modal — `docs/design-refs/08-new-task-modal.png`.
@@ -94,9 +95,14 @@ watch(
         form.clearErrors();
         form.priority = defaultPriority.value;
         form.project_id = props.projectId ? String(props.projectId) : '';
+        // What the modal opened with is the baseline, so a preset project is not "unsaved".
+        form.defaults();
         tab.value = 'task';
     },
 );
+
+/** Reliability slice 3: a typed-in, unsent task is not lost to a sidebar click or an F5. */
+useUnsavedGuard(() => props.open && form.isDirty);
 
 /**
  * Reka autofocuses the dialog's first focusable thing, which is the Task tab. The name is

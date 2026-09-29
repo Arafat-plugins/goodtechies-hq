@@ -253,7 +253,11 @@ class TaskController extends Controller
             // The discussion of a task this employee is assigned to. The same payload the
             // Admin page gets, from the same builder — an employee's thread is not a narrower
             // view of the discussion, it is the same discussion on a task they are on.
-            'discussion' => $this->discussionPayload($request, $task),
+            //
+            // A closure (slow-loading slice 6): built only when the response carries it — the
+            // visit, the drawer's fetch, or a partial reload that names it — and not on the
+            // 15-second `task`/`activity` poll. `visible()` above has already said 404 or yes.
+            'discussion' => fn (): array => $this->discussionPayload($request, $task),
         ]);
     }
 

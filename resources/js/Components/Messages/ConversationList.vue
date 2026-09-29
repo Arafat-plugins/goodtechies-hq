@@ -4,6 +4,7 @@ import { Hash, Megaphone, MessageSquare, Users } from '@lucide/vue';
 import { computed } from 'vue';
 import type { ConversationSummary, ConversationTypeKey } from '@/Components/Messages/messages';
 import { CONVERSATION_GROUPS, messagesHref } from '@/Components/Messages/messages';
+import { isViewingConversation } from '@/Components/Realtime/shell';
 import { cn } from '@/lib/utils';
 
 /**
@@ -58,6 +59,15 @@ function iconFor(row: ConversationSummary) {
     return row.type === null ? MessageSquare : ICONS[row.type];
 }
 
+/**
+ * Messaging polish: the conversation open in front of the reader shows no unread pill — its
+ * new messages are appearing in the thread beside this list, and they are marked read as soon
+ * as they are drawn. A thread in a hidden or unfocused tab counts again.
+ */
+function unreadShown(row: ConversationSummary): number {
+    return isViewingConversation(row.id) ? 0 : row.unread_count;
+}
+
 function unreadLabel(row: ConversationSummary): string {
     return row.unread_count === 1 ? '1 unread message' : `${row.unread_count} unread messages`;
 }
@@ -94,7 +104,7 @@ function unreadLabel(row: ConversationSummary): string {
 
                         <span class="flex min-w-0 flex-1 flex-col">
                             <span
-                                :class="cn('truncate', row.unread_count > 0 && 'font-medium')"
+                                :class="cn('truncate', unreadShown(row) > 0 && 'font-medium')"
                             >{{ row.label }}</span>
                             <span v-if="row.last_message" class="truncate text-xs text-muted-foreground">
                                 {{ row.last_message.is_mine ? 'You' : (row.last_message.author ?? 'Somebody') }}:
@@ -103,7 +113,7 @@ function unreadLabel(row: ConversationSummary): string {
                         </span>
 
                         <span
-                            v-if="row.unread_count > 0"
+                            v-if="unreadShown(row) > 0"
                             class="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-xs font-medium tabular-nums text-primary-foreground"
                         >
                             {{ row.unread_count > 99 ? '99+' : row.unread_count }}

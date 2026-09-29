@@ -134,7 +134,15 @@ class TimerService
         $existing = $this->byClientUuid($clientUuid);
 
         if ($existing !== null) {
-            return $existing;
+            // Only this employee's own retry lands on the row it made — the rule `replay()`
+            // applies. Another person's uuid is not a key into their timer: the call is an
+            // ordinary new start under a uuid of the server's own, so it can neither hand back
+            // their entry nor be "recovered" onto it by the unique index below.
+            if ((int) $existing->employee_id === (int) $employee->getKey()) {
+                return $existing;
+            }
+
+            $clientUuid = (string) Str::uuid();
         }
 
         // The readable refusal. The index below is what actually guarantees it.

@@ -267,6 +267,7 @@ import OnLeaveFlag from '@/Components/Leave/OnLeaveFlag.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import TaskFilterBar, { taskFiltersActive } from '@/Components/Tasks/TaskFilterBar.vue';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
+import { personTone } from '@/Components/Messages/people';
 import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { pushQuery } from '@/lib/tableState';
@@ -463,7 +464,7 @@ const loading = useNavigationPending();
             <template #cell-assignee="{ row }">
                 <span v-if="row.primary_assignee" class="inline-flex items-center gap-2">
                     <Avatar class="size-6">
-                        <AvatarFallback class="text-xs">
+                        <AvatarFallback :class="cn('text-xs', personTone(row.primary_assignee.id).avatar)">
                             {{ initials(row.primary_assignee.name) }}
                         </AvatarFallback>
                     </Avatar>

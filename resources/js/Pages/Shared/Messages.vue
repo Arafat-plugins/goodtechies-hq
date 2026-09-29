@@ -18,6 +18,7 @@ import ConversationContextPanel from '@/Components/Messages/ConversationContextP
 import MessagesRail from '@/Components/Messages/MessagesRail.vue';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
 import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
+import { adoptInbox, isViewingConversation } from '@/Components/Realtime/shell';
 import {
     RAIL_POLL_MS,
     THREAD_POLL_MS,
@@ -127,8 +128,16 @@ const routes = computed(() =>
     props.active === null ? null : conversationRoutes(props.active.conversation_id),
 );
 
+/**
+ * Messaging polish: the conversation on screen (tab visible, window focused) is left out — its
+ * new messages are arriving in the thread beside this sentence, the same rule as the rail pill,
+ * the sidebar pill and the top bar's Messages icon (`Realtime/shell.ts`).
+ */
 const description = computed(() => {
-    const unread = props.conversations.reduce((total, row) => total + row.unread_count, 0);
+    const unread = props.conversations.reduce(
+        (total, row) => total + (isViewingConversation(row.id) ? 0 : row.unread_count),
+        0,
+    );
 
     if (unread === 0) {
         return 'Everything here is read.';
@@ -149,7 +158,10 @@ const description = computed(() => {
 const showsThread = computed(() => {
     const [, query = ''] = page.url.split('?');
 
-    return new URLSearchParams(query).has('conversation');
+    const params = new URLSearchParams(query);
+
+    // `?unread=1` (the top bar's Messages icon) opens a thread just as `?conversation=` does.
+    return params.has('conversation') || params.has('unread');
 });
 
 /* ------------------------------------------------------------------ the context panel */
@@ -223,6 +235,17 @@ function reloadRail(): void {
  * that does not exist yet and is out of this slice.
  */
 useLiveRefresh(null, reloadRail, { intervalMs: RAIL_POLL_MS });
+
+/**
+ * The rail's rows are the whole inbox with the server's counts, so they are also the shell's
+ * (`adoptInbox()`): the sidebar pill and the top bar's icon move with every rail read rather than
+ * a shell poll later. Nothing here marks anything read — `GET /messages` never does.
+ */
+watch(
+    () => props.conversations,
+    (rows) => adoptInbox(rows),
+    { immediate: true },
+);
 
 const activeChannel = computed(() => conversationChannel(activeId.value));
 
@@ -457,6 +480,7 @@ const activeLine = computed(() =>
                                 :routes="routes"
                                 scroll
                                 class="lg:max-h-none"
+                                @read="reloadRail"
                             />
                         </div>
                     </template>

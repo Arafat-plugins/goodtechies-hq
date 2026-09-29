@@ -74,10 +74,24 @@ const meta = computed(() => {
 </script>
 
 <template>
+    <!--
+        Messaging polish: an attachment is an object of its own size, not a strip across the
+        thread. The card is `w-fit` and capped — a file card at `max-w-xs` (20rem), an image at
+        its natural aspect ratio inside `max-w-xs` × `max-h-64` — so a PDF name and a photo sit
+        in the conversation the way a file sits in any chat, and the author line above stays
+        the author line.
+
+        Only the card is a link. The image opens itself; a file card is ONE link (glyph, name,
+        size, the download arrow) that opens or downloads the file exactly as the old arrow did;
+        a voice note keeps its player and its own download arrow. Nothing outside the card —
+        the message row, its author, the bubble — is clickable.
+    -->
     <div
         :class="
             cn(
-                'flex min-w-0 flex-col gap-2 rounded-md border bg-card p-2 text-card-foreground shadow-flat',
+                'flex w-fit max-w-full min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-1.5 text-card-foreground shadow-flat',
+                !rendersImage && 'w-full sm:max-w-xs',
+                rendersVoice && 'sm:max-w-sm',
                 onAccent && 'border-transparent',
             )
         "
@@ -87,13 +101,14 @@ const meta = computed(() => {
             :href="file.url"
             target="_blank"
             rel="noopener noreferrer"
-            class="min-w-0 rounded-sm focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+            :aria-label="`Open ${file.name}`"
+            class="block w-fit max-w-full min-w-0 overflow-hidden rounded-md bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
         >
             <img
                 :src="file.url"
                 :alt="file.name"
                 loading="lazy"
-                class="max-h-64 w-auto max-w-full rounded-sm"
+                class="block h-auto max-h-64 w-auto max-w-full object-contain sm:max-w-xs"
             >
             <span class="sr-only">(opens in a new tab)</span>
         </a>
@@ -111,18 +126,8 @@ const meta = computed(() => {
             label="voice message"
         />
 
-        <div class="flex min-w-0 items-center gap-2">
-            <span
-                :class="
-                    cn(
-                        'flex size-8 shrink-0 items-center justify-center rounded-md bg-muted',
-                        'text-muted-foreground',
-                    )
-                "
-            >
-                <component :is="iconFor(file)" class="size-4" aria-hidden="true" />
-            </span>
-
+        <!-- An image's caption line: its name and a download, kept to the image's width. -->
+        <div v-if="rendersImage || rendersVoice" class="flex w-0 min-w-full items-center gap-2 px-1">
             <span class="flex min-w-0 flex-1 flex-col">
                 <span class="min-w-0 truncate text-xs font-medium" :title="file.name">
                     {{ file.name }}
@@ -130,7 +135,7 @@ const meta = computed(() => {
                 <span class="min-w-0 truncate text-xs text-muted-foreground">{{ meta }}</span>
             </span>
 
-            <TooltipProvider v-if="!stale" :delay-duration="150">
+            <TooltipProvider :delay-duration="150">
                 <Tooltip>
                     <TooltipTrigger as-child>
                         <a
@@ -149,8 +154,45 @@ const meta = computed(() => {
                     <TooltipContent>Download</TooltipContent>
                 </Tooltip>
             </TooltipProvider>
+        </div>
 
-            <span v-if="stale" class="shrink-0 text-xs text-muted-foreground">Link expired</span>
+        <!-- A file: the whole compact card is the one link. -->
+        <a
+            v-else-if="!stale"
+            :href="file.url"
+            :target="file.is_previewable ? '_blank' : undefined"
+            rel="noopener noreferrer"
+            :title="file.name"
+            class="group/file flex min-w-0 items-center gap-2.5 rounded-md p-1 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+        >
+            <span class="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <component :is="iconFor(file)" class="size-4" aria-hidden="true" />
+            </span>
+
+            <span class="flex min-w-0 flex-1 flex-col">
+                <span class="min-w-0 truncate text-xs font-medium">
+                    <span class="sr-only">{{ file.is_previewable ? 'Open' : 'Download' }} </span>{{ file.name }}
+                </span>
+                <span class="min-w-0 truncate text-xs text-muted-foreground">{{ meta }}</span>
+            </span>
+
+            <Download
+                class="size-4 shrink-0 text-muted-foreground group-hover/file:text-accent-foreground"
+                aria-hidden="true"
+            />
+            <span v-if="file.is_previewable" class="sr-only">(opens in a new tab)</span>
+        </a>
+
+        <!-- The links have lapsed: the name stays, as text, and says why it is not a link. -->
+        <div v-else class="flex min-w-0 items-center gap-2.5 p-1">
+            <span class="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <component :is="iconFor(file)" class="size-4" aria-hidden="true" />
+            </span>
+            <span class="flex min-w-0 flex-1 flex-col">
+                <span class="min-w-0 truncate text-xs font-medium" :title="file.name">{{ file.name }}</span>
+                <span class="min-w-0 truncate text-xs text-muted-foreground">{{ meta }}</span>
+            </span>
+            <span class="shrink-0 text-xs text-muted-foreground">Link expired</span>
         </div>
     </div>
 </template>

@@ -26,9 +26,27 @@ class EnsureSurface
         }
 
         if ($user->surface() !== $expected) {
+            // Still a 403 — the permission matrix and the privacy rules depend on the status.
+            // A background Inertia visit or a fetch() gets a body the client can act on: the
+            // person's role changed while the page was open, and `home` is where they now live.
+            if ($request->hasHeader('X-Inertia') || $request->expectsJson()) {
+                return response()->json([
+                    'message' => 'Your access has changed.',
+                    'reason' => 'surface',
+                    'home' => $this->homeFor($user),
+                ], 403);
+            }
+
             abort(403);
         }
 
         return $next($request);
+    }
+
+    private function homeFor(User $user): string
+    {
+        $surface = $user->surface();
+
+        return $surface instanceof Surface ? route($surface->homeRoute()) : route('home');
     }
 }

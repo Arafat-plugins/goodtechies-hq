@@ -1,5 +1,9 @@
 import { router } from '@inertiajs/vue3';
-import { onScopeDispose } from 'vue';
+import { onScopeDispose, watch } from 'vue';
+import { overlayOpen } from '@/Components/Realtime/live';
+import { backoff, onReconnect } from '@/lib/net';
+import { isSessionLive, sessionState } from '@/lib/session';
+import { hasNewVersion } from '@/lib/version';
 
 /**
  * Part 0.5's refresh rule, in one place.
@@ -68,8 +72,63 @@ function wanted(): string[] {
     return [...keys];
 }
 
+/**
+ * Reliability slice 2a: healthy, every tick reads; after a failed read the next waits two ticks,
+ * then four, up to five minutes, and the browser coming back online reads at once.
+ */
+let gate = backoff(everyMs);
+
+/**
+ * Reliability slice 3: a read that an open overlay refused, waiting for it to close.
+ *
+ * `reload.ts` screens get this from `useLiveProps` (`canRefresh: () => !overlayOpen()`, remembered
+ * and delivered after); this is the same rule for the `usePagePoll` screens. The Admin leave queue
+ * is the one that needed it: a decision dialog open over a row, and a poll swapping that row out
+ * from under the Approve button. The refused read is re-asked the moment the overlay closes rather
+ * than twenty seconds later, so the queue is never staler for having waited.
+ */
+const OVERLAY_RECHECK_MS = 500;
+let overlayWait: ReturnType<typeof setTimeout> | null = null;
+
+function waitForOverlay(): void {
+    if (overlayWait !== null) {
+        return;
+    }
+
+    overlayWait = setTimeout(() => {
+        overlayWait = null;
+
+        if (callers.size === 0) {
+            return;
+        }
+
+        if (overlayOpen()) {
+            waitForOverlay();
+
+            return;
+        }
+
+        read();
+    }, OVERLAY_RECHECK_MS);
+}
+
+function stopOverlayWait(): void {
+    if (overlayWait !== null) {
+        clearTimeout(overlayWait);
+        overlayWait = null;
+    }
+}
+
 function read(): void {
-    if (inFlight || callers.size === 0 || !pageVisible()) {
+    // `hasNewVersion()`: a deploy happened (reliability slice 3) — every read would meet the same
+    // 409, and the shell is already offering "Reload now".
+    if (inFlight || callers.size === 0 || !pageVisible() || !isSessionLive() || hasNewVersion() || !gate.ready()) {
+        return;
+    }
+
+    if (overlayOpen()) {
+        waitForOverlay();
+
         return;
     }
 
@@ -81,23 +140,61 @@ function read(): void {
 
     inFlight = true;
 
+    const sentAt = Date.now();
+    let failed = false;
+
+    // A reload always preserves scroll and state: Inertia 3.7 forces both and its ReloadOptions omits them.
     router.reload({
         only,
-        preserveScroll: true,
-        preserveState: true,
+        onSuccess: () => gate.succeed(),
+        onNetworkError: () => {
+            failed = true;
+        },
+        onHttpException: (response) => {
+            if (response.status >= 500 || response.status === 404 || response.status === 403 || response.status === 429) {
+                failed = true;
+            }
+        },
         onFinish: () => {
             inFlight = false;
+
+            if (failed) {
+                gate.fail(sentAt);
+            }
         },
     });
 }
 
+// The network is back: one read now, while anybody is still asking.
+onReconnect(() => {
+    if (timer !== null) {
+        read();
+    }
+});
+
 function startPolling(): void {
-    if (timer !== null || callers.size === 0 || !pageVisible()) {
+    if (timer !== null || callers.size === 0 || !pageVisible() || !isSessionLive()) {
         return;
     }
 
     timer = setInterval(read, everyMs);
 }
+
+// Signed out, or moved to another surface: the shared interval stops. Signed back in: one
+// immediate read, then the interval again (only if anybody is still asking).
+watch(
+    () => sessionState.status,
+    (status) => {
+        if (status !== 'ok') {
+            stopPolling();
+
+            return;
+        }
+
+        read();
+        startPolling();
+    },
+);
 
 function stopPolling(): void {
     if (timer !== null) {
@@ -109,6 +206,7 @@ function stopPolling(): void {
 function onVisibilityChange(): void {
     if (!pageVisible()) {
         stopPolling();
+        stopOverlayWait();
 
         return;
     }
@@ -138,6 +236,7 @@ export function usePagePoll(only: readonly string[], options: { everyMs?: number
 
     if (options.everyMs !== undefined && options.everyMs < everyMs) {
         everyMs = options.everyMs;
+        gate = backoff(everyMs);
         stopPolling();
     }
 
@@ -156,7 +255,9 @@ export function usePagePoll(only: readonly string[], options: { everyMs?: number
         }
 
         stopPolling();
+        stopOverlayWait();
         everyMs = DEFAULT_EVERY_MS;
+        gate = backoff(everyMs);
 
         if (listening && typeof document !== 'undefined') {
             document.removeEventListener('visibilitychange', onVisibilityChange);

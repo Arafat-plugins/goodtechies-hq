@@ -75,7 +75,10 @@ it('gives each dashboard exactly its documented props', function (string $email,
 
     $response = $this->get($home)->assertOk();
     $pageProps = array_keys($response->inertiaProps());
-    $shared = ['errors', 'auth', 'flash', 'app'];
+    // `shell` is shared too, and a full document load now carries it (slow-loading slice 6), so
+    // the first paint does not spend a second request asking. It is asserted in
+    // `Surfaces/ShellPropTest.php` and `Performance/FirstPaintTest.php`, not as a dashboard prop.
+    $shared = ['errors', 'auth', 'flash', 'app', 'shell'];
 
     expect(array_values(array_diff($pageProps, $shared)))->toEqualCanonicalizing($props);
 })->with([

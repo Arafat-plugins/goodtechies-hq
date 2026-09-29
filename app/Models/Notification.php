@@ -114,6 +114,30 @@ class Notification extends Model
     }
 
     /**
+     * What the BELL shows: everything except message notifications (messaging polish).
+     *
+     * A DM, a mention in a conversation and an announcement are counted by the Messages icon in
+     * the top bar instead, from the conversations' own read state, so the bell and the envelope
+     * never count the same thing twice. A mention in a TASK discussion stays here: that
+     * conversation is not in the Messages inbox, so the bell is the only place it could appear.
+     * The Notification Center still lists every kind on its Messages tab.
+     *
+     * @param  Builder<Notification>  $query
+     * @return Builder<Notification>
+     */
+    public function scopeForBell(Builder $query): Builder
+    {
+        return $query
+            ->whereNotIn('type', [
+                NotificationType::MessageReceived->value,
+                NotificationType::AnnouncementPosted->value,
+            ])
+            ->where(fn (Builder $inner): Builder => $inner
+                ->where('type', '!=', NotificationType::MessageMentioned->value)
+                ->orWhereRaw("payload->'context'->>'conversation_type' = ?", ['task']));
+    }
+
+    /**
      * Newest first, with `id` making the sort total so two rows written in the same second
      * never swap places between two polls.
      *

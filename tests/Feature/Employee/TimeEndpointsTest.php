@@ -223,6 +223,102 @@ it('replays an offline batch over HTTP without double-counting it', function ():
         ->and($entry->isFlagged())->toBeTrue();
 });
 
+/* ------------------------------------------- reliability slice 4: flaky connection */
+
+it('lands a retried start on the row the first attempt made, over HTTP', function (): void {
+    // The widget keeps one uuid per Start intent, so a start whose reply was lost is sent again
+    // with the SAME uuid. The second post must answer as a success, not "a timer is already
+    // going", and must not make a second row.
+    $uuid = (string) Str::uuid();
+    $start = ['task_id' => $this->task->id, 'client_uuid' => $uuid];
+
+    $this->actingAs($this->tapu->user)->post('/employee/time/start', $start)
+        ->assertRedirect()->assertSessionHas('success');
+
+    Carbon::setTestNow('2026-09-24 09:00:40');
+
+    $this->actingAs($this->tapu->user)->post('/employee/time/start', $start)
+        ->assertRedirect()->assertSessionHas('success')->assertSessionMissing('error');
+
+    expect(TimeEntry::count())->toBe(1)
+        ->and(TimeEntry::sole()->client_uuid)->toBe($uuid)
+        ->and(TimeEntry::sole()->started_at->toDateTimeString())->toBe('2026-09-24 09:00:00');
+});
+
+it('never hands one employee another\'s entry through a reused start uuid', function (): void {
+    $uuid = (string) Str::uuid();
+
+    $this->actingAs($this->tapu->user)
+        ->post('/employee/time/start', ['task_id' => $this->task->id, 'client_uuid' => $uuid]);
+
+    $tapusEntry = TimeEntry::sole();
+
+    $other = Employee::factory()->forRole(RoleName::REMOTE_EMPLOYEE)->create();
+    $theirTask = Task::factory()->create();
+    $theirTask->assignees()->attach($other->id, ['is_primary' => true]);
+
+    Carbon::setTestNow('2026-09-24 09:10:00');
+
+    // Employee B sends A's uuid. B gets a start of their own — a new row, under a uuid the
+    // server chose — and A's entry is neither returned, reassigned nor touched.
+    $this->actingAs($other->user)
+        ->post('/employee/time/start', ['task_id' => $theirTask->id, 'client_uuid' => $uuid])
+        ->assertRedirect()->assertSessionHas('success');
+
+    $theirs = TimeEntry::where('employee_id', $other->id)->sole();
+
+    expect(TimeEntry::count())->toBe(2)
+        ->and($theirs->getKey())->not->toBe($tapusEntry->getKey())
+        ->and($theirs->client_uuid)->not->toBe($uuid)
+        ->and($theirs->task_id)->toBe($theirTask->id)
+        ->and($tapusEntry->fresh()->employee_id)->toBe($this->tapu->id)
+        ->and($tapusEntry->fresh()->isRunning())->toBeTrue();
+
+    // And B's own view of their timer is B's entry, not A's.
+    $this->actingAs($other->user)
+        ->getJson('/employee/time/current')
+        ->assertOk()
+        ->assertJsonPath('running.id', $theirs->id);
+});
+
+it('closes an entry started online from a Stop pressed offline, no later than the evidence', function (): void {
+    // Started online, one ping delivered at 09:30, then the connection went. The browser kept
+    // pinging into its buffer (09:31, 09:32), the person pressed Stop at 09:40 by its clock, and
+    // the batch is replayed at 10:15 when the connection is back. The buffer carries the ping the
+    // server already had (09:30) as well — the widget adds it so an empty buffer is never read
+    // as "no evidence past the start".
+    $uuid = (string) Str::uuid();
+
+    $this->actingAs($this->tapu->user)
+        ->post('/employee/time/start', ['task_id' => $this->task->id, 'client_uuid' => $uuid]);
+
+    Carbon::setTestNow('2026-09-24 09:30:00');
+    $this->actingAs($this->tapu->user)->postJson('/employee/time/heartbeat')->assertOk();
+
+    Carbon::setTestNow('2026-09-24 10:15:00');
+
+    $this->actingAs($this->tapu->user)
+        ->postJson('/employee/time/replay', [
+            'task_id' => $this->task->id,
+            'client_uuid' => $uuid,
+            'started_at' => '2026-09-24 09:00:00',
+            'heartbeats' => ['2026-09-24 09:31:00', '2026-09-24 09:32:00', '2026-09-24 09:30:00'],
+            'paused_seconds' => 0,
+            'stopped_at' => '2026-09-24 09:40:00',
+        ])
+        ->assertOk()
+        ->assertJsonPath('running', null);
+
+    $entry = TimeEntry::sole();
+
+    // Ended at the last heartbeat (09:32), not the claimed 09:40 and not the replay's 10:15,
+    // and flagged with why, because the claim ran more than a minute past the evidence.
+    expect($entry->isStopped())->toBeTrue()
+        ->and($entry->ended_at->toDateTimeString())->toBe('2026-09-24 09:32:00')
+        ->and($entry->duration_seconds)->toBe(32 * 60)
+        ->and($entry->isFlagged())->toBeTrue();
+});
+
 /* ------------------------------------------------------- manual and corrections */
 
 it('will not take a manual entry without a reason', function (): void {

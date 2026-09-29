@@ -2,6 +2,9 @@
 import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import AnnouncementBanner from '@/Components/Shell/AnnouncementBanner.vue';
+import ConnectivityStrip from '@/Components/Shell/ConnectivityStrip.vue';
+import NewVersionStrip from '@/Components/Shell/NewVersionStrip.vue';
+import SessionEndedDialog from '@/Components/Shell/SessionEndedDialog.vue';
 import { useShellLive } from '@/Components/Realtime/shell';
 
 /**
@@ -39,5 +42,11 @@ const drawsItsOwn = computed(() => page.component === 'Shared/Messages');
 </script>
 
 <template>
+    <!-- Reliability slice 1: the one mount of the session dialog, and its signed-out strip. -->
+    <SessionEndedDialog />
+    <!-- Reliability slice 2a: offline / server unreachable, one line for every poller. -->
+    <ConnectivityStrip />
+    <!-- Reliability slice 3: a deploy while this tab was open; the person chooses when to reload. -->
+    <NewVersionStrip />
     <AnnouncementBanner v-if="!drawsItsOwn" :announcement="announcement" class="mb-4" />
 </template>

@@ -5,6 +5,7 @@ import LoginHistoryCard, { type LoginAttempt } from '@/Components/Profile/LoginH
 import PasswordForm from '@/Components/Profile/PasswordForm.vue';
 import ProfileDetailsForm, { type ProfileDetails } from '@/Components/Profile/ProfileDetailsForm.vue';
 import SessionsCard, { type ActiveSession } from '@/Components/Profile/SessionsCard.vue';
+import SoundCard from '@/Components/Profile/SoundCard.vue';
 import TwoFactorCard, { type TwoFactorStatus } from '@/Components/Profile/TwoFactorCard.vue';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
@@ -47,6 +48,7 @@ defineProps<{
             </div>
             <div class="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
                 <TwoFactorCard class="order-2" :two-factor="twoFactor" />
+                <SoundCard class="order-6" />
             </div>
         </div>
     </PageShell>

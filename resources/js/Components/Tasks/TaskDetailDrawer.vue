@@ -14,6 +14,8 @@ import type {
     TaskSurface,
 } from '@/Components/Tasks/taskDetail';
 import { Button } from '@/Components/ui/button';
+import { fetchWithTimeout } from '@/lib/net';
+import { isSessionLive, reportResponse } from '@/lib/session';
 import { toast } from '@/lib/toast';
 
 /**
@@ -70,11 +72,16 @@ async function load(): Promise<void> {
         return;
     }
 
+    // Signed out, or moved to another surface: nothing is asked, and the session dialog speaks.
+    if (!isSessionLive()) {
+        return;
+    }
+
     const mine = ++token.value;
     loading.value = detail.value === null || detail.value.task.id !== id;
 
     try {
-        const response = await fetch(`/${props.surface}/tasks/${id}`, {
+        const response = await fetchWithTimeout(`/${props.surface}/tasks/${id}`, {
             credentials: 'same-origin',
             headers: {
                 'X-Inertia': 'true',
@@ -92,6 +99,25 @@ async function load(): Promise<void> {
         // same thing for any other request.
         if (response.status === 409) {
             router.visit(href.value);
+
+            return;
+        }
+
+        // The session ended or the role changed: the session module says so, once. What is
+        // already in the drawer stays; a drawer with nothing in it yet closes quietly.
+        if (await reportResponse(response)) {
+            if (detail.value === null || detail.value.task.id !== id) {
+                emit('update:open', false);
+            }
+
+            return;
+        }
+
+        // Only an Inertia answer carries task props. Anything else — a redirect the fetch
+        // followed onto another page — is not this task and must not be read as one.
+        if (response.ok && (response.redirected || !response.headers.has('X-Inertia'))) {
+            toast.error('That task could not be opened.');
+            emit('update:open', false);
 
             return;
         }

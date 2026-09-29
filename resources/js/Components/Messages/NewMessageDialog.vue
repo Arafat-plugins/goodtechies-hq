@@ -5,7 +5,9 @@ import { computed, nextTick, ref, useId, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import type { MessagePerson } from '@/Components/Messages/messages';
 import { initialsOf } from '@/Components/Messages/messages';
+import { personTone } from '@/Components/Messages/people';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
+import { cn } from '@/lib/utils';
 import { Button } from '@/Components/ui/button';
 import {
     Dialog,
@@ -185,7 +187,7 @@ function start(person: MessagePerson): void {
                             @click="start(person)"
                         >
                             <Avatar class="size-7">
-                                <AvatarFallback class="text-xs font-medium">
+                                <AvatarFallback :class="cn('text-xs font-medium', personTone(person.id).avatar)">
                                     {{ initialsOf(person.name) }}
                                 </AvatarFallback>
                             </Avatar>

@@ -95,7 +95,10 @@ class ConversationService
 
     public const CONTEXT_TASKS = 10;
 
-    public function __construct(private readonly ActivityLogger $activity) {}
+    public function __construct(
+        private readonly ActivityLogger $activity,
+        private readonly NotificationService $notifications,
+    ) {}
 
     /*
     |--------------------------------------------------------------------------
@@ -518,20 +521,52 @@ class ConversationService
      * `updateExistingPivot` rather than `syncWithoutDetaching`, so an existing row keeps its
      * identity and only its timestamp moves.
      */
-    public function markRead(User $user, Conversation $conversation): void
+    public function markRead(User $user, Conversation $conversation, ?int $throughMessageId = null): void
     {
-        $existing = $conversation->members()->whereKey($user->getKey())->exists();
+        $at = Carbon::now();
+        $caughtUp = true;
 
-        // Written through `UnreadLine::sql()` — a STRING at microsecond precision — because a
-        // `DateTimeInterface` binding goes through `Grammar::getDateFormat()` (`Y-m-d H:i:s`) on
-        // its way to the database and arrives with the fraction of a second already gone.
-        // Decision M-15: at second precision, a reply posted in the same second as this read is
-        // equal to it rather than after it, and `>` calls it already-read.
-        $at = UnreadLine::sql(Carbon::now());
+        // Messaging polish: "read up to THIS message" rather than "read up to now". A screen that
+        // knows exactly which message is the newest one somebody has actually had in front of
+        // them marks that one, so a message that landed a moment later — and has not been drawn
+        // yet — stays unread. A message id from another conversation marks nothing.
+        if ($throughMessageId !== null) {
+            $raw = $conversation->messages()->whereKey($throughMessageId)->toBase()->value('created_at');
 
-        $existing
-            ? $conversation->members()->updateExistingPivot($user->getKey(), ['last_read_at' => $at])
-            : $conversation->members()->attach($user->getKey(), ['last_read_at' => $at]);
+            if ($raw === null) {
+                return;
+            }
+
+            $at = Carbon::parse((string) $raw);
+            $caughtUp = ! $conversation->messages()
+                ->where('id', '>', $throughMessageId)
+                ->where('author_id', '!=', $user->getKey())
+                ->exists();
+        }
+
+        $member = $conversation->members()->whereKey($user->getKey())->first();
+        $current = $member?->pivot?->last_read_at;
+
+        // The line never moves backwards: a slow request that marks an older message must not
+        // un-read what a quicker one already marked.
+        if ($current === null || Carbon::parse((string) $current)->lessThan($at)) {
+            // Written through `UnreadLine::sql()` — a STRING at microsecond precision — because a
+            // `DateTimeInterface` binding goes through `Grammar::getDateFormat()` (`Y-m-d H:i:s`)
+            // on its way to the database and arrives with the fraction of a second already gone.
+            // Decision M-15: at second precision, a reply posted in the same second as this read
+            // is equal to it rather than after it, and `>` calls it already-read.
+            $value = UnreadLine::sql($at);
+
+            $member !== null
+                ? $conversation->members()->updateExistingPivot($user->getKey(), ['last_read_at' => $value])
+                : $conversation->members()->attach($user->getKey(), ['last_read_at' => $value]);
+        }
+
+        // Somebody who has read the whole conversation has read what the notifications about it
+        // were asking them to read — the DM, the mention, the announcement.
+        if ($caughtUp) {
+            $this->notifications->markConversationRead($user, $conversation);
+        }
     }
 
     /**

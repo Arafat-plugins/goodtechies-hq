@@ -20,6 +20,7 @@ import type { BoardCard } from '@/Components/Tasks/taskBoard';
 import type { TaskSurface, TaskTransition } from '@/Components/Tasks/taskDetail';
 import { formatDate, initials, taskRoutes } from '@/Components/Tasks/taskDetail';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
+import { personTone } from '@/Components/Messages/people';
 import { Button } from '@/Components/ui/button';
 import {
     DropdownMenu,
@@ -220,7 +221,7 @@ const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || prop
         <div class="flex min-w-0 flex-wrap items-center gap-2">
             <span v-if="card.primary_assignee" class="flex min-w-0 items-center gap-1.5">
                 <Avatar class="size-6">
-                    <AvatarFallback class="text-xs">
+                    <AvatarFallback :class="cn('text-xs', personTone(card.primary_assignee.id).avatar)">
                         {{ initials(card.primary_assignee.name) }}
                     </AvatarFallback>
                 </Avatar>

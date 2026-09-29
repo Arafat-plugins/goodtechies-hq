@@ -1,15 +1,20 @@
 <?php
 
+use App\Http\ErrorResponses;
 use App\Http\Middleware\ContentSecurityPolicy;
 use App\Http\Middleware\EnsureActiveUser;
 use App\Http\Middleware\EnsureSurface;
 use App\Http\Middleware\EnsureTwoFactorEnrolled;
 use App\Http\Middleware\HandleInertiaRequests;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Session\TokenMismatchException;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -62,4 +67,46 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        // Session expiry (reliability slice 1). A background Inertia visit or a fetch() that
+        // finds the session gone must NOT be redirected to /login: Inertia would follow the
+        // redirect and swap the page the person is typing into for the login screen. They get
+        // a 401 the client turns into a "your session has ended" dialog over the page instead.
+        // A full-page GET keeps the redirect (with the intended URL) it always had.
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
+            if (! $request->hasHeader('X-Inertia') && ! $request->expectsJson()) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'Your session has ended.',
+                'reason' => 'session',
+            ], 401);
+        });
+
+        // The framework has already mapped a TokenMismatchException to an HttpException(419)
+        // by the time render callbacks run, so it is recognised by what it wraps.
+        $exceptions->render(function (HttpException $e, Request $request) {
+            if (! $e->getPrevious() instanceof TokenMismatchException) {
+                return null;
+            }
+
+            if (! $request->hasHeader('X-Inertia') && ! $request->expectsJson()) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'Your session has ended.',
+                'reason' => 'csrf',
+            ], 419);
+        });
+
+        // Reliability slice 2a. An Inertia visit that meets an error used to get Laravel's HTML
+        // page, which Inertia draws in its raw modal. The STATUS never changes here (a 404
+        // stays a 404, a 403 a 403 — the permission matrix and the privacy rules depend on
+        // it); only the body does. Rendering and logging already happened by the time this
+        // runs, so a 500 is reported exactly as before.
+        $exceptions->respond(function (SymfonyResponse $response, Throwable $e, Request $request) {
+            return ErrorResponses::for($response, $request);
+        });
     })->create();

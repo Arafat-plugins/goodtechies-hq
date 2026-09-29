@@ -3,6 +3,7 @@ import type { Errors, FormDataConvertible } from '@inertiajs/core';
 import { ref, type Ref } from 'vue';
 import type { FileSummary } from '@/Components/Files/files';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
+import { inlineUploadFailure, type UploadFailure } from '@/lib/net';
 
 /**
  * The messaging client: the one shape of a thread, the endpoints that read and write one, and
@@ -286,6 +287,13 @@ export interface MessageMutationOptions {
     onAccepted?: () => void;
     onInvalid?: (errors: Errors) => void;
     onFinish?: () => void;
+    /** 0-100 as the bytes go (reliability slice 2b). Only a FormData send reports any. */
+    onProgress?: (percent: number) => void;
+    /**
+     * The caller shows no answer / a 5xx / a 413 inline, so the global toast stays quiet for
+     * this one visit (`inlineUploadFailure`). Left out, the global handler speaks as before.
+     */
+    onSendFailed?: (kind: UploadFailure) => void;
 }
 
 /**
@@ -303,6 +311,12 @@ export function mutateMessage(
         forceFormData: options.forceFormData,
         preserveScroll: true,
         preserveState: true,
+        onProgress: (event) => {
+            if (event) {
+                options.onProgress?.(event.percentage ?? Math.round((event.progress ?? 0) * 100));
+            }
+        },
+        ...(options.onSendFailed ? inlineUploadFailure(options.onSendFailed) : {}),
         onSuccess: () => options.onAccepted?.(),
         onError: (errors) => options.onInvalid?.(errors),
         onFinish: () => options.onFinish?.(),

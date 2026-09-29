@@ -25,6 +25,11 @@ export const toast = {
         return sonner.error(message, options);
     },
 
+    /** Neutral news that needs no action — "still working", say. */
+    info(message: string, options?: ToastOptions): ToastId {
+        return sonner.info(message, options);
+    },
+
     loading(message: string, options?: ToastOptions): ToastId {
         return sonner.loading(message, options);
     },

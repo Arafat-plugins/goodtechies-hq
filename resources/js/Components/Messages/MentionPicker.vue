@@ -37,6 +37,12 @@ const props = defineProps<{
     /** The people the server will accept a mention of. The same list it validates against. */
     people: MessagePerson[];
     disabled?: boolean;
+    /**
+     * Messaging polish: inside the composer pill the trigger reads "@ Mentions" from `sm` up,
+     * after the reference, and is round like the pill's other controls. The accessible name is
+     * unchanged either way.
+     */
+    labelled?: boolean;
 }>();
 
 const emit = defineEmits<{ pick: [person: MessagePerson] }>();
@@ -172,7 +178,8 @@ function choose(person: MessagePerson | undefined): void {
                         ref="triggerEl"
                         type="button"
                         variant="ghost"
-                        size="icon-sm"
+                        :size="labelled ? 'sm' : 'icon-sm'"
+                        :class="labelled && 'h-8 gap-1.5 rounded-full px-2 text-muted-foreground hover:text-foreground sm:h-9 sm:px-2.5'"
                         :disabled="disabled || people.length === 0"
                         :aria-expanded="open"
                         aria-haspopup="listbox"
@@ -181,6 +188,7 @@ function choose(person: MessagePerson | undefined): void {
                         @click="open ? hide() : show()"
                     >
                         <AtSign aria-hidden="true" />
+                        <span v-if="labelled" class="hidden sm:inline" aria-hidden="true">Mentions</span>
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent>Mention somebody</TooltipContent>
@@ -189,7 +197,8 @@ function choose(person: MessagePerson | undefined): void {
 
         <div
             v-if="open"
-            class="absolute bottom-full left-0 z-20 mb-2 flex w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-md border bg-popover p-2 text-popover-foreground shadow-overlay"
+            :class="labelled ? 'right-0' : 'left-0'"
+            class="absolute bottom-full z-20 mb-2 flex w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-md border bg-popover p-2 text-popover-foreground shadow-overlay"
             @keydown.esc.prevent.stop="hide()"
         >
             <label :for="inputId" class="sr-only">Find somebody to mention</label>

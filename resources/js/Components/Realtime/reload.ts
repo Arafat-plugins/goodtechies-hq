@@ -1,7 +1,10 @@
 import { router } from '@inertiajs/vue3';
 import type { MaybeRefOrGetter } from 'vue';
 import type { LiveRefreshHandle, LiveRefreshOptions } from '@/Components/Realtime/live';
-import { overlayOpen, useLiveRefresh } from '@/Components/Realtime/live';
+import { overlayOpen, SHELL_POLL_MS, useLiveRefresh } from '@/Components/Realtime/live';
+import { backoff } from '@/lib/net';
+import { isSessionLive } from '@/lib/session';
+import { hasNewVersion } from '@/lib/version';
 
 /**
  * One Inertia partial reload for however many live screens asked for one.
@@ -45,6 +48,16 @@ const wanted = new Set<string>();
 let scheduled = false;
 let inFlight = false;
 
+/**
+ * Reliability slice 2a: the batch's backoff. Every live screen's reads go out through this one
+ * request, so this is the one gate they share. Healthy, it never holds anything back and each
+ * screen keeps its own interval exactly. After a failed batch (no answer, a 5xx, or the server's
+ * `{reason: "error"}`), the next one waits twice the shell's interval — the one poll every page
+ * runs — then twice that, up to five minutes. A tick inside the window leaves its names in
+ * `wanted` for the first tick after it; the browser coming back online opens the gate at once.
+ */
+const gate = backoff(SHELL_POLL_MS);
+
 function send(): void {
     scheduled = false;
 
@@ -54,17 +67,51 @@ function send(): void {
         return;
     }
 
+    // Signed out (or moved to another surface): nothing goes out. `wanted` keeps its names, and
+    // the pollers' own ticks re-ask once the session is back.
+    if (!isSessionLive()) {
+        return;
+    }
+
+    // A new deploy (reliability slice 3): the names wait, and "Reload now" answers all of them.
+    if (hasNewVersion()) {
+        return;
+    }
+
+    // Backed off, or the browser is offline: the names wait for the next tick past the gate.
+    if (!gate.ready()) {
+        return;
+    }
+
     const only = [...wanted];
     wanted.clear();
     inFlight = true;
+
+    const sentAt = Date.now();
+    let failed = false;
 
     // `preserveState` and `preserveScroll` are not passed because `router.reload()` forces both
     // to true itself (`doReload`), and Inertia's own types refuse them here to say so. They are
     // the reason this is a `reload` and not a `visit`.
     router.reload({
         only,
+        onSuccess: () => gate.succeed(),
+        onNetworkError: () => {
+            failed = true;
+        },
+        onHttpException: (response) => {
+            // A 401 / 419 / surface 403 is the session module's; anything else here is a
+            // failed read (`app.ts` keeps it silent and off the page).
+            if (response.status >= 500 || response.status === 404 || response.status === 403 || response.status === 429) {
+                failed = true;
+            }
+        },
         onFinish: () => {
             inFlight = false;
+
+            if (failed) {
+                gate.fail(sentAt);
+            }
 
             // Anything that asked while this one was out goes now.
             if (wanted.size > 0) {

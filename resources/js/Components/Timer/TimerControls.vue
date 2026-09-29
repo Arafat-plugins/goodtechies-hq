@@ -4,7 +4,7 @@ import { computed, ref, watch } from 'vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 import type { TimeableTask } from '@/Components/Timer/timer';
-import { formatClock, formatDuration, spokenDuration, useTimer } from '@/Components/Timer/timer';
+import { formatClock, formatDuration, OFFLINE_STOP_TEXT, spokenDuration, useTimer } from '@/Components/Timer/timer';
 import { Button } from '@/Components/ui/button';
 import { Label } from '@/Components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/Components/ui/native-select';
@@ -214,7 +214,7 @@ function start(): void {
                 v-if="!running"
                 type="button"
                 size="sm"
-                :disabled="timer.busy.value || (taskId === null && chosen === null)"
+                :disabled="timer.busy.value || timer.stopPending.value || (taskId === null && chosen === null)"
                 @click="start"
             >
                 <Play aria-hidden="true" />
@@ -284,7 +284,17 @@ function start(): void {
             </p>
         </div>
 
-        <p v-if="timer.status.value === 'offline'" class="w-full text-xs text-muted-foreground">
+        <!--
+            Reliability slice 4: a Stop pressed while goodERP could not be reached. It is kept in
+            this browser and replayed; the line says so, so nobody presses Stop again or thinks
+            the session is lost. Start waits until it has been delivered.
+        -->
+        <p v-if="timer.stopPending.value" role="alert" class="flex w-full items-start gap-2 text-xs text-muted-foreground">
+            <CloudOff class="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+            {{ OFFLINE_STOP_TEXT }}
+        </p>
+
+        <p v-else-if="timer.status.value === 'offline'" class="w-full text-xs text-muted-foreground">
             The connection has gone. This session is being kept here and sent when it comes back
             — and if it stays away for more than
             {{ timer.state.value?.heartbeat_timeout_minutes ?? 5 }} minutes the server ends this
