@@ -2,6 +2,7 @@
 import { useForm } from '@inertiajs/vue3';
 import { computed, nextTick, ref, watch } from 'vue';
 import type { TaskNamedRef, TaskOption } from '@/Components/Tasks/TaskList.vue';
+import { BIRTH_STATUSES } from '@/Components/Tasks/taskBoard';
 import { focusField } from '@/Components/Tasks/taskDetail';
 import { Button } from '@/Components/ui/button';
 import { Checkbox } from '@/Components/ui/checkbox';
@@ -47,11 +48,17 @@ const props = defineProps<{
     employees?: TaskNamedRef[];
     /** Preselect the project when the modal is opened from inside one. */
     projectId?: number | null;
+    /**
+     * Preselect "Starts in" — the Board's lane "Add task" (brief 012). Only a birth status is
+     * taken (`BIRTH_STATUSES`); anything else falls back to To do, as the server would refuse it.
+     */
+    status?: string | null;
 }>();
 
 const emit = defineEmits<{ 'update:open': [open: boolean]; created: [] }>();
 
 const DEFAULT_PRIORITY = 'medium';
+const DEFAULT_STATUS = 'todo';
 
 const form = useForm<{
     project_id: string;
@@ -68,7 +75,7 @@ const form = useForm<{
     project_id: '',
     title: '',
     description: '',
-    status: 'todo',
+    status: DEFAULT_STATUS,
     priority: DEFAULT_PRIORITY,
     start_date: '',
     due_date: '',
@@ -95,7 +102,8 @@ watch(
         form.clearErrors();
         form.priority = defaultPriority.value;
         form.project_id = props.projectId ? String(props.projectId) : '';
-        // What the modal opened with is the baseline, so a preset project is not "unsaved".
+        form.status = props.status && BIRTH_STATUSES.includes(props.status) ? props.status : DEFAULT_STATUS;
+        // What the modal opened with is the baseline, so a preset project or lane is not "unsaved".
         form.defaults();
         tab.value = 'task';
     },

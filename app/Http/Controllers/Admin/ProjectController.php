@@ -11,9 +11,11 @@ use App\Models\ActivityLog;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Models\Project;
+use App\Models\TimeEntry;
 use App\Services\ActivityLogger;
 use App\Services\ConversationService;
 use App\Services\ProjectService;
+use App\Services\TaskTimerService;
 use App\Support\BillingFrequency;
 use App\Support\BillingType;
 use App\Support\Priority;
@@ -50,6 +52,7 @@ class ProjectController extends Controller
         private readonly ProjectService $projects,
         private readonly ActivityLogger $activity,
         private readonly ConversationService $conversations,
+        private readonly TaskTimerService $timers,
     ) {}
 
     public function index(Request $request): Response
@@ -77,6 +80,12 @@ class ProjectController extends Controller
             'clients' => $this->clients(),
             'projectManagers' => $this->projectManagers(),
             ...$this->optionLists(),
+            // "Working now" per project (flow F3): open task timers grouped by project id, one
+            // statement for the whole page. ABSENT without `watchLive`, never an empty map that
+            // would read as "nobody is working".
+            ...($request->user()->can('watchLive', TimeEntry::class)
+                ? ['workingNowByProject' => fn (): array => $this->timers->workingNowByProject($request->user()) ?? []]
+                : []),
         ]);
     }
 
@@ -111,7 +120,7 @@ class ProjectController extends Controller
             ->with('success', 'Project created.');
     }
 
-    public function show(Project $project): Response
+    public function show(Request $request, Project $project): Response
     {
         Gate::authorize('view', $project);
 
@@ -131,6 +140,11 @@ class ProjectController extends Controller
             // `forProject()` rather than a relation read, so a project created in the window
             // while the Phase 6 backfill ran gets its channel here rather than a missing tab.
             'discussionConversationId' => $this->conversations->forProject($project)->getKey(),
+
+            // Who is timing a task on this project right now (flow F3) — absent without `watchLive`.
+            ...($request->user()->can('watchLive', TimeEntry::class)
+                ? ['workingNow' => fn (): array => $this->timers->workingNow($request->user(), (int) $project->getKey()) ?? []]
+                : []),
         ]);
     }
 

@@ -10,7 +10,10 @@ import PageShell from '@/Components/PageShell.vue';
 import type { Paginated } from '@/Components/Pagination.vue';
 import { moneyLine } from '@/Components/Projects/FinanceCard.vue';
 import type { NamedRef, Option, Project } from '@/Components/Projects/ProjectForm.vue';
+import ProjectWorkingNow from '@/Components/Projects/ProjectWorkingNow.vue';
+import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
+import { workingNowPing, type WorkingNowRow } from '@/Components/Timer/taskTimer';
 import { Button } from '@/Components/ui/button';
 import { Checkbox } from '@/Components/ui/checkbox';
 import {
@@ -50,7 +53,21 @@ const props = defineProps<{
     priorities: Option[];
     billingTypes: Option[];
     billingFrequencies: Option[];
+    /** Open task timers by project id (flow F3) — absent for anybody without `watchLive`. */
+    workingNowByProject?: Record<number, WorkingNowRow[]>;
 }>();
+
+/**
+ * "Working now" follows the timers live: a `task.changed` kind `timer` frame (flow F1) becomes a
+ * partial reload of this one prop. A reader without the prop never asks for it.
+ */
+if (props.workingNowByProject !== undefined) {
+    useLiveTaskProps(['workingNowByProject'], { accept: workingNowPing });
+}
+
+function workingOn(projectId: number): WorkingNowRow[] {
+    return props.workingNowByProject?.[projectId] ?? [];
+}
 
 /* ----------------------------------------------------------------- filters */
 
@@ -253,6 +270,7 @@ function confirmArchiveToggle(): void {
                         <span v-if="row.domain" class="text-xs font-normal text-muted-foreground break-all">
                             {{ row.domain }}
                         </span>
+                        <ProjectWorkingNow v-if="workingOn(row.id).length" :rows="workingOn(row.id)" />
                     </div>
                 </template>
 

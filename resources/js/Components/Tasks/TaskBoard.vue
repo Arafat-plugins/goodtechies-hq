@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { KanbanSquare } from '@lucide/vue';
+import { KanbanSquare, Plus } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import { useLiveTaskProps } from '@/Components/Realtime/reload';
@@ -12,6 +12,7 @@ import type { BoardCard, BoardColumn, BoardPayload, TransitionMap } from '@/Comp
 import { asDetail, cloneColumns, moveCard, movesFor } from '@/Components/Tasks/taskBoard';
 import type { TaskSurface } from '@/Components/Tasks/taskDetail';
 import { mutateTask, taskRoutes } from '@/Components/Tasks/taskDetail';
+import { Button } from '@/Components/ui/button';
 import { useDragPan } from '@/lib/dragPan';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
@@ -67,11 +68,18 @@ const props = defineProps<{
     searchPlaceholder: string;
     emptyTitle: string;
     emptyDescription: string;
+    /**
+     * The lanes that end in an "Add task" row (brief 012). The page decides: the Admin Board
+     * passes the birth statuses, the Employee Board passes nothing and shows none.
+     */
+    addableStatuses?: readonly string[];
 }>();
 
 const emit = defineEmits<{
     /** A card asked to be opened; the page owns the detail drawer. */
     'open-task': [taskId: number];
+    /** A lane's "Add task" was pressed; the page owns the quick-add modal. */
+    'add-task': [status: string];
 }>();
 
 /* --------------------------------------------------------------- the local board */
@@ -654,6 +662,25 @@ watch(isPanning, (panning) => {
                             Nothing in {{ column.label }}
                         </li>
                     </ul>
+
+                    <!--
+                        Brief 012: start a task in this lane. Outside the list, so it adds nothing
+                        to a drop's index (`indexAt` counts cards only) and is no drop zone of its
+                        own — a card dropped over it lands at the end of the lane, as it would on
+                        any empty stretch of it. A button, so `PAN_EXCLUDE` never pans from it.
+                    -->
+                    <Button
+                        v-if="addableStatuses?.includes(column.key)"
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        data-lane-add
+                        class="w-full justify-start text-muted-foreground"
+                        @click="emit('add-task', column.key)"
+                    >
+                        <Plus aria-hidden="true" />
+                        Add task<span class="sr-only"> to {{ column.label }}</span>
+                    </Button>
                 </section>
             </div>
         </div>

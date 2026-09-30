@@ -9,7 +9,6 @@ import { tagTone } from '@/Components/Tasks/TaskList.vue';
 import type { TaskDetail, TaskSurface } from '@/Components/Tasks/taskDetail';
 import { focusField, formatDate, formatMinutes, mutateTask, taskRoutes } from '@/Components/Tasks/taskDetail';
 import { Button } from '@/Components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
 import {
     Dialog,
     DialogContent,
@@ -161,7 +160,84 @@ function save(): void {
     });
 }
 
+/** The rows' label column and their borderless-until-hover controls. */
+const rowLabel = 'self-start py-1.5 text-xs font-medium text-muted-foreground';
+const rowControl = 'h-8 border-transparent px-2 shadow-flat hover:border-input dark:bg-transparent';
+
 const formErrors = computed(() => (page.props.errors ?? {}) as Record<string, string>);
+
+/* ------------------------------------------------------------- in-place rows */
+
+/**
+ * Brief 014: the Asana-style rows write one field at a time, through the same `PUT` the
+ * "Edit details" form sends — `UpdateTaskRequest` takes a partial body (tags and the move
+ * already rely on it). Plan fields are offered in place only to someone who may plan.
+ */
+const mayPlanHere = computed(() => mayPlan.value && editable.value);
+const savingField = ref<string | null>(null);
+
+function saveField(field: 'due_date' | 'priority' | 'description', value: string | null): void {
+    if (savingField.value !== null) {
+        return;
+    }
+
+    savingField.value = field;
+
+    mutateTask('put', routes.value.update, { [field]: value }, {
+        onAccepted: () => {
+            if (field === 'description') {
+                descriptionBaseline.value = description.value;
+            }
+        },
+        onSettled: () => emit('settled'),
+        onFinish: () => {
+            savingField.value = null;
+        },
+    });
+}
+
+function changeDue(event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+
+    if (value !== (props.task.due_date ?? '')) {
+        saveField('due_date', value === '' ? null : value);
+    }
+}
+
+function changePriority(value: unknown): void {
+    if (typeof value === 'string' && value !== '' && value !== props.task.priority) {
+        saveField('priority', value);
+    }
+}
+
+/**
+ * The description is plain text that turns into a field when clicked, and saves on blur.
+ * A live re-read (flow F1) replaces it only while nobody is typing in it — typed text is safe.
+ */
+const description = ref(props.task.description ?? '');
+const descriptionBaseline = ref(description.value);
+const descriptionFocused = ref(false);
+const descriptionDirty = computed(() => description.value !== descriptionBaseline.value);
+
+watch(
+    () => props.task.description,
+    (value) => {
+        if (!descriptionFocused.value && !descriptionDirty.value) {
+            description.value = value ?? '';
+            descriptionBaseline.value = description.value;
+        }
+    },
+);
+
+useUnsavedGuard(() => descriptionDirty.value);
+
+function blurDescription(): void {
+    descriptionFocused.value = false;
+
+    if (descriptionDirty.value) {
+        saveField('description', blank(description.value));
+    }
+}
 
 /* ----------------------------------------------------------------------- tags */
 
@@ -311,178 +387,177 @@ function move(): void {
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4">
-        <CardHeader>
-            <CardTitle class="text-sm font-medium">Details</CardTitle>
-            <CardDescription v-if="!mayPlan">
-                Dates, priority and the title are set by an administrator or a manager.
-            </CardDescription>
-        </CardHeader>
+    <!--
+        Brief 014: the Asana-style label | value rows. No card, no prose subline — the rows are
+        the panel. Due date, priority and the description are edited in place (one field per
+        `PUT`); the title, start date and estimate stay behind "Edit details".
+    -->
+    <section class="flex min-w-0 flex-col gap-5" data-task-fields>
+        <form v-if="editing" class="flex min-w-0 flex-col gap-4" novalidate @submit.prevent="save">
+            <div v-if="mayPlan" class="flex min-w-0 flex-col gap-2">
+                <Label for="task-title">Name</Label>
+                <Input id="task-title" ref="firstField" v-model="draft.title" :disabled="saving" />
+                <p v-if="formErrors.title" class="text-xs text-destructive">{{ formErrors.title }}</p>
+            </div>
 
-        <CardContent class="flex min-w-0 flex-col gap-4">
-            <form v-if="editing" class="flex min-w-0 flex-col gap-4" novalidate @submit.prevent="save">
-                <div v-if="mayPlan" class="flex min-w-0 flex-col gap-2">
-                    <Label for="task-title">Name</Label>
-                    <Input id="task-title" ref="firstField" v-model="draft.title" :disabled="saving" />
-                    <p v-if="formErrors.title" class="text-xs text-destructive">{{ formErrors.title }}</p>
+            <div class="flex min-w-0 flex-col gap-2">
+                <Label for="task-description">Description</Label>
+                <Textarea id="task-description" v-model="draft.description" rows="5" :disabled="saving" />
+                <p v-if="formErrors.description" class="text-xs text-destructive">
+                    {{ formErrors.description }}
+                </p>
+            </div>
+
+            <div class="grid min-w-0 gap-4 sm:grid-cols-2">
+                <div v-if="mayPlan && priorities?.length" class="flex min-w-0 flex-col gap-2">
+                    <Label for="task-priority">Priority</Label>
+                    <Select v-model="draft.priority">
+                        <SelectTrigger id="task-priority" class="w-full">
+                            <SelectValue placeholder="Pick one…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem
+                                v-for="priority in priorities"
+                                :key="priority.value"
+                                :value="priority.value"
+                            >
+                                {{ priority.label }}
+                            </SelectItem>
+                        </SelectContent>
+                    </Select>
                 </div>
 
                 <div class="flex min-w-0 flex-col gap-2">
-                    <Label for="task-description">Description</Label>
-                    <Textarea id="task-description" v-model="draft.description" rows="5" :disabled="saving" />
-                    <p v-if="formErrors.description" class="text-xs text-destructive">
-                        {{ formErrors.description }}
+                    <Label for="task-estimate">Estimate (minutes)</Label>
+                    <Input
+                        id="task-estimate"
+                        v-model="draft.estimated_minutes"
+                        type="number"
+                        min="0"
+                        :disabled="saving"
+                    />
+                    <p v-if="formErrors.estimated_minutes" class="text-xs text-destructive">
+                        {{ formErrors.estimated_minutes }}
                     </p>
                 </div>
 
-                <div class="grid min-w-0 gap-4 sm:grid-cols-2">
-                    <div v-if="mayPlan && priorities?.length" class="flex min-w-0 flex-col gap-2">
-                        <Label for="task-priority">Priority</Label>
-                        <Select v-model="draft.priority">
-                            <SelectTrigger id="task-priority" class="w-full">
-                                <SelectValue placeholder="Pick one…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem
-                                    v-for="priority in priorities"
-                                    :key="priority.value"
-                                    :value="priority.value"
-                                >
-                                    {{ priority.label }}
-                                </SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-
-                    <div class="flex min-w-0 flex-col gap-2">
-                        <Label for="task-estimate">Estimate (minutes)</Label>
-                        <Input
-                            id="task-estimate"
-                            v-model="draft.estimated_minutes"
-                            type="number"
-                            min="0"
-                            :disabled="saving"
-                        />
-                        <p v-if="formErrors.estimated_minutes" class="text-xs text-destructive">
-                            {{ formErrors.estimated_minutes }}
-                        </p>
-                    </div>
-
-                    <div v-if="mayPlan" class="flex min-w-0 flex-col gap-2">
-                        <Label for="task-start-date">Start date</Label>
-                        <Input id="task-start-date" v-model="draft.start_date" type="date" :disabled="saving" />
-                        <p v-if="formErrors.start_date" class="text-xs text-destructive">
-                            {{ formErrors.start_date }}
-                        </p>
-                    </div>
-
-                    <div v-if="mayPlan" class="flex min-w-0 flex-col gap-2">
-                        <Label for="task-due-date">Due date</Label>
-                        <Input id="task-due-date" v-model="draft.due_date" type="date" :disabled="saving" />
-                        <p v-if="formErrors.due_date" class="text-xs text-destructive">
-                            {{ formErrors.due_date }}
-                        </p>
-                    </div>
-                </div>
-
-                <div class="flex flex-wrap items-center gap-2">
-                    <Button type="submit" size="sm" :disabled="saving">
-                        {{ saving ? 'Saving…' : 'Save details' }}
-                    </Button>
-                    <Button type="button" size="sm" variant="outline" :disabled="saving" @click="cancel">
-                        Cancel
-                    </Button>
-                </div>
-            </form>
-
-            <template v-else>
-                <div class="flex min-w-0 flex-col gap-1">
-                    <p class="text-xs font-medium text-muted-foreground">Description</p>
-                    <p v-if="task.description" class="min-w-0 text-sm whitespace-pre-line">
-                        {{ task.description }}
+                <div v-if="mayPlan" class="flex min-w-0 flex-col gap-2">
+                    <Label for="task-start-date">Start date</Label>
+                    <Input id="task-start-date" v-model="draft.start_date" type="date" :disabled="saving" />
+                    <p v-if="formErrors.start_date" class="text-xs text-destructive">
+                        {{ formErrors.start_date }}
                     </p>
-                    <p v-else class="text-sm text-muted-foreground">No description.</p>
                 </div>
 
-                <dl class="grid min-w-0 gap-4 sm:grid-cols-2">
-                    <div class="flex min-w-0 flex-col gap-1">
-                        <dt class="text-xs font-medium text-muted-foreground">Project</dt>
-                        <!--
-                            A link in the reading colour with an underline on hover — the same
-                            treatment every other in-content link in this app has. Not
-                            `text-primary`: the shell already spends the screen's one orange on
-                            the active nav rail, and a page's primary button spends the other
-                            (DESIGN.md §5.3).
-                        -->
-                        <dd class="flex min-w-0 flex-col items-start gap-1 text-sm break-words">
-                            <Link
-                                v-if="task.project"
-                                :href="`/${surface}/projects/${task.project.id}`"
-                                class="font-medium hover:underline"
-                            >
-                                {{ task.project.name }}
-                            </Link>
-                            <template v-else>—</template>
-                            <!--
-                                The move itself is a dialog, not this button: it has a
-                                consequence for the task's tags that has to be said before
-                                the click rather than found on the timeline afterwards.
+                <div v-if="mayPlan" class="flex min-w-0 flex-col gap-2">
+                    <Label for="task-due-date">Due date</Label>
+                    <Input id="task-due-date" v-model="draft.due_date" type="date" :disabled="saving" />
+                    <p v-if="formErrors.due_date" class="text-xs text-destructive">
+                        {{ formErrors.due_date }}
+                    </p>
+                </div>
+            </div>
 
-                                Outline, like every other control on this screen — and
-                                deliberately not the `link` variant, which is `text-primary`:
-                                the shell already spends the screen's one orange on the active
-                                nav rail (DESIGN.md §5.3), which is the same reason the project
-                                name above is a reading-coloured link.
-                            -->
-                            <Button
-                                v-if="mayMove"
-                                ref="moveOpener"
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                class="mt-1"
-                                @click="openMove"
-                            >
-                                <FolderInput aria-hidden="true" />
-                                Move to another project…
-                            </Button>
-                        </dd>
-                    </div>
-                    <div class="flex min-w-0 flex-col gap-1">
-                        <dt class="text-xs font-medium text-muted-foreground">Priority</dt>
-                        <dd class="min-w-0 text-sm">{{ task.priority_label ?? '—' }}</dd>
-                    </div>
-                    <div class="flex min-w-0 flex-col gap-1">
-                        <dt class="text-xs font-medium text-muted-foreground">Start date</dt>
-                        <dd class="min-w-0 text-sm tabular-nums">{{ formatDate(task.start_date) }}</dd>
-                    </div>
-                    <div class="flex min-w-0 flex-col gap-1">
-                        <dt class="text-xs font-medium text-muted-foreground">Due date</dt>
-                        <!-- Late prints its word; red alone says nothing in greyscale (§5.6). -->
-                        <dd :class="cn('min-w-0 text-sm tabular-nums', task.is_overdue && 'text-destructive')">
-                            {{ formatDate(task.due_date) }}
-                            <span v-if="task.is_overdue" class="text-xs font-medium">· Overdue</span>
-                        </dd>
-                    </div>
-                    <div class="flex min-w-0 flex-col gap-1">
-                        <dt class="text-xs font-medium text-muted-foreground">Estimate</dt>
-                        <dd class="min-w-0 text-sm tabular-nums">{{ formatMinutes(task.estimated_minutes) }}</dd>
-                    </div>
-                    <div class="flex min-w-0 flex-col gap-1">
-                        <dt class="text-xs font-medium text-muted-foreground">Created by</dt>
-                        <dd class="min-w-0 text-sm break-words">{{ task.created_by?.name ?? '—' }}</dd>
-                    </div>
-                </dl>
+            <div class="flex flex-wrap items-center gap-2">
+                <Button type="submit" size="sm" :disabled="saving">
+                    {{ saving ? 'Saving…' : 'Save details' }}
+                </Button>
+                <Button type="button" size="sm" variant="outline" :disabled="saving" @click="cancel">
+                    Cancel
+                </Button>
+            </div>
+        </form>
+
+        <template v-else>
+            <dl class="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1 text-sm">
+                <template v-if="$slots.assignee">
+                    <dt :class="rowLabel">Assignee</dt>
+                    <dd class="min-w-0"><slot name="assignee" /></dd>
+                </template>
+
+                <dt :class="rowLabel"><label for="task-row-due">Due date</label></dt>
+                <dd class="flex min-w-0 flex-wrap items-center gap-2">
+                    <Input
+                        v-if="mayPlanHere"
+                        id="task-row-due"
+                        type="date"
+                        :model-value="task.due_date ?? ''"
+                        :disabled="savingField === 'due_date'"
+                        :class="cn(rowControl, 'w-auto tabular-nums', task.is_overdue && 'text-destructive')"
+                        data-row-due
+                        @change="changeDue"
+                    />
+                    <span v-else :class="cn('py-1 tabular-nums', task.is_overdue && 'text-destructive')">
+                        {{ formatDate(task.due_date) }}
+                    </span>
+                    <!-- Late prints its word; red alone says nothing in greyscale (§5.6). -->
+                    <span v-if="task.is_overdue" class="text-xs font-medium text-destructive">Overdue</span>
+                </dd>
+
+                <dt :class="rowLabel"><label for="task-row-priority">Priority</label></dt>
+                <dd class="min-w-0">
+                    <Select
+                        v-if="mayPlanHere && priorities?.length"
+                        :model-value="task.priority ?? ''"
+                        :disabled="savingField === 'priority'"
+                        @update:model-value="changePriority"
+                    >
+                        <SelectTrigger id="task-row-priority" size="sm" :class="cn(rowControl, 'w-auto')" data-row-priority>
+                            <SelectValue placeholder="—" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem v-for="priority in priorities" :key="priority.value" :value="priority.value">
+                                {{ priority.label }}
+                            </SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <span v-else class="py-1">{{ task.priority_label ?? '—' }}</span>
+                </dd>
+
+                <dt :class="rowLabel">Project</dt>
+                <!--
+                    A link in the reading colour with an underline on hover — not `text-primary`:
+                    the shell already spends the screen's one orange (DESIGN.md §5.3). The move
+                    is a dialog because it has a consequence for the task's tags.
+                -->
+                <dd class="flex min-w-0 flex-wrap items-center gap-1 break-words">
+                    <Link
+                        v-if="task.project"
+                        :href="`/${surface}/projects/${task.project.id}`"
+                        class="py-1 font-medium hover:underline"
+                    >
+                        {{ task.project.name }}
+                    </Link>
+                    <span v-else class="py-1">—</span>
+                    <Button
+                        v-if="mayMove"
+                        ref="moveOpener"
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Move to another project…"
+                        title="Move to another project…"
+                        @click="openMove"
+                    >
+                        <FolderInput aria-hidden="true" />
+                    </Button>
+                </dd>
+
+                <dt :class="rowLabel">Start date</dt>
+                <dd class="min-w-0 py-1 tabular-nums">{{ formatDate(task.start_date) }}</dd>
+
+                <dt :class="rowLabel">Estimate</dt>
+                <dd class="min-w-0 py-1 tabular-nums">{{ formatMinutes(task.estimated_minutes) }}</dd>
 
                 <!--
                     Assigning a tag is an edit, not tag CRUD: the options are the ones the
                     controller sent, which is exactly what `tag_ids` accepts. Nothing here
                     creates, renames or deletes one.
                 -->
-                <div class="flex min-w-0 flex-col gap-2">
-                    <p id="task-tags-label" class="text-xs font-medium text-muted-foreground">Tags</p>
+                <dt id="task-tags-label" :class="rowLabel">Tags</dt>
+                <dd class="flex min-w-0 flex-col gap-2 py-1">
 
-                    <p v-if="task.tags.length === 0" class="text-sm text-muted-foreground">No tags.</p>
+                    <p v-if="task.tags.length === 0 && !mayTag" class="text-sm text-muted-foreground">—</p>
                     <ul v-else class="flex min-w-0 flex-wrap items-center gap-1" aria-labelledby="task-tags-label">
                         <li v-for="tag in task.tags" :key="tag.id" class="flex items-center gap-0.5">
                             <StatusBadge :status="tagTone(tag.colour)" :label="tag.name" size="sm" />
@@ -510,7 +585,7 @@ function move(): void {
                                 is left behind when the task moves, a global one travels.
                             -->
                             <Select v-model="chosenTag" :disabled="tagging || full || untagged.length === 0">
-                                <SelectTrigger id="task-tag-add" ref="tagTrigger" class="w-full sm:w-64">
+                                <SelectTrigger id="task-tag-add" ref="tagTrigger" size="sm" class="w-full sm:w-56">
                                     <SelectValue placeholder="Add a tag…" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -561,17 +636,39 @@ function move(): void {
                         Every tag this project can use is already on the task.
                     </p>
                     <p v-if="tagError" class="text-xs text-destructive">{{ tagError }}</p>
-                </div>
+                </dd>
 
-                <div v-if="editable">
-                    <Button ref="opener" type="button" size="sm" variant="outline" @click="edit">
-                        <Pencil aria-hidden="true" />
-                        Edit details
-                    </Button>
-                </div>
-            </template>
-        </CardContent>
-    </Card>
+                <dt :class="rowLabel">Created by</dt>
+                <dd class="min-w-0 py-1 break-words">{{ task.created_by?.name ?? '—' }}</dd>
+            </dl>
+
+            <div v-if="editable" class="-mt-3">
+                <Button ref="opener" type="button" size="sm" variant="ghost" class="text-muted-foreground" @click="edit">
+                    <Pencil aria-hidden="true" />
+                    Edit details
+                </Button>
+            </div>
+
+            <div class="flex min-w-0 flex-col gap-1">
+                <h3 class="text-sm font-semibold"><label for="task-row-description">Description</label></h3>
+                <Textarea
+                    v-if="editable"
+                    id="task-row-description"
+                    v-model="description"
+                    rows="3"
+                    placeholder="What is this task about?"
+                    :disabled="savingField === 'description'"
+                    class="field-sizing-content min-h-16 resize-none border-transparent px-2 shadow-flat hover:border-input"
+                    data-row-description
+                    @focus="descriptionFocused = true"
+                    @blur="blurDescription"
+                />
+                <p v-else-if="task.description" class="min-w-0 text-sm whitespace-pre-line">{{ task.description }}</p>
+                <p v-else class="text-sm text-muted-foreground">No description.</p>
+                <p v-if="formErrors.description" class="text-xs text-destructive">{{ formErrors.description }}</p>
+            </div>
+        </template>
+    </section>
 
     <Dialog v-model:open="moveOpen">
         <DialogContent class="max-w-lg">

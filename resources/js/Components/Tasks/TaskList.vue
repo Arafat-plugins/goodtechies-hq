@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { ColumnDef } from '@/Components/DataTable/types';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
+import type { MyTaskTimer, RunningTaskTimer } from '@/Components/Timer/taskTimer';
 
 /**
  * The Tasks List view: the grouped `DataTable`, its chip filter bar and its group-by toggle.
@@ -72,7 +73,20 @@ export interface Task {
     assignees: TaskAssignee[];
     primary_assignee: TaskEmployeeRef | null;
     tags: TaskTag[];
+    /** The checklist's lines, and how many are ticked — the card's tick-box counter. */
+    checklist_count: number;
+    checklist_done_count: number;
+    /**
+     * Flow F2: live subtasks (not archived, not cancelled) and how many are Completed — the
+     * card's `2/5` progress counter and the List's "Subtasks" column.
+     */
     subtask_count: number;
+    subtask_done_count: number;
+    /**
+     * A subtask's parent — present ONLY when this reader may see the parent. Absent (not
+     * null) on a top-level task and on a subtask whose parent is not theirs to see.
+     */
+    parent?: { id: number; title: string };
     /**
      * Assignees on approved leave when this task is due (Part D §5 and §9, Phase 5).
      *
@@ -85,11 +99,23 @@ export interface Task {
      * carry, so the server always sends an array.
      */
     assignees_on_leave: { name: string; until: string }[];
+    /**
+     * Flow F3: the READER's own open timer on this task, or null. Every reader gets the key;
+     * it only ever describes their own timer.
+     */
+    my_timer: MyTaskTimer | null;
+    /**
+     * Flow F3: everybody else timing this task — sent to watchers (`TimeEntryPolicy::watchLive`)
+     * ONLY. Absent, not empty, for anybody else.
+     */
+    running_timers?: RunningTaskTimer[];
     permissions: {
         can_update: boolean;
         can_delete: boolean;
         can_archive: boolean;
         can_review: boolean;
+        /** Flow F3: `TimeEntryPolicy::trackTask` — whether this card draws ▶ for this reader. */
+        can_track_time: boolean;
     };
 }
 
@@ -140,6 +166,12 @@ export interface TaskFilters {
     mine: boolean;
     overdue: boolean;
     archived: boolean;
+    /**
+     * Flow F2: subtasks are in this view. `?subtasks=1` ("Show subtasks"), or any personal
+     * scope — a person's own subtasks are always on their own lists. Optional only because a
+     * few screens build a filters object by hand.
+     */
+    subtasks?: boolean;
 }
 
 export interface TaskOption {
@@ -264,7 +296,7 @@ export function tagTone(colour: string): StatusKey {
 </script>
 
 <script setup lang="ts">
-import { ListChecks } from '@lucide/vue';
+import { CornerDownRight, ListChecks } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import DataTable from '@/Components/DataTable/DataTable.vue';
@@ -479,6 +511,16 @@ useLiveTaskProps(['tasks']);
                         that column entirely (decision 2-6) and the flag has to survive there.
                     -->
                     <OnLeaveFlag :people="row.assignees_on_leave ?? []" variant="compact" />
+                    <!-- Flow F2: a subtask names its parent, only when the server sent it. -->
+                    <span
+                        v-if="row.parent"
+                        data-row-parent
+                        class="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+                    >
+                        <CornerDownRight class="size-3 shrink-0" aria-hidden="true" />
+                        <span class="sr-only">Subtask of</span>
+                        <span class="min-w-0 truncate">{{ row.parent.title }}</span>
+                    </span>
                 </div>
             </template>
 

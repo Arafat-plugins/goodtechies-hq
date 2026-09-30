@@ -319,4 +319,16 @@ Steps: mutation commits → `App\Events\TaskChanged` (ShouldBroadcast, after com
 Payload: { task_id, kind } — ids and the kind of change only, never task text
 Invariants: one broadcast per change; never before commit; never to a user who cannot see the task; never echoed to the acting tab; zero periodic requests while the socket is connected
 Test: php vendor/bin/pest tests/Feature/Realtime/TaskLiveUpdateFlowTest.php
+### F2 task-subtasks
+Trigger: `POST /admin/tasks/{task}/subtasks` (`Admin/TaskController@storeSubtask`, `StoreSubtaskRequest`); then the ordinary `/{task}` routes on the subtask (status, archive, delete)
+Steps: `TaskService::createSubtask()` → `create()` with `parent_id` + the parent's `project_id` → `TaskAssigned` → `NotificationDispatcher` → `announceChange()` rings the child AND the parent (`updated`, to the parent's own viewers; flow F1) → the card's `subtask_count`/`subtask_done_count` re-read
+Invariants: depth ≤ 1 (`TaskPolicy::createSubtask` 403; no re-parenting); subtask project = parent project; archive/unarchive/delete of a parent carries its subtasks; a subtask's visibility is `TaskPolicy::view` on itself; `parent` is sent only if the reader may view the parent (absent otherwise); counter = not deleted, not archived, not cancelled, done = `completed`
+Lists: general List/Board/Calendar/Gantt are `topLevel()` unless `subtasks=1` or a personal scope (`mine`); Reports/Workload include subtasks (decision 12-71)
+Test: php vendor/bin/pest tests/Feature/Tasks/SubtaskFlowTest.php
+### F3 task-timer
+Trigger: `POST /tasks/{task}/timer` (`Shared/TaskTimerController@start`, `StartTaskTimerRequest`, `clock_in` optional), `POST /task-timer/{pause,resume,stop}`, `POST /task-timer/heartbeat` (JSON); plus clock-out and `hq:timer-watchdog`
+Steps: `TimeEntryPolicy::trackTasks` (403) → `Task::visibleTo` (404) → `trackTask` = assigned, or Admin/Manager on any task they can view (403) → office/Admin not clocked in: 422 `clock_in`, or `AttendanceService::clockIn` → `TaskTimerService::start` → `TimerService::switchTo` (stops any other open entry) → `time_entries` row (`counts_toward_hours` false for office/Admin) → `TaskChanged` kind `timer` after commit (flow F1; start/pause/resume → watchers + owner, stop → every viewer) → board patches (`my_timer`, `running_timers`, `tracked_seconds`)
+Panel: the Admin Time page / dashboard 'Working now' panel (`TaskTimerService::workingNow`, `working_now` / `workingNow`, one query, absent without `watchLive`) re-reads on `task.changed` kind `timer`; so do the Admin Projects pages — list marker `ProjectWorkingNow` from `workingNowByProject` (`workingNowByProject()`, same one query grouped by project id) and the project page's `WorkingNowPanel` from `workingNow` (`workingNow($viewer, $projectId)`); test `tests/Feature/Admin/ProjectWorkingNowTest.php`
+Invariants: ≤ 1 open entry per employee (index); office/Admin entries never count (`scopeCounted`/`counts()`, timesheet, reports, `daily_work_summary`) but do reach `tasks.tracked_seconds` (`scopeTracked`); no office/Admin entry without an open clock-in; clock-out stops it; `running_timers` only for `watchLive` (absent otherwise); remote `/employee/time/*` unchanged; decision 12-73
+Test: php vendor/bin/pest tests/Feature/Tasks/TaskTimerFlowTest.php
 <!-- /dispatch:map -->

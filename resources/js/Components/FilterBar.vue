@@ -11,6 +11,11 @@ export type FilterKind = 'select' | 'multi-select' | 'date-range' | 'toggle';
 export interface FilterOption {
     value: string;
     label: string;
+    /**
+     * Not offered in the value picker, but still labels the chip when the URL carries it — a
+     * value retired from the menu that old links may still apply (brief 017). Opt-in.
+     */
+    hidden?: boolean;
 }
 
 /**
@@ -27,6 +32,11 @@ export interface FilterDef {
     options?: FilterOption[];
     /** Placeholder for the value picker's search box. */
     searchPlaceholder?: string;
+    /**
+     * Not offered in *Add filter*, but still drawn as a removable chip when set — a filter
+     * retired from the menu that old links may still apply (brief 017). Opt-in.
+     */
+    hidden?: boolean;
 }
 </script>
 
@@ -126,6 +136,8 @@ const emit = defineEmits<{
 
 const chipMode = computed(() => (props.filters?.length ?? 0) > 0);
 const defs = computed<FilterDef[]>(() => props.filters ?? []);
+/** What *Add filter* lists: every filter not marked `hidden`. */
+const menuDefs = computed<FilterDef[]>(() => defs.value.filter((def) => !def.hidden));
 
 /* ------------------------------------------------------------------ search */
 
@@ -374,7 +386,7 @@ function isChosen(def: FilterDef, value: string): boolean {
                         <CommandList>
                             <CommandGroup heading="Filter by">
                                 <CommandItem
-                                    v-for="def in defs"
+                                    v-for="def in menuDefs"
                                     :key="def.key"
                                     :value="def.key"
                                     class="justify-between"
@@ -449,7 +461,7 @@ function isChosen(def: FilterDef, value: string): boolean {
                                 <CommandEmpty>Nothing matches.</CommandEmpty>
                                 <CommandGroup>
                                     <CommandItem
-                                        v-for="option in picker.options ?? []"
+                                        v-for="option in (picker.options ?? []).filter((entry) => !entry.hidden)"
                                         :key="option.value"
                                         :value="option.value"
                                         class="justify-between"

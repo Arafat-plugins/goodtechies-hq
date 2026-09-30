@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link, router } from '@inertiajs/vue3';
-import { Archive, ArchiveRestore, Repeat, Trash2 } from '@lucide/vue';
+import { Archive, ArchiveRestore, CornerDownRight, Repeat, Trash2 } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
 import type { FileRoutes } from '@/Components/Files/files';
@@ -15,6 +15,7 @@ import TaskFieldsPanel from '@/Components/Tasks/TaskFieldsPanel.vue';
 import TaskLinksPanel from '@/Components/Tasks/TaskLinksPanel.vue';
 import TaskPeoplePanel from '@/Components/Tasks/TaskPeoplePanel.vue';
 import TaskStatusActions from '@/Components/Tasks/TaskStatusActions.vue';
+import TaskSubtasksPanel from '@/Components/Tasks/TaskSubtasksPanel.vue';
 import TaskSummaryPanel from '@/Components/Tasks/TaskSummaryPanel.vue';
 import TimerWidget from '@/Components/Timer/TimerWidget.vue';
 import type {
@@ -81,7 +82,23 @@ const emit = defineEmits<{
     settled: [];
     /** The task is gone; a drawer showing it should close. */
     removed: [];
+    /** Flow F2: show another task — a subtask, or a subtask's parent — in this same drawer. */
+    'open-task': [id: number];
 }>();
+
+/**
+ * A subtask or a parent was clicked. The drawer swaps it in place; the page visits it — the
+ * body does not know which it is in beyond `variant`, as everywhere else here.
+ */
+function openTask(id: number): void {
+    if (props.variant === 'drawer') {
+        emit('open-task', id);
+
+        return;
+    }
+
+    router.visit(taskRoutes(props.surface, id).show);
+}
 
 const routes = computed(() => taskRoutes(props.surface, props.task.id));
 
@@ -156,7 +173,14 @@ function confirmDelete(): void {
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-6">
+    <!--
+        Brief 014: no big bordered cards in the detail — every panel's `Card` inside the body is
+        drawn flat (no border, fill, shadow or inset) and its prose subline is dropped; the
+        heading is the section. Dialogs are teleported out, so they keep their surface.
+    -->
+    <div
+        class="flex min-w-0 flex-col gap-6 [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:border-0 [&_[data-slot=card]]:bg-transparent [&_[data-slot=card]]:py-0 [&_[data-slot=card]]:shadow-flat [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-description]]:hidden [&_[data-slot=card-header]]:px-0 [&_[data-slot=card-title]]:font-semibold"
+    >
         <!-- Where the task stands, and what it can do next. -->
         <div class="flex min-w-0 flex-col gap-4">
             <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -204,6 +228,26 @@ function confirmDelete(): void {
                 </span>
             </p>
 
+            <!--
+                Flow F2: a subtask names its parent — only when the server sent the parent,
+                which it does only when this reader may view it (absent otherwise).
+            -->
+            <p
+                v-if="task.parent"
+                data-task-parent
+                class="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 text-xs text-muted-foreground"
+            >
+                <CornerDownRight class="size-3 shrink-0" aria-hidden="true" />
+                <span>Part of</span>
+                <button
+                    type="button"
+                    class="min-w-0 truncate rounded-sm font-medium text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring"
+                    @click="openTask(task.parent.id)"
+                >
+                    {{ task.parent.title }}
+                </button>
+            </p>
+
             <TaskStatusActions
                 :task="task"
                 :surface="surface"
@@ -216,12 +260,16 @@ function confirmDelete(): void {
         <div
             :class="
                 cn(
-                    'grid min-w-0 gap-6',
+                    'grid min-w-0 gap-8',
                     variant === 'page' && 'xl:grid-cols-3',
                 )
             "
         >
-            <div :class="cn('flex min-w-0 flex-col gap-6', variant === 'page' && 'xl:col-span-2')">
+            <!--
+                Brief 014: one column in the Asana order — the label | value rows and the
+                description, subtasks, checklist, attachments, then the conversation.
+            -->
+            <div :class="cn('flex min-w-0 flex-col gap-8', variant === 'page' && 'xl:col-span-2')">
                 <TaskFieldsPanel
                     :task="task"
                     :surface="surface"
@@ -229,43 +277,56 @@ function confirmDelete(): void {
                     :tags="tags"
                     :projects="projects"
                     @settled="emit('settled')"
+                >
+                    <template #assignee>
+                        <TaskPeoplePanel
+                            ref="people"
+                            variant="row"
+                            :task="task"
+                            :surface="surface"
+                            :employees="employees"
+                            @settled="emit('settled')"
+                        />
+                    </template>
+                </TaskFieldsPanel>
+
+                <!-- A subtask has no subtasks (one level deep), so it has no panel either. -->
+                <TaskSubtasksPanel
+                    v-if="(task.subtasks?.length ?? 0) > 0 || task.can_add_subtask"
+                    :task="task"
+                    :surface="surface"
+                    :employees="employees"
+                    @settled="emit('settled')"
+                    @open="openTask"
                 />
-                <TaskSummaryPanel :task="task" :surface="surface" @settled="emit('settled')" />
                 <TaskChecklistPanel :task="task" :surface="surface" @settled="emit('settled')" />
 
                 <!--
                     `canUpload` is the task's OWN server-resolved permission — the ability
                     `FileService::guardMayAttach()` asks for — never a role and never a surface.
-                    `changed` is how the drawer learns to re-read: it holds a payload it fetched
-                    itself, and `attachment_count` on it goes stale the moment a file lands.
+                    `changed` is how the drawer learns to re-read. `compact` is the opt-in
+                    heading-and-list look; the project and client Files tabs keep the card.
                 -->
                 <FilePanel
                     :routes="attachmentRoutes"
                     :can-upload="task.permissions.can_update"
                     title="Attachments"
-                    description="Briefs, screenshots and anything else this task is about."
-                    empty-description="Anything attached to this task shows up here."
+                    compact
                     @changed="emit('settled')"
                 />
+
+                <TaskSummaryPanel :task="task" :surface="surface" @settled="emit('settled')" />
 
                 <TaskDiscussionPanel
                     :task="task"
                     :surface="surface"
                     :discussion="discussion"
+                    :composer-placement="variant === 'drawer' ? 'footer' : 'inline'"
                     @settled="emit('settled')"
                 />
-
-                <TaskActivityPanel :activity="activity" />
             </div>
 
-            <div class="flex min-w-0 flex-col gap-6">
-                <TaskPeoplePanel
-                    ref="people"
-                    :task="task"
-                    :surface="surface"
-                    :employees="employees"
-                    @settled="emit('settled')"
-                />
+            <div class="flex min-w-0 flex-col gap-8">
                 <TaskLinksPanel :task="task" :surface="surface" @settled="emit('settled')" />
                 <TaskDependenciesPanel
                     :task="task"
@@ -274,14 +335,24 @@ function confirmDelete(): void {
                     @settled="emit('settled')"
                 />
 
-<!--
+                <!--
                     Phase 4. The timer, for whoever the SERVER says may run one — the widget
-                    asks `auth.user.canTrackTime` (`TimeEntryPolicy::track`) and draws no
-                    controls for anybody else, which is why one component can hang here on both
-                    surfaces and in both mounts. An Admin reading this task sees the total and
-                    no buttons.
+                    asks `auth.user.canTrackTime` (`TimeEntryPolicy::track`) for the remote
+                    timer's full controls, and since flow F3 `permissions.can_track_time`
+                    (`TimeEntryPolicy::trackTask`) for everyone else's ▶ / ⏸ / ⏹. An Admin
+                    reading a task they are not on sees the total, who is timing it, and no
+                    buttons.
                 -->
-                <TimerWidget :task-id="task.id" :tracked-seconds="task.tracked_seconds" />
+                <TimerWidget
+                    :task-id="task.id"
+                    :tracked-seconds="task.tracked_seconds"
+                    :my-timer="task.my_timer"
+                    :can-track-task="task.permissions.can_track_time"
+                    :running-timers="task.running_timers"
+                    @settled="emit('settled')"
+                />
+
+                <TaskActivityPanel :activity="activity" />
 
                 <p class="text-xs text-muted-foreground">
                     Created {{ formatDateTime(task.created_at) }}

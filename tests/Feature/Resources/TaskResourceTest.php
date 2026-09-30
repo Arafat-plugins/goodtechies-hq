@@ -28,10 +28,10 @@ beforeEach(function () {
 });
 
 /** One task payload, as the Admin List view sends it. */
-function firstTaskPayload(object $test, ?User $as = null, array $query = []): array
+function firstTaskPayload(object $test, ?User $as = null, array $query = [], string $route = 'admin.tasks.index'): array
 {
     $props = $test->actingAs($as ?? $test->admin)
-        ->get(route('admin.tasks.index', $query))
+        ->get(route($route, $query))
         ->assertOk()
         ->inertiaPage()['props'];
 
@@ -56,14 +56,26 @@ it('sends exactly the documented task keys', function () {
         'completed_at', 'completed_by', 'first_completion',
         'created_at', 'created_by',
         'project', 'assignees', 'primary_assignee', 'tags',
-        'subtask_count', 'subtasks_done_count', 'attachment_count', 'permissions',
+        'checklist_count', 'checklist_done_count', 'subtask_count', 'subtask_done_count',
+        'attachment_count', 'comment_count', 'permissions',
         // Phase 5: the assignees who are on approved leave when this task is due. Always an
         // array — empty for a task nobody is away for AND for a reader who may not see that
         // leave, so there is no second meaning for null to carry (Part D §5's flag).
         'assignees_on_leave',
+        // Flow F3: the reader's own open task timer (null when none), and — because this reader
+        // is an Admin, a watcher — everybody else's. `running_timers` is ABSENT for an employee;
+        // the next test and tests/Feature/Tasks/TaskTimerFlowTest.php pin that.
+        'my_timer', 'running_timers',
         // checklist, links, dependencies, dependents, attachments and available_transitions
         // are the detail page's; on a list they are absent, not empty.
     ]);
+})->group('phase2');
+
+it('keeps running_timers out of an employee\'s task payload altogether', function () {
+    $payload = firstTaskPayload($this, $this->tapu, [], 'employee.tasks.index');
+
+    expect($payload)->toHaveKey('my_timer')
+        ->and($payload)->not->toHaveKey('running_timers');
 })->group('phase2');
 
 it('sends the grouped envelope the List view loops over', function () {
@@ -185,9 +197,8 @@ it('computes is_overdue rather than reading a column', function () {
     $this->travelBack();
 })->group('phase2');
 
-it('reports subtask_count as zero until slice 2 adds checklists', function () {
-    // The key exists now so the List view's Subtasks column has somewhere to read from, and
-    // its shape will not change when the relation arrives.
+it('reports subtask_count as zero for a task nobody has split', function () {
+    // Decision 12-71: real subtasks now; a seeded task with none reads 0, never absent.
     expect(firstTaskPayload($this)['subtask_count'])->toBe(0);
 })->group('phase2');
 
@@ -195,7 +206,7 @@ it('mirrors the policy in permissions', function () {
     $payload = firstTaskPayload($this);
 
     expect(array_keys($payload['permissions']))
-        ->toEqualCanonicalizing(['can_update', 'can_delete', 'can_archive', 'can_review']);
+        ->toEqualCanonicalizing(['can_update', 'can_delete', 'can_archive', 'can_review', 'can_track_time']);
 
     // An employee sees a narrower set of trues on their own task than the admin does.
     $tapusTask = Task::query()->forEmployee($this->tapu->employee)->firstOrFail();

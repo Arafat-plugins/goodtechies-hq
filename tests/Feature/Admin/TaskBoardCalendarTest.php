@@ -102,12 +102,14 @@ it('sends a board card everything the card draws, and nothing from the project f
                 ->has('tags')
                 // Checklist counts exist because checklists do, and so now does the
                 // attachment count — slice 4 gave the paperclip something real to print.
-                // Comments arrive in the next slice and are still absent rather than sent as
-                // a zero that would look like a count of something.
+                // Brief 012 gave the speech bubble its number: the messages in the task's
+                // discussion (tests/Feature/Tasks/CommentCountTest.php).
+                ->has('checklist_count')
+                ->has('checklist_done_count')
                 ->has('subtask_count')
-                ->has('subtasks_done_count')
+                ->has('subtask_done_count')
                 ->has('attachment_count')
-                ->missing('comment_count')
+                ->has('comment_count')
                 // The attachments themselves are the detail page's: a board must not sign a
                 // URL per file per card to draw a number.
                 ->missing('attachments')

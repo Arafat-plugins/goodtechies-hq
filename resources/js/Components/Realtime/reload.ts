@@ -231,7 +231,7 @@ export const TASK_DRAWER_MARKER = '[data-task-drawer]';
  */
 export function useLiveTaskProps(
     names: readonly string[],
-    options: Pick<LiveRefreshOptions, 'canRefresh'> = {},
+    options: Pick<LiveRefreshOptions, 'canRefresh' | 'accept'> = {},
 ): LiveRefreshHandle {
     const page = usePage<{ auth?: { user?: { id?: number } | null } }>();
 

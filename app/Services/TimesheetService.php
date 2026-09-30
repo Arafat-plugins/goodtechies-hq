@@ -135,6 +135,9 @@ class TimesheetService
     {
         return TimeEntry::query()
             ->where('employee_id', $employee->getKey())
+            // A timesheet is a person's hours. An office/Admin task-timer row is a breakdown of
+            // a day the office clock holds, not hours, so it is not a row here (decision 12-73).
+            ->countsTowardHours()
             ->whereBetween('work_date', [$start->toDateString(), $end->toDateString()])
             ->with(['task:id,title,project_id', 'project:id,name'])
             ->orderBy('started_at')

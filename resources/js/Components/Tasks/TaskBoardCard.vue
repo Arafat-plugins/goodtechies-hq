@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { GripVertical, ListChecks } from '@lucide/vue';
+import { Clock, CornerDownRight, GripVertical, ListChecks, ListTree, MessageSquare, Paperclip } from '@lucide/vue';
 import { computed } from 'vue';
 import OnLeaveFlag from '@/Components/Leave/OnLeaveFlag.vue';
 import DueCountdown from '@/Components/Tasks/DueCountdown.vue';
 import TaskPriorityFlag from '@/Components/Tasks/TaskPriorityFlag.vue';
+import RunningTimers from '@/Components/Timer/RunningTimers.vue';
+import TaskTimerButton from '@/Components/Timer/TaskTimerButton.vue';
+import { formatDuration, spokenDuration } from '@/Components/Timer/timer';
 import type { BoardCard } from '@/Components/Tasks/taskBoard';
 import type { TaskSurface, TaskTransition } from '@/Components/Tasks/taskDetail';
 import { initials, taskRoutes } from '@/Components/Tasks/taskDetail';
@@ -15,11 +18,12 @@ import { cn } from '@/lib/utils';
 
 /**
  * One card on the Board: title, description, then one footer row — assignee avatars, the
- * countdown, the checklist count, and the priority flag on the right. No project line and no
- * tag chips (the drawer, the List and the filters still carry both).
+ * countdown, the checklist and subtask counters, the comment and attachment counts, and the
+ * priority flag on the right. No project line and no tag chips (the drawer, the List and the
+ * filters still carry both).
  *
- * The card prints **no comment or attachment count**: `TaskResource` sends neither, and a zero
- * printed for a number the server never sent is a lie the card would tell on every row.
+ * The comment and attachment counts (brief 012) are each drawn only above zero, like the two
+ * counters before them: a row of zeros is noise on every fresh card.
  * Priority is a flag in a `--priority-*` token with its word printed beside it (DESIGN.md
  * §1.4b), so the colour is never the only carrier.
  *
@@ -115,12 +119,38 @@ const shown = computed(() => people.value.slice(0, MAX_AVATARS));
 const hidden = computed(() => people.value.slice(MAX_AVATARS));
 const hiddenNames = computed(() => hidden.value.map((person) => person.name ?? 'Unnamed assignee').join(', '));
 const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || props.canMoveDown);
+
+/**
+ * Flow F3: a press that began on the timer's buttons is a press, never the start of a drag.
+ * A native `dragstart` fires on the draggable `<li>`, not on the button inside it, so the card
+ * remembers where the pointer went down and refuses the drag from there.
+ */
+let pressOnTimer = false;
+
+function onPointerDownCapture(event: PointerEvent): void {
+    pressOnTimer = event.target instanceof Element && event.target.closest('[data-card-timer]') !== null;
+}
+
+function onDragStart(event: DragEvent): void {
+    if (pressOnTimer) {
+        event.preventDefault();
+
+        return;
+    }
+
+    emit('drag-start', event);
+}
 </script>
 
 <template>
     <!--
         The card is one tab stop that opens the drawer on Enter or Space (nothing on the card binds
         a key to reordering), named by its title.
+
+        `relative` makes the card the containing block for its `sr-only` labels (the countdown's,
+        the priority's, the timer's live region). Without it they are positioned against the
+        page, at their static place in a column scrolled far to the right, and the whole
+        document scrolled sideways on the Board (found by the F3 browser check, 1279 px at 1280).
     -->
     <li
         :draggable="canDrag"
@@ -129,13 +159,14 @@ const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || prop
         :aria-label="card.title"
         :class="
             cn(
-                'group flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-card-foreground shadow-raised outline-none focus-visible:ring-3 focus-visible:ring-ring',
+                'group relative flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-card-foreground shadow-raised outline-none focus-visible:ring-3 focus-visible:ring-ring',
                 canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
                 dragging && 'opacity-40',
                 busy && 'opacity-60',
             )
         "
-        @dragstart="emit('drag-start', $event)"
+        @pointerdown.capture="onPointerDownCapture"
+        @dragstart="onDragStart"
         @dragend="emit('drag-end')"
         @click.capture="onClickCapture"
         @keydown.capture="onKeydownCapture"
@@ -168,6 +199,17 @@ const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || prop
                 aria-hidden="true"
             />
         </div>
+
+        <!-- Flow F2: a subtask names its parent — only when the server sent the parent at all. -->
+        <p
+            v-if="card.parent"
+            data-card-parent
+            class="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+        >
+            <CornerDownRight class="size-3 shrink-0" aria-hidden="true" />
+            <span class="sr-only">Subtask of</span>
+            <span class="min-w-0 truncate">{{ card.parent.title }}</span>
+        </p>
 
         <p v-if="card.description" class="line-clamp-2 min-w-0 text-xs text-muted-foreground">
             {{ card.description }}
@@ -231,21 +273,92 @@ const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || prop
                 <DueCountdown :due-date="card.due_date" :status="card.status" />
 
                 <span
-                    v-if="card.subtask_count > 0"
+                    v-if="card.checklist_count > 0"
                     class="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
-                    :aria-label="`${card.subtasks_done_count} of ${card.subtask_count} checklist items done`"
+                    :aria-label="`${card.checklist_done_count} of ${card.checklist_count} checklist items done`"
                 >
                     <ListChecks class="size-3" aria-hidden="true" />
                     <span class="tabular-nums" aria-hidden="true">
-                        {{ card.subtasks_done_count }}/{{ card.subtask_count }}
+                        {{ card.checklist_done_count }}/{{ card.checklist_count }}
                     </span>
+                </span>
+
+                <!--
+                    Flow F2: the parent's subtask progress, in the checklist counter's own style
+                    beside it. A different glyph (a tree, not ticks) so the two numbers are told
+                    apart without reading the label.
+                -->
+                <span
+                    v-if="card.subtask_count > 0"
+                    data-card-subtasks
+                    class="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+                    :aria-label="`${card.subtask_done_count} of ${card.subtask_count} subtasks completed`"
+                >
+                    <ListTree class="size-3" aria-hidden="true" />
+                    <span class="tabular-nums" aria-hidden="true">
+                        {{ card.subtask_done_count }}/{{ card.subtask_count }}
+                    </span>
+                </span>
+
+                <!--
+                    Brief 012: the discussion's messages and the task's files. Numbers only; each
+                    names itself in its accessible name, since a bubble and a clip are not words.
+                -->
+                <span
+                    v-if="card.comment_count > 0"
+                    role="img"
+                    data-card-comments
+                    class="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+                    :aria-label="`${card.comment_count} ${card.comment_count === 1 ? 'comment' : 'comments'}`"
+                >
+                    <MessageSquare class="size-3" aria-hidden="true" />
+                    <span class="tabular-nums" aria-hidden="true">{{ card.comment_count }}</span>
+                </span>
+
+                <span
+                    v-if="card.attachment_count > 0"
+                    role="img"
+                    data-card-attachments
+                    class="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+                    :aria-label="`${card.attachment_count} ${card.attachment_count === 1 ? 'attachment' : 'attachments'}`"
+                >
+                    <Paperclip class="size-3" aria-hidden="true" />
+                    <span class="tabular-nums" aria-hidden="true">{{ card.attachment_count }}</span>
+                </span>
+
+                <!--
+                    Flow F3: the task's total tracked time — every approved entry, remote or an
+                    office/Admin breakdown. Drawn from a whole minute up, like the counters beside it
+                    (under a minute it would read "0m").
+                -->
+                <span
+                    v-if="card.tracked_seconds >= 60"
+                    role="img"
+                    data-card-tracked
+                    class="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+                    :aria-label="`${spokenDuration(card.tracked_seconds)} tracked`"
+                >
+                    <Clock class="size-3" aria-hidden="true" />
+                    <span class="tabular-nums" aria-hidden="true">{{ formatDuration(card.tracked_seconds) }}</span>
                 </span>
 
                 <span v-if="card.is_archived" class="shrink-0 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
                     Archived
                 </span>
 
-                <span class="ml-auto inline-flex shrink-0">
+                <!--
+                    Flow F3, watchers only: who else is timing this card. The key is absent from
+                    everybody else's payload, so this never mounts for an employee.
+                -->
+                <RunningTimers v-if="card.running_timers && card.running_timers.length > 0" :timers="card.running_timers" />
+
+                <span class="ml-auto inline-flex shrink-0 items-center gap-2">
+                    <!-- Flow F3: ▶ / ⏸ / ⏹ — only where the server said this reader may time it. -->
+                    <TaskTimerButton
+                        v-if="card.permissions.can_track_time || card.my_timer"
+                        :task-id="card.id"
+                        :my-timer="card.my_timer"
+                    />
                     <TaskPriorityFlag :priority="card.priority" />
                 </span>
             </div>

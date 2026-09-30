@@ -260,6 +260,7 @@ class ReportService
         if (Gate::forUser($viewer)->allows('viewAny', TimeEntry::class)) {
             $base = fn (): Builder => TimeEntry::query()
                 ->visibleTo($viewer)
+                ->countsTowardHours()
                 ->whereBetween('time_entries.work_date', [$from->toDateString(), $to->toDateString()]);
 
             $payload['time'] = [
@@ -1870,6 +1871,9 @@ class ReportService
             'as_of' => $filters->asOf(),
             'project_id' => $filters->projectId,
             'assignee_id' => $filters->employeeId,
+            // Decision 12-71: a report counts WORK, and a subtask is work somebody owes, so
+            // reports include subtasks where the general Board and List leave them off.
+            'subtasks' => true,
         ];
     }
 
@@ -1985,6 +1989,9 @@ class ReportService
     {
         return TimeEntry::query()
             ->visibleTo($viewer)
+            // Hours reports are about people's hours: an office/Admin task-timer breakdown row
+            // is not one, in any column — minutes, pending or the entry count (decision 12-73).
+            ->countsTowardHours()
             ->whereBetween('time_entries.work_date', $filters->dateStrings())
             ->when($filters->employeeId, fn (Builder $q, int $id) => $q->where('time_entries.employee_id', $id))
             ->when($filters->projectId, fn (Builder $q, int $id) => $q->whereIn(

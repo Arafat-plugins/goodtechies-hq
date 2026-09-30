@@ -2,9 +2,11 @@
 
 namespace App\Policies;
 
+use App\Models\Task;
 use App\Models\TimeEntry;
 use App\Models\User;
 use App\Support\Permission;
+use App\Support\RoleName;
 use App\Support\TrackingMode;
 
 /**
@@ -46,6 +48,85 @@ class TimeEntryPolicy extends Policy
     }
 
     /**
+     * May this person run a TASK timer — the ▶ on a board card and in the drawer (flow F3,
+     * decision 12-73)? The gate on `/task-timer/*` and the general half of `trackTask()`.
+     *
+     * **No new permission key.** Working a task is already `tasks.view` plus an assignment, and
+     * the timer is how that work is measured, so the rule is stated in keys that exist:
+     *
+     *   - `tasks.view` — the Accountant holds none and is refused outright (403);
+     *   - an employee record, because an entry belongs to an employee;
+     *   - the person's OWN tracking mode decides which clock their day is on, exactly as it does
+     *     for `track()` and for the office clock: `remote_timer` still needs `timer.use` (that
+     *     timer IS their day, and `track()` is unchanged), `office_attendance` needs
+     *     `attendance.view_own`, the key the clock-in itself asks for. `none` gets nothing.
+     *
+     * Nothing here compares a role name, for the reason this class's docblock gives.
+     */
+    public function trackTasks(User $user): bool
+    {
+        if (! $this->allows($user, Permission::TasksView)) {
+            return false;
+        }
+
+        return match ($user->employee?->tracking_mode) {
+            TrackingMode::RemoteTimer => $this->allows($user, Permission::TimerUse),
+            TrackingMode::OfficeAttendance => $this->allows($user, Permission::AttendanceViewOwn),
+            default => false,
+        };
+    }
+
+    /**
+     * ▶ on THIS task: `trackTasks()`, the task still live, and EITHER the person is assigned to
+     * it OR they are an Admin/Manager who may see it (`TaskPolicy::view`) — brief 021.
+     *
+     * An employee sees only assigned tasks (`Task::visibleTo`), so for them "every card I can
+     * see" and "every card I am on" are the same set and their rule is unchanged: a task they
+     * are not on is 404 at the controller, never reaches here. An Admin or Manager sees every
+     * task and may time any of them — the original request was that "admin will have this
+     * system to track his own work" on every card. They time it under their OWN employee
+     * record; nobody is assigned by this. The role check is the one `TaskPolicy::view` makes.
+     *
+     * Reads the loaded `assignees` relation when there is one, so a board of two hundred cards
+     * asks this per card without a query per card.
+     */
+    public function trackTask(User $user, Task $task): bool
+    {
+        if (! $this->trackTasks($user) || $task->isArchived()) {
+            return false;
+        }
+
+        $employeeId = $user->employee?->getKey();
+
+        if ($employeeId === null) {
+            return false;
+        }
+
+        if ($user->hasRole(RoleName::ADMIN, RoleName::MANAGER) && $user->can('view', $task)) {
+            return true;
+        }
+
+        if ($task->relationLoaded('assignees')) {
+            return $task->assignees->contains('id', $employeeId);
+        }
+
+        return $task->assignees()->where('employees.id', $employeeId)->exists();
+    }
+
+    /**
+     * May this person see, live, who is running a timer on a card and for how long?
+     *
+     * `attendance.manage_others` — the key that already shows them every entry in the table
+     * (`TimeEntry::visibleTo()`) and Admin → Workforce → Time. Seeing a running timer is seeing
+     * an open row of that same table, so it is not a new privilege and gets no new key. Everyone
+     * else sees their own timer and nobody else's: `running_timers` is ABSENT from their payload.
+     */
+    public function watchLive(User $user): bool
+    {
+        return $this->allows($user, Permission::AttendanceManageOthers);
+    }
+
+    /**
      * The Time page on the Employee surface: *my* entries, by day.
      *
      * Deliberately the same answer as `track` and not a word wider. A Manager holds
@@ -80,7 +161,9 @@ class TimeEntryPolicy extends Policy
      */
     public function update(User $user, TimeEntry $entry): bool
     {
-        if (! $entry->isStopped()) {
+        // A task-timer breakdown row is not hours, so there is no figure on it to correct: its
+        // day is the attendance record, and that has its own correction (decision 12-73).
+        if (! $entry->isStopped() || ! $entry->countsTowardHours()) {
             return false;
         }
 
@@ -118,7 +201,8 @@ class TimeEntryPolicy extends Policy
      */
     public function approve(User $user, TimeEntry $entry): bool
     {
-        if (! $entry->isStopped()) {
+        // Nothing to rule on: a breakdown row is nobody's hours (decision 12-73).
+        if (! $entry->isStopped() || ! $entry->countsTowardHours()) {
             return false;
         }
 

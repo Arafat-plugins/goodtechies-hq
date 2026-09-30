@@ -52,6 +52,7 @@ use Illuminate\Support\Carbon;
     'reason',
     'edited_at',
     'edited_by',
+    'counts_toward_hours',
 ])]
 class TimeEntry extends Model
 {
@@ -82,6 +83,7 @@ class TimeEntry extends Model
             'entry_type' => TimeEntryType::class,
             'paused_seconds' => 'integer',
             'duration_seconds' => 'integer',
+            'counts_toward_hours' => 'boolean',
         ];
     }
 
@@ -161,10 +163,23 @@ class TimeEntry extends Model
         return $this->flagged_at !== null;
     }
 
-    /** The one question every total asks. A manual entry awaiting approval answers false. */
+    /**
+     * The one question every total asks. A manual entry awaiting approval answers false, and so
+     * does an office/Admin task-timer entry (decision 12-73): that row is a breakdown of a day
+     * the office clock already measured, and counting it would count the day twice.
+     */
     public function counts(): bool
     {
-        return $this->approved_at !== null;
+        return $this->approved_at !== null && $this->countsTowardHours();
+    }
+
+    /**
+     * Is this row somebody's hours, or a breakdown of hours the office clock already holds?
+     * Null (a model built without the column) reads as the column's default, true.
+     */
+    public function countsTowardHours(): bool
+    {
+        return $this->counts_toward_hours !== false;
     }
 
     /**
@@ -314,13 +329,38 @@ class TimeEntry extends Model
 
     /**
      * Entries that count toward a total. The single predicate: somebody (or the system) approved
-     * it. See the migration's docblock.
+     * it, and it is somebody's hours rather than a task-timer breakdown (decision 12-73). See
+     * both migrations' docblocks.
      *
      * @param  Builder<TimeEntry>  $query
      */
     public function scopeCounted(Builder $query): void
     {
-        $query->whereNotNull('approved_at');
+        $query->whereNotNull('time_entries.approved_at')->where('time_entries.counts_toward_hours', true);
+    }
+
+    /**
+     * Rows that are somebody's hours at all — every row but an office/Admin task-timer
+     * breakdown (decision 12-73). `scopeCounted()` is this plus approval; a screen that lists
+     * a person's hours rather than summing them (the timesheet) asks this one.
+     *
+     * @param  Builder<TimeEntry>  $query
+     */
+    public function scopeCountsTowardHours(Builder $query): void
+    {
+        $query->where('time_entries.counts_toward_hours', true);
+    }
+
+    /**
+     * What a TASK has had spent on it: approved, whether or not it is anybody's hours. The one
+     * predicate `tasks.tracked_seconds` is recomputed from — the task total is exactly what the
+     * breakdown rows exist for (decision 12-73). Never use it for a person's hours.
+     *
+     * @param  Builder<TimeEntry>  $query
+     */
+    public function scopeTracked(Builder $query): void
+    {
+        $query->whereNotNull('time_entries.approved_at');
     }
 
     /**

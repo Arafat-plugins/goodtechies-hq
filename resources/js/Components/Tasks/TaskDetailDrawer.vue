@@ -44,6 +44,20 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'update:open': [open: boolean] }>();
 
+/**
+ * The task this drawer is showing. It starts as the row that opened it and follows that prop,
+ * and it moves on its own when a subtask row — or a subtask's "Part of" link — is clicked
+ * inside the drawer (flow F2): the same drawer re-reads the other task in place.
+ */
+const current = ref<number | null>(props.taskId);
+
+watch(
+    () => props.taskId,
+    (id) => {
+        current.value = id;
+    },
+);
+
 interface DetailProps {
     task: TaskDetail;
     activity: TaskActivityEntry[];
@@ -64,10 +78,10 @@ const loading = ref(false);
 /** Bumped per open so a slow answer for a closed drawer cannot land in it. */
 const token = ref(0);
 
-const href = computed(() => (props.taskId === null ? '' : `/${props.surface}/tasks/${props.taskId}`));
+const href = computed(() => (current.value === null ? '' : `/${props.surface}/tasks/${current.value}`));
 
 async function load(): Promise<void> {
-    const id = props.taskId;
+    const id = current.value;
 
     if (id === null) {
         return;
@@ -149,7 +163,7 @@ async function load(): Promise<void> {
 }
 
 watch(
-    () => [props.open, props.taskId] as const,
+    () => [props.open, current.value] as const,
     ([open, id]) => {
         if (!open || id === null) {
             return;
@@ -176,7 +190,7 @@ watch(
 const me = computed(() => (page.props as { auth?: { user?: { id?: number } | null } }).auth?.user?.id);
 
 useLiveRefresh(
-    () => (props.open && props.taskId !== null ? tasksChannel(me.value) : null),
+    () => (props.open && current.value !== null ? tasksChannel(me.value) : null),
     () => {
         if (props.open && detail.value !== null && !loading.value) {
             void load();
@@ -188,13 +202,18 @@ useLiveRefresh(
         coalesceMs: TASKS_COALESCE_MS,
         hiddenResyncMs: TASKS_HIDDEN_RESYNC_MS,
         resyncWhenLive: true,
-        accept: (frame) => frame.task_id === props.taskId,
+        accept: (frame) => frame.task_id === current.value,
     },
 );
 
 /** A write inside the drawer refreshes the drawer; the list behind it refreshed itself. */
 function refresh(): void {
     void load();
+}
+
+/** A subtask or its parent, opened in this same drawer. */
+function openTask(id: number): void {
+    current.value = id;
 }
 
 function close(): void {
@@ -208,11 +227,12 @@ function close(): void {
         :title="detail?.task.title ?? 'Task'"
         :subtitle="detail?.task.project?.name ?? undefined"
         width="xl"
-        :deep-link-id="taskId"
+        large-title
+        :deep-link-id="current"
         @update:open="(value) => emit('update:open', value)"
     >
         <template #header-actions>
-            <Button v-if="taskId !== null" as-child variant="outline" size="sm">
+            <Button v-if="current !== null" as-child variant="outline" size="sm">
                 <a :href="href">
                     <ExternalLink aria-hidden="true" />
                     <span class="sr-only sm:not-sr-only">Open</span>
@@ -241,6 +261,7 @@ function close(): void {
             variant="drawer"
             @settled="refresh"
             @removed="close"
+            @open-task="openTask"
         />
     </DetailDrawer>
 </template>

@@ -88,7 +88,12 @@ function remove(id: number): void {
 <template>
     <Card class="min-w-0 gap-4">
         <CardHeader>
-            <CardTitle class="text-sm font-medium">Checklist</CardTitle>
+            <CardTitle class="flex items-center gap-2 text-sm font-medium">
+                Checklist
+                <span v-if="task.checklist.length > 0" class="text-xs font-normal text-muted-foreground tabular-nums">
+                    {{ done }}/{{ task.checklist.length }}
+                </span>
+            </CardTitle>
             <CardDescription>
                 <span class="tabular-nums">{{ done }}</span> of
                 <span class="tabular-nums">{{ task.checklist.length }}</span> done

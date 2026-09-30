@@ -18,11 +18,14 @@ import TimeEntryRow from '@/Components/Time/TimeEntryRow.vue';
 import type { AdminTimeEntry, TimeBreakdownRow, TimeDateNav, TimeWeek } from '@/Components/Time/time';
 import { adminTimeRoutes } from '@/Components/Time/time';
 import { formatDuration } from '@/Components/Timer/timer';
+import type { WorkingNowRow } from '@/Components/Timer/taskTimer';
+import { workingNowPing } from '@/Components/Timer/taskTimer';
+import WorkingNowPanel from '@/Components/Timer/WorkingNowPanel.vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import { ATTENDANCE_POLL_MS } from '@/Components/Realtime/live';
-import { useLiveProps } from '@/Components/Realtime/reload';
+import { useLiveProps, useLiveTaskProps } from '@/Components/Realtime/reload';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
 defineOptions({ layout: AdminLayout });
@@ -69,6 +72,8 @@ const props = defineProps<{
     byEmployee: TimeBreakdownRow[];
     byProject: TimeBreakdownRow[];
     byTask: TimeBreakdownRow[];
+    /** Every open task timer — who, on which task, for how long (flow F3, watchers only). */
+    working_now: WorkingNowRow[];
 }>();
 
 const rejecting = ref<AdminTimeEntry | null>(null);
@@ -101,6 +106,13 @@ const truncated = computed(() => props.queue_total > props.queue.length);
  * reader chose, and the rollups are the chosen week's arithmetic rather than what is arriving.
  */
 useLiveProps(['queue', 'queue_total', 'flagged', 'decided'], { intervalMs: ATTENDANCE_POLL_MS });
+
+/**
+ * "Working now" — flow F1/F3. Not on the thirty-second poll: it re-reads on `tasks.{me}` when a
+ * `task.changed` frame of kind `timer` arrives (a start, pause, resume or stop anywhere), as a
+ * partial reload of this one prop. The server resolves only `working_now` for it.
+ */
+useLiveTaskProps(['working_now'], { accept: workingNowPing });
 </script>
 
 <template>
@@ -130,6 +142,14 @@ useLiveProps(['queue', 'queue_total', 'flagged', 'decided'], { intervalMs: ATTEN
                 </Button>
             </div>
         </template>
+
+        <!--
+            Working now, at the top: who is timing which task right now, and for how long. It is
+            the one thing on this page that changes while you read it.
+        -->
+        <section aria-labelledby="working-now" class="min-w-0">
+            <WorkingNowPanel :rows="working_now" heading-id="working-now" />
+        </section>
 
         <!-- The queue. First, because it is the only thing on this page that is waiting on somebody. -->
         <section aria-labelledby="approval-queue" class="flex min-w-0 flex-col gap-4">

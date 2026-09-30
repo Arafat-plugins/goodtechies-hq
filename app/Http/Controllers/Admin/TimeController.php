@@ -10,6 +10,7 @@ use App\Models\Employee;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\TimeEntry;
+use App\Services\TaskTimerService;
 use App\Services\TimerService;
 use App\Support\TrackingMode;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -82,7 +83,10 @@ class TimeController extends Controller
     /** How many rows each of the three breakdown tables holds. */
     private const BREAKDOWN_LIMIT = 25;
 
-    public function __construct(private readonly TimerService $timer) {}
+    public function __construct(
+        private readonly TimerService $timer,
+        private readonly TaskTimerService $tasks,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -92,10 +96,8 @@ class TimeController extends Controller
         $date = $this->date($request);
         [$weekFrom, $weekTo] = $this->week($date);
 
-        $queue = $this->timer->awaitingDecision($user, self::QUEUE_LIMIT);
-        $flagged = $this->timer->flaggedAndCounted($user, $weekFrom, $weekTo, self::SHORTLIST);
-        $decided = $this->timer->recentlyDecided($user, self::SHORTLIST);
-
+        // Closures, so a partial reload (the queue's poll, the Working now panel's ring) runs
+        // only the reads it asked for. A full visit resolves every one, exactly as before.
         return Inertia::render('Admin/Time/Index', [
             'date' => [
                 'value' => $date->toDateString(),
@@ -109,16 +111,21 @@ class TimeController extends Controller
                 'to' => $weekTo->toDateString(),
                 'label' => $weekFrom->isoFormat('D MMM').' – '.$weekTo->isoFormat('D MMM YYYY'),
             ],
-            'queue' => $this->entries($request, $queue),
+            'queue' => fn (): array => $this->entries($request, $this->timer->awaitingDecision($user, self::QUEUE_LIMIT)),
             // The whole count, not the list's length: a queue that says "12 waiting" while
             // showing 50 rows has told the Admin something they can act on.
-            'queue_total' => $this->timer->awaitingDecisionCount($user),
+            'queue_total' => fn (): int => $this->timer->awaitingDecisionCount($user),
             'queue_limit' => self::QUEUE_LIMIT,
-            'flagged' => $this->entries($request, $flagged),
-            'decided' => $this->entries($request, $decided),
-            'byEmployee' => $this->byEmployee($user, $date, $weekFrom, $weekTo),
-            'byProject' => $this->byProject($user, $date, $weekFrom, $weekTo),
-            'byTask' => $this->byTask($user, $date, $weekFrom, $weekTo),
+            'flagged' => fn (): array => $this->entries($request, $this->timer->flaggedAndCounted($user, $weekFrom, $weekTo, self::SHORTLIST)),
+            'decided' => fn (): array => $this->entries($request, $this->timer->recentlyDecided($user, self::SHORTLIST)),
+            'byEmployee' => fn (): array => $this->byEmployee($user, $date, $weekFrom, $weekTo),
+            'byProject' => fn (): array => $this->byProject($user, $date, $weekFrom, $weekTo),
+            'byTask' => fn (): array => $this->byTask($user, $date, $weekFrom, $weekTo),
+            // "Working now" (flow F3): who is timing which task, for how long. A closure, so
+            // the panel's live partial reload on `task.changed` kind `timer` runs this one read
+            // and nothing else on the page. The page is `::review`, which is the same key as
+            // `watchLive`, so this is a list here — empty when nobody is timing.
+            'working_now' => fn (): array => $this->tasks->workingNow($user) ?? [],
         ]);
     }
 

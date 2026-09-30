@@ -596,3 +596,40 @@
 ) {
     --tw-ring-shadow: 0 0 #0000;
 }
+
+/*
+ * Text-entry fields carry no focus border and no focus ring (2026-09-30, decision 12-72,
+ * DESIGN.md §2.2). The client asked for the orange focus border to go "from everywhere".
+ *
+ * Scope: fields you TYPE into (or pick a value in) — `Input` (incl. `type="date"`), `Textarea`,
+ * the Select trigger, `NativeSelect`, `PinInput`'s slots and the Command/Combobox search input.
+ * Buttons, links, checkboxes, switches, tabs, menu items and cards are NOT listed and keep their
+ * opaque `--ring` (§2.2): a focused text field already shows a blinking caret. Same pattern as the
+ * overlay block above — generated `Components/ui/*` files are not hand-edited, and this is
+ * unlayered so it outranks the generated `focus-visible:border-ring focus-visible:ring-3`:
+ *   - `--tw-ring-shadow` is cleared, so no halo is painted; `shadow-flat` (`--tw-shadow`) and
+ *     every other layer composed into `box-shadow` is untouched;
+ *   - the border stays `--input`, its unfocused colour. An invalid field (`aria-invalid`) is
+ *     excluded and keeps `--destructive`. A call site whose field is borderless at rest
+ *     (`TaskSubtasksPanel`'s add row) keeps that with `focus-visible:border-transparent!` —
+ *     important layered utilities outrank this unlayered rule.
+ * No token changes; `--ring` still paints every other focus indicator.
+ */
+[data-slot="input"]:focus,
+[data-slot="textarea"]:focus,
+[data-slot="select-trigger"]:focus,
+[data-slot="native-select"]:focus,
+[data-slot="pin-input-slot"]:focus,
+[data-slot="command-input"]:focus {
+    --tw-ring-shadow: 0 0 #0000;
+}
+
+:is(
+    [data-slot="input"],
+    [data-slot="textarea"],
+    [data-slot="select-trigger"],
+    [data-slot="native-select"],
+    [data-slot="pin-input-slot"]
+):focus:not([aria-invalid="true"]) {
+    border-color: var(--input);
+}

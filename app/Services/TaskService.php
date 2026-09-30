@@ -91,6 +91,51 @@ class TaskService
         'workSummaryAuthor',
         'completer',
         'firstCompleter',
+        // Decision 12-71: a subtask's `↳ <parent title>` line. The parent's assignees ride along
+        // because `TaskPolicy::view` on the parent is what decides whether the line is sent at
+        // all, and for an employee that is an assignee check — asked of the loaded relation,
+        // not a query per row. Two constant queries, and none when no row has a parent.
+        'parent.assignees',
+    ];
+
+    /**
+     * The subtask counter on a card (decision 12-71): live subtasks only — not deleted
+     * (SoftDeletes), not archived — and **not cancelled**, in either number. A cancelled
+     * subtask is neither work still owed nor work done; counting it in the total would leave a
+     * parent at 4/5 forever, and counting it as done would claim work nobody did. "Done" is
+     * `completed` and nothing else.
+     *
+     * @return array<string|int, mixed>
+     */
+    public static function subtaskCounts(): array
+    {
+        $live = fn (Builder $query) => $query->whereNull('archived_at')
+            ->where('status', '!=', TaskStatus::Cancelled->value);
+
+        return [
+            'subtasks as subtask_count' => $live,
+            'subtasks as subtask_done_count' => fn (Builder $query) => $live($query)
+                ->where('status', TaskStatus::Completed->value),
+        ];
+    }
+
+    /**
+     * What the check on a subtask row does (decision 12-71): ONE step forward along the
+     * machine, never a jump. `TaskStatus::TRANSITIONS` has no shortcut to Completed — work goes
+     * through In review with a work summary and a reviewer passes it — so the check is the next
+     * forward move, and it is offered only when TaskPolicy::transition says this viewer may make
+     * it. Every entry is a move the machine already allows; this only picks which one "forward"
+     * means from each status.
+     *
+     * @var array<string, string>
+     */
+    public const CHECK_STEP = [
+        'backlog' => 'todo',
+        'todo' => 'in_progress',
+        'in_progress' => 'in_review',
+        'changes_requested' => 'in_progress',
+        'waiting' => 'in_progress',
+        'in_review' => 'completed',
     ];
 
     /** The group-by variants the List view offers. */
@@ -154,6 +199,9 @@ class TaskService
         // action item's task gets its discussion, its board position and its audit row like
         // any other (decisions 2-9 and 2-36, a third time).
         'source_meeting_id',
+        // Decision 12-71: a subtask's parent, set in the INSERT by createSubtask() and never
+        // again — there is no re-parenting, which is half of how "one level deep" stays true.
+        'parent_id',
     ];
 
     /**
@@ -197,6 +245,9 @@ class TaskService
                 // The paperclip on a card. The `files` relation is already current-versions
                 // only, so this counts files and not revisions.
                 'files as attachment_count',
+                // The speech bubble beside it (brief 012): messages in the task's discussion.
+                'discussionMessages as comment_count',
+                ...self::subtaskCounts(),
             ])
             // **"Assignee on leave" (Phase 5, Part D §5 and §9).** A correlated subquery, not a
             // second pass: this method is the single funnel for the List, the Board, the
@@ -320,6 +371,10 @@ class TaskService
                 [$to->toDateString()],
             ))
             ->when($filters['overdue'], fn (Builder $q) => $q->overdue($filters['as_of']))
+            // Decision 12-71: subtasks are left off a general view unless "Show subtasks" is on
+            // — and `subtasks` is already true under a personal scope (see filters()), so a
+            // person's own subtasks are always on their My Tasks / Due today / Overdue.
+            ->unless($filters['subtasks'], fn (Builder $q) => $q->topLevel())
             // Archived tasks are hidden from active views unless explicitly asked for.
             ->unless($filters['archived'], fn (Builder $q) => $q->notArchived());
     }
@@ -611,6 +666,18 @@ class TaskService
             $status = TaskStatus::Backlog;
         }
 
+        // One level deep, and in the parent's project — held here as well as in the policy,
+        // because create() is the door every caller goes through (decision 12-71).
+        if (isset($attributes['parent_id'])) {
+            $parent = Task::query()->findOrFail($attributes['parent_id']);
+
+            if ($parent->isSubtask()) {
+                throw new TaskStateException('A subtask cannot have subtasks of its own.');
+            }
+
+            $attributes['project_id'] = $parent->project_id;
+        }
+
         return DB::transaction(function () use ($actor, $attributes, $assigneeIds, $primaryId, $status): Task {
             $task = new Task;
             $task->fill(array_intersect_key($attributes, array_flip(self::FIELDS)));
@@ -652,6 +719,37 @@ class TaskService
     }
 
     /**
+     * Split a task: create a subtask under $parent (decision 12-71, flow F2).
+     *
+     * It goes THROUGH create() — the fourth caller that could have been a second creation path
+     * and is not (decisions 2-9 and 2-36) — so a subtask is born with its discussion, its audit
+     * and activity rows, the assignee's `TaskAssigned` notification and its own `TaskChanged`;
+     * announceChange() then rings the parent too, whose counter just moved.
+     *
+     * The project is the parent's, always: a subtask in a different project from its parent
+     * would put one piece of work on two clients' boards. It is born in To do, not Backlog — it
+     * was made to be done by the person it names.
+     *
+     * @param  array{title: string, due_date?: string|null}  $attributes
+     *
+     * @throws AuthorizationException
+     */
+    public function createSubtask(User $actor, Task $parent, array $attributes, ?int $assigneeId = null): Task
+    {
+        if (! Gate::forUser($actor)->allows('createSubtask', $parent)) {
+            throw new AuthorizationException('You are not allowed to add a subtask here.');
+        }
+
+        return $this->create($actor, [
+            'title' => $attributes['title'],
+            'due_date' => $attributes['due_date'] ?? null,
+            'project_id' => $parent->project_id,
+            'parent_id' => $parent->getKey(),
+            'status' => TaskStatus::Todo->value,
+        ], $assigneeId === null ? [] : [$assigneeId]);
+    }
+
+    /**
      * Edit a task. Not its status, not its assignees, not its position — each of those is its
      * own method with its own ability and its own audit row.
      *
@@ -669,6 +767,14 @@ class TaskService
     public function update(User $actor, Task $task, array $attributes): Task
     {
         $this->guardWritable($actor, $task, 'update', 'edited');
+
+        // A subtask lives in its parent's project (decision 12-71); moving one alone would
+        // split a piece of work across two clients' boards. Move the parent instead.
+        if ($task->isSubtask()
+            && array_key_exists('project_id', $attributes)
+            && (int) $attributes['project_id'] !== (int) $task->project_id) {
+            throw new TaskStateException('A subtask stays in its parent\'s project. Move the parent task instead.');
+        }
 
         return DB::transaction(function () use ($actor, $task, $attributes): Task {
             $task->fill(array_intersect_key($attributes, array_flip(self::FIELDS)));
@@ -693,6 +799,16 @@ class TaskService
                 $tagged = $this->applyTags($actor, $task, (array) $attributes['tag_ids']);
             } elseif ($moved) {
                 $this->dropForeignTags($actor, $task);
+            }
+
+            // A parent that moved takes its subtasks with it — same project, always.
+            if ($moved) {
+                foreach ($task->subtasks()->get() as $subtask) {
+                    $subtask->forceFill(['project_id' => $task->project_id])->save();
+                    $this->activity->record($subtask, 'Task updated: project_id (moved with its parent)', $actor);
+                    $this->dropForeignTags($actor, $subtask);
+                    $this->announceChange($subtask, 'updated');
+                }
             }
 
             if ($changed !== [] || $tagged) {
@@ -986,20 +1102,31 @@ class TaskService
         }
 
         DB::transaction(function () use ($actor, $task): void {
-            // Audit first: the row is written while the task is still there to be described,
-            // and audit_logs is append-only so it cannot be tidied up afterwards.
-            $this->audit->record(AuditEvent::TaskDeleted, $task, $this->snapshot($task), null, $actor);
-            $this->activity->record($task, 'Task deleted', $actor);
+            // Decision 12-71: a parent's subtasks go with it, each audit-logged and announced as
+            // the task it is. The FK cannot see a soft delete, so this is the cascade.
+            foreach ($task->subtasks()->get() as $subtask) {
+                $this->deleteOne($actor, $subtask);
+            }
 
-            $task->delete();
-
-            // After the delete, so the event describes something that has happened. The delete
-            // is SOFT, so the row, its assignees and its policy answers are all still there for
-            // the dispatcher to ask about.
-            event(new TaskDeleted($task, $actor));
-
-            $this->announceChange($task, 'deleted');
+            $this->deleteOne($actor, $task);
         });
+    }
+
+    private function deleteOne(User $actor, Task $task): void
+    {
+        // Audit first: the row is written while the task is still there to be described,
+        // and audit_logs is append-only so it cannot be tidied up afterwards.
+        $this->audit->record(AuditEvent::TaskDeleted, $task, $this->snapshot($task), null, $actor);
+        $this->activity->record($task, 'Task deleted', $actor);
+
+        $task->delete();
+
+        // After the delete, so the event describes something that has happened. The delete
+        // is SOFT, so the row, its assignees and its policy answers are all still there for
+        // the dispatcher to ask about.
+        event(new TaskDeleted($task, $actor));
+
+        $this->announceChange($task, 'deleted');
     }
 
     /**
@@ -1021,17 +1148,33 @@ class TaskService
         return DB::transaction(function () use ($actor, $task): Task {
             // Archiving is orthogonal to status, exactly as it is for a project: the task keeps
             // the status it had, and comes back in it.
-            $task->forceFill(['archived_at' => now()])->save();
+            $at = now();
 
-            $this->activity->record($task, sprintf(
-                'Task archived (was %s)',
-                $task->status?->label() ?? 'unknown',
-            ), $actor);
+            // Decision 12-71: the live subtasks are archived WITH the parent, at the parent's
+            // exact timestamp — which is how unarchive() tells them from one archived earlier on
+            // its own, which must stay archived.
+            foreach ($task->subtasks()->notArchived()->get() as $subtask) {
+                $this->archiveOne($actor, $subtask, $at);
+            }
 
-            $this->announceChange($task, 'archived');
+            $this->archiveOne($actor, $task, $at);
 
             return $task->refresh();
         });
+    }
+
+    private function archiveOne(User $actor, Task $task, Carbon $at): void
+    {
+        // Archiving is orthogonal to status, exactly as it is for a project: the task keeps
+        // the status it had, and comes back in it.
+        $task->forceFill(['archived_at' => $at])->save();
+
+        $this->activity->record($task, sprintf(
+            'Task archived (was %s)',
+            $task->status?->label() ?? 'unknown',
+        ), $actor);
+
+        $this->announceChange($task, 'archived');
     }
 
     /**
@@ -1048,12 +1191,21 @@ class TaskService
             throw TaskStateException::notArchived();
         }
 
+        if ($task->isSubtask() && Task::query()->whereKey($task->parent_id)->whereNotNull('archived_at')->exists()) {
+            throw new TaskStateException('Its parent task is archived. Unarchive the parent first.');
+        }
+
         return DB::transaction(function () use ($actor, $task): Task {
-            $task->forceFill(['archived_at' => null])->save();
+            // Only the subtasks archived together with the parent come back with it.
+            $together = $task->subtasks()->where('archived_at', $task->archived_at)->get();
 
-            $this->activity->record($task, 'Task unarchived', $actor);
+            foreach ([...$together, $task] as $one) {
+                $one->forceFill(['archived_at' => null])->save();
 
-            $this->announceChange($task, 'restored');
+                $this->activity->record($one, 'Task unarchived', $actor);
+
+                $this->announceChange($one, 'restored');
+            }
 
             return $task->refresh();
         });
@@ -1300,6 +1452,19 @@ class TaskService
         sort($userIds);
 
         event(new TaskChanged((int) $task->getKey(), $kind, $userIds));
+
+        // Flow F2: a subtask's change can move its parent's counter and its drawer's list, so
+        // the parent rings too — as `updated`, to the parent's OWN viewers, which is what keeps
+        // an employee who sees only the subtask from learning the parent's id this way. A
+        // comment or a reorder changes nothing the parent shows. A parent already deleted (the
+        // cascade) has said so itself.
+        if ($task->parent_id !== null && ! in_array($kind, ['commented', 'reordered'], true)) {
+            $parent = Task::query()->find($task->parent_id);
+
+            if ($parent !== null) {
+                $this->announceChange($parent, 'updated');
+            }
+        }
     }
 
     /**
@@ -2069,7 +2234,7 @@ class TaskService
      * Either end may stand alone: `date_from` on its own is an open-ended "from here on".
      *
      * @param  array<string, mixed>  $filters
-     * @return array{search: string|null, project_id: int|null, status: string|null, scope: string|null, priority: string|null, assignee_id: int|null, tag_id: int|null, bucket: string|null, mine: bool, date_from: Carbon|null, date_to: Carbon|null, overdue: bool, archived: bool, as_of: Carbon}
+     * @return array{search: string|null, project_id: int|null, status: string|null, scope: string|null, priority: string|null, assignee_id: int|null, tag_id: int|null, bucket: string|null, mine: bool, date_from: Carbon|null, date_to: Carbon|null, overdue: bool, archived: bool, subtasks: bool, as_of: Carbon}
      */
     public function filters(array $filters): array
     {
@@ -2101,6 +2266,10 @@ class TaskService
             'date_to' => $this->date($filters['date_to'] ?? null),
             'overdue' => (bool) ($filters['overdue'] ?? false),
             'archived' => (bool) ($filters['archived'] ?? false),
+            // "Show subtasks" (decision 12-71). On whenever the view is personal — `mine`, which
+            // every scope sets — because somebody's own subtask is their work whatever the
+            // general board chooses to show; otherwise only when asked for.
+            'subtasks' => $scope !== null || (bool) ($filters['mine'] ?? false) || (bool) ($filters['subtasks'] ?? false),
             // Overdue is relative to a date, so the date is a parameter rather than a call to
             // today() buried in the query — that is what makes it testable at a fixed date.
             'as_of' => $asOf instanceof Carbon ? $asOf : Carbon::today(),

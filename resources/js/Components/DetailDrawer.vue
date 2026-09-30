@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, watch } from 'vue';
+import { computed, nextTick, provide, ref, watch } from 'vue';
+import { DRAWER_FOOTER_INSET } from '@/Components/drawerFooter';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/Components/ui/sheet';
 import { queryParam, syncQuery } from '@/lib/tableState';
 import { cn } from '@/lib/utils';
@@ -39,8 +40,10 @@ const props = withDefaults(
         width?: 'sm' | 'md' | 'lg' | 'xl';
         /** The id written to `?detail=`. Omitted means the drawer does not touch the URL. */
         deepLinkId?: string | number | null;
+        /** Opt-in: the Asana-style big title (the task drawer, brief 014). */
+        largeTitle?: boolean;
     }>(),
-    { width: 'md' },
+    { width: 'md', largeTitle: false },
 );
 
 const emit = defineEmits<{ 'update:open': [open: boolean] }>();
@@ -53,6 +56,20 @@ const WIDTH_CLASS: Record<'sm' | 'md' | 'lg' | 'xl', string> = {
 };
 
 const widthClass = computed(() => WIDTH_CLASS[props.width]);
+
+/**
+ * Brief 016: the height of a composer pinned to this drawer's bottom edge (`drawerFooter.ts`).
+ * The body is padded by it so its last line can always be scrolled clear of the composer.
+ */
+const footerInset = ref(0);
+
+provide(DRAWER_FOOTER_INSET, (px: number) => {
+    footerInset.value = Math.max(0, Math.round(px));
+});
+
+const bodyStyle = computed(() =>
+    footerInset.value > 0 ? { paddingBottom: `calc(1rem + ${footerInset.value}px)` } : undefined,
+);
 
 /** Opening writes the id into the URL; closing takes it back out. */
 watch(
@@ -132,7 +149,7 @@ function onCloseAutoFocus(event: Event): void {
         >
             <SheetHeader class="flex-row items-start justify-between gap-3 border-b p-4 pr-12">
                 <div class="flex min-w-0 flex-col gap-1">
-                    <SheetTitle class="text-base break-words">{{ title }}</SheetTitle>
+                    <SheetTitle :class="largeTitle ? 'text-xl font-semibold break-words' : 'text-base break-words'">{{ title }}</SheetTitle>
                     <SheetDescription v-if="subtitle" class="break-words">{{ subtitle }}</SheetDescription>
                 </div>
                 <div v-if="$slots['header-actions']" class="flex shrink-0 items-center gap-2">
@@ -140,7 +157,7 @@ function onCloseAutoFocus(event: Event): void {
                 </div>
             </SheetHeader>
 
-            <div class="min-w-0 flex-1 overflow-y-auto p-4">
+            <div class="min-w-0 flex-1 overflow-y-auto p-4" :style="bodyStyle" data-drawer-body>
                 <slot />
             </div>
 

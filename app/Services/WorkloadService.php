@@ -84,8 +84,8 @@ class WorkloadService
             'totals' => [
                 // The agency's own two counts, from the same two buckets, so the strip at the
                 // top and the rows below it are the same question asked twice.
-                'open_count' => $this->tasks->count($viewer, ['bucket' => TaskBucket::Open->value, 'as_of' => $asOf]),
-                'overdue_count' => $this->tasks->count($viewer, ['bucket' => TaskBucket::Overdue->value, 'as_of' => $asOf]),
+                'open_count' => $this->tasks->count($viewer, ['bucket' => TaskBucket::Open->value, 'as_of' => $asOf, 'subtasks' => true]),
+                'overdue_count' => $this->tasks->count($viewer, ['bucket' => TaskBucket::Overdue->value, 'as_of' => $asOf, 'subtasks' => true]),
                 'employee_count' => count($rows),
             ],
         ];
@@ -119,11 +119,13 @@ class WorkloadService
                 'assignee_id' => $id,
                 'bucket' => TaskBucket::Open->value,
                 'as_of' => $asOf,
+                'subtasks' => true,
             ]),
             'overdue_count' => $this->tasks->count($viewer, [
                 'assignee_id' => $id,
                 'bucket' => TaskBucket::Overdue->value,
                 'as_of' => $asOf,
+                'subtasks' => true,
             ]),
 
             // Estimated and tracked, side by side and never combined. Both are about the TASKS

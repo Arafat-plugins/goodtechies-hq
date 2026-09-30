@@ -15,6 +15,7 @@ use App\Models\PayrollItem;
 use App\Models\PayrollPeriod;
 use App\Models\Project;
 use App\Models\Task;
+use App\Models\TimeEntry;
 use App\Models\User;
 use App\Services\AttendanceService;
 use App\Services\FinanceService;
@@ -24,6 +25,7 @@ use App\Services\ProjectService;
 use App\Services\SettingsService;
 use App\Services\TaskReviewers;
 use App\Services\TaskService;
+use App\Services\TaskTimerService;
 use App\Services\WorkloadService;
 use App\Support\AttendanceStatus;
 use App\Support\ProjectStatus;
@@ -119,6 +121,7 @@ class DashboardController extends Controller
         private readonly FinanceService $finance,
         private readonly SettingsService $settings,
         private readonly WorkloadService $workload,
+        private readonly TaskTimerService $timers,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -126,26 +129,34 @@ class DashboardController extends Controller
         $user = $request->user();
         $asOf = Carbon::today();
         $maySeeTasks = Gate::forUser($user)->allows('viewAny', Task::class);
+        $mayWatch = Gate::forUser($user)->allows('watchLive', TimeEntry::class);
 
+        // Closures, so a live partial reload runs only the reads it names: the sixty-second poll
+        // asks for six, and the Working now panel's ring on `task.changed` kind `timer` for one.
+        // A full visit resolves every one, exactly as before.
         return Inertia::render('Admin/Dashboard', [
             'greetingName' => Str::before(trim($user->name), ' '),
             'today' => now(config('app.timezone'))->toDateString(),
             'stats' => [
                 'activeEmployees' => Employee::where('status', UserStatus::Active)->count(),
             ],
-            'attendance' => $this->attendanceToday($user, $asOf),
-            'workStats' => $this->workStats($user, $asOf, $maySeeTasks),
-            'attention' => $maySeeTasks ? $this->attention($user, $asOf) : [],
-            'taskStatuses' => $maySeeTasks ? $this->taskStatuses($user, $asOf) : [],
+            'attendance' => fn () => $this->attendanceToday($user, $asOf),
+            'workStats' => fn () => $this->workStats($user, $asOf, $maySeeTasks),
+            'attention' => fn () => $maySeeTasks ? $this->attention($user, $asOf) : [],
+            'taskStatuses' => fn () => $maySeeTasks ? $this->taskStatuses($user, $asOf) : [],
             // Row 2's other three. `taskStatuses` above is the donut, these two are the bars,
             // and `upcomingDeadlines` is the LIST — Part D §3 names four things and budgets
             // three charts, so the fourth is not a chart. See each method.
-            'tasksByEmployee' => $maySeeTasks ? $this->tasksByEmployee($user, $asOf) : [],
-            'projectsByType' => $this->projectsByType($user),
-            'upcomingDeadlines' => $this->upcomingDeadlines($user, $asOf),
-            'upcomingHolidays' => $this->upcomingHolidays($request, $asOf),
-            'upcomingMeetings' => $this->upcomingMeetings($request, $user),
-            'finance' => $this->financeThisMonth($user, $asOf),
+            'tasksByEmployee' => fn () => $maySeeTasks ? $this->tasksByEmployee($user, $asOf) : [],
+            'projectsByType' => fn () => $this->projectsByType($user),
+            'upcomingDeadlines' => fn () => $this->upcomingDeadlines($user, $asOf),
+            'upcomingHolidays' => fn () => $this->upcomingHolidays($request, $asOf),
+            'upcomingMeetings' => fn () => $this->upcomingMeetings($request, $user),
+            'finance' => fn () => $this->financeThisMonth($user, $asOf),
+            // "Working now" (flow F3): who is timing which task, for how long — for a watcher
+            // (`TimeEntryPolicy::watchLive`) and ABSENT for anybody else, never an empty list
+            // that would read as "nobody is working".
+            ...($mayWatch ? ['workingNow' => fn (): array => $this->timers->workingNow($user) ?? []] : []),
         ]);
     }
 

@@ -11,9 +11,11 @@ import {
     Trash2,
     Upload,
     X,
+    Plus,
 } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
+import { cn } from '@/lib/utils';
 import type {
     FileHistoryResponse,
     FileIndexResponse,
@@ -80,9 +82,16 @@ const props = withDefaults(
         title?: string;
         description?: string;
         emptyDescription?: string;
+        /**
+         * Opt-in (brief 014, the task detail): a heading with the count and a `+`, no card and
+         * no prose, the files as a plain list of links; the upload form shows only once a
+         * file is chosen. Every other mount keeps the card. Behaviour is identical.
+         */
+        compact?: boolean;
     }>(),
     {
         canUpload: false,
+        compact: false,
         title: 'Files',
         description: 'Briefs, deliverables and anything else worth keeping with this record.',
         emptyDescription: 'Anything attached to this record shows up here.',
@@ -135,6 +144,15 @@ const replacingName = computed(
 );
 
 const fieldError = computed(() => pickedError.value ?? serverError.value);
+
+/** `compact` hides the upload form until there is something in it to act on. */
+const formShown = computed(
+    () => !props.compact || picked.value !== null || uploading.value || fieldError.value !== null || target.value !== 'new' || failedToSend.value,
+);
+
+function pickFile(): void {
+    pickerEl.value?.click();
+}
 
 /* ------------------------------------------------------------------------ reading */
 
@@ -531,13 +549,30 @@ function destroy(file: FileSummary): void {
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4">
-        <CardHeader>
+    <Card :class="cn('min-w-0 gap-4', compact && 'gap-1 rounded-none border-0 bg-transparent py-0 shadow-flat')">
+        <CardHeader v-if="compact" class="flex items-center gap-2 px-0">
+            <CardTitle class="text-sm font-semibold">{{ title }}</CardTitle>
+            <span v-if="files.length > 0" class="rounded-sm bg-muted px-1.5 text-xs text-muted-foreground tabular-nums">
+                {{ files.length }}
+            </span>
+            <Button
+                v-if="canUpload"
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="`Add to ${title}`"
+                data-file-add
+                @click="pickFile"
+            >
+                <Plus aria-hidden="true" />
+            </Button>
+        </CardHeader>
+        <CardHeader v-else>
             <CardTitle class="text-sm font-medium">{{ title }}</CardTitle>
             <CardDescription>{{ description }}</CardDescription>
         </CardHeader>
 
-        <CardContent class="flex min-w-0 flex-col gap-4">
+        <CardContent :class="cn('flex min-w-0 flex-col gap-4', compact && 'gap-2 px-0')">
             <!-- Loading -->
             <div v-if="loading" class="flex flex-col gap-3" aria-busy="true">
                 <span class="sr-only">Loading files</span>
@@ -586,14 +621,18 @@ function destroy(file: FileSummary): void {
                 </div>
 
                 <EmptyState
-                    v-if="files.length === 0"
+                    v-if="files.length === 0 && !compact"
                     :icon="Paperclip"
                     title="No files yet"
                     :description="emptyDescription"
                 />
 
-                <ul v-else class="divide-y">
-                    <li v-for="file in files" :key="file.id" class="flex min-w-0 flex-col gap-2 py-3">
+                <ul v-else-if="files.length > 0" :class="compact ? 'flex flex-col' : 'divide-y'">
+                    <li
+                        v-for="file in files"
+                        :key="file.id"
+                        :class="cn('flex min-w-0 flex-col gap-2', compact ? 'py-1' : 'py-3')"
+                    >
                         <div
                             class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
                         >
@@ -618,7 +657,7 @@ function destroy(file: FileSummary): void {
                                     </a>
                                     <span v-else class="text-sm font-medium break-all">{{ file.name }}</span>
 
-                                    <p class="text-xs text-muted-foreground">
+                                    <p v-if="!compact" class="text-xs text-muted-foreground">
                                         {{ file.size_label }} ·
                                         {{ file.uploaded_by?.name ?? 'Unknown uploader' }} ·
                                         {{ formatUploadedAt(file.uploaded_at) }}
@@ -825,7 +864,7 @@ function destroy(file: FileSummary): void {
                 -->
                 <form
                     v-if="canUpload"
-                    class="flex min-w-0 flex-col gap-2 border-t pt-4"
+                    :class="cn('flex min-w-0 flex-col gap-2 border-t pt-4', !formShown && 'sr-only')"
                     novalidate
                     @submit.prevent="upload"
                 >
@@ -844,7 +883,7 @@ function destroy(file: FileSummary): void {
                         :disabled="uploading"
                         :aria-describedby="fieldError ? `${errorId} ${hintId}` : hintId"
                         :aria-invalid="fieldError ? true : undefined"
-                        class="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-flat transition-[color,box-shadow] outline-none file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:font-medium file:text-secondary-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring dark:bg-input/30"
+                        class="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-flat transition-[color,box-shadow] outline-none file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:font-medium file:text-secondary-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
                         @change="choose"
                     >
 

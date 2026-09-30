@@ -60,6 +60,8 @@ class TaskChanged implements ShouldBroadcast, ShouldDispatchAfterCommit
         'status',
         'reordered',
         'commented',
+        // Flow F3: a task timer started, paused, resumed or stopped on this task.
+        'timer',
     ];
 
     /**

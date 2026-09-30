@@ -527,7 +527,7 @@ function focusTrigger(): void {
                         auto-focus
                         :aria-label="`Search pages and ${recordNoun}`"
                         :placeholder="placeholder"
-                        class="h-9 min-w-0 flex-1 rounded-md bg-transparent text-sm outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring"
+                        class="h-9 min-w-0 flex-1 rounded-md bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                     />
                     <!--
                         The scope, visibly: which records this palette is looking in. The

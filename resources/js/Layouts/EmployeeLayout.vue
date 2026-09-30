@@ -7,6 +7,7 @@ import AppSidebar from '@/Components/Shell/AppSidebar.vue';
 import AppTopBar from '@/Components/Shell/AppTopBar.vue';
 import SkipToContent from '@/Components/Shell/SkipToContent.vue';
 import ShellLive from '@/Components/Shell/ShellLive.vue';
+import TaskTimerPulse from '@/Components/Timer/TaskTimerPulse.vue';
 import TimerBar from '@/Components/Timer/TimerBar.vue';
 import Toaster from '@/Components/Toaster.vue';
 import { cn } from '@/lib/utils';
@@ -58,6 +59,8 @@ const navigating = useShellNavigationPending();
                 "
             >
                 <ShellLive />
+                <!-- Flow F3: keeps an office/Admin task timer's heartbeat going on every page. -->
+                <TaskTimerPulse />
                 <FlashMessage class="mb-4" />
                 <slot />
             </main>

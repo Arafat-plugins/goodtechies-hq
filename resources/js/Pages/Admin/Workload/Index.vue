@@ -52,9 +52,11 @@ const props = defineProps<{
 }>();
 
 /** The Tasks list, under the exact filter a number was counted with. */
+// `subtasks: 1`: Workload counts subtasks (decision 12-71), so the list a number opens shows
+// them too — otherwise a row would say 5 open and its link would show 3.
 function tasksHref(params: Record<string, string | number>): string {
     return `/admin/tasks?${new URLSearchParams(
-        Object.fromEntries(Object.entries(params).map(([key, value]) => [key, String(value)])),
+        Object.fromEntries(Object.entries({ ...params, subtasks: 1 }).map(([key, value]) => [key, String(value)])),
     ).toString()}`;
 }
 

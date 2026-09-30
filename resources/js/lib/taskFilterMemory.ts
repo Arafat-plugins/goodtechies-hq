@@ -35,6 +35,8 @@ export const TASK_FILTER_KEYS = [
     'bucket',
     'overdue',
     'archived',
+    // Flow F2: "Show subtasks".
+    'subtasks',
 ] as const;
 
 export type TaskFilterSet = Record<string, string>;
@@ -63,6 +65,24 @@ export function filtersOf(search: string | URLSearchParams): TaskFilterSet {
     }
 
     return set;
+}
+
+/**
+ * `set` without what Due today / Overdue used to save from *Add filter*: `overdue=1` and a
+ * `bucket` of `overdue` or `due_today` (brief 017). Those now belong to the scope dropdown, whose
+ * `scope=` is still saved. The server still reads the old keys, so a link carrying them works;
+ * they are just never remembered or put back, and an old saved set loses them on read.
+ */
+export function savableFilters(set: TaskFilterSet): TaskFilterSet {
+    const next: TaskFilterSet = { ...set };
+
+    delete next.overdue;
+
+    if (next.bucket === 'overdue' || next.bucket === 'due_today') {
+        delete next.bucket;
+    }
+
+    return next;
 }
 
 export function hasFilters(set: TaskFilterSet | null): set is TaskFilterSet {
@@ -138,7 +158,7 @@ export function readSavedFilters(userId: number): TaskFilterSet | null {
             }
         }
 
-        return filtersOf(params);
+        return savableFilters(filtersOf(params));
     } catch {
         return null;
     }
@@ -146,7 +166,7 @@ export function readSavedFilters(userId: number): TaskFilterSet | null {
 
 export function writeSavedFilters(userId: number, set: TaskFilterSet): void {
     try {
-        window.localStorage.setItem(storageKey(userId), JSON.stringify(set));
+        window.localStorage.setItem(storageKey(userId), JSON.stringify(savableFilters(set)));
     } catch {
         /* Private mode: the filters just do not outlive this page. */
     }

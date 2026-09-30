@@ -76,6 +76,7 @@ class AttendanceService
         private readonly SettingsService $settings,
         private readonly AuditLogger $audit,
         private readonly HolidayService $holidays,
+        private readonly TimerService $timer,
     ) {}
 
     /**
@@ -403,8 +404,29 @@ class AttendanceService
 
             $record->save();
 
+            // Flow F3: a task timer on the office clock runs INSIDE the clock-in and cannot
+            // outlive it. Stopped at the clock-out's own moment, in the same transaction, so a
+            // clock-out that fails leaves the timer exactly as it was.
+            $this->timer->stopBreakdownFor($employee, Carbon::parse($at));
+
             return $record;
         });
+    }
+
+    /**
+     * Is this office employee clocked in right now — today's record has a clock-in and no
+     * clock-out? The check ▶ on a task card makes before an office/Admin timer may run.
+     */
+    public function isClockedIn(Employee $employee, ?CarbonInterface $at = null): bool
+    {
+        $date = ($at === null ? Carbon::now() : Carbon::parse($at))->copy()->startOfDay();
+
+        return AttendanceRecord::query()
+            ->where('employee_id', $employee->getKey())
+            ->whereDate('date', $date->toDateString())
+            ->whereNotNull('clock_in')
+            ->whereNull('clock_out')
+            ->exists();
     }
 
     /**

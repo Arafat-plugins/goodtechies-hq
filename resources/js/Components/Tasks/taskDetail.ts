@@ -7,7 +7,7 @@ import type {
 } from '@/Components/Messages/messages';
 import { MESSAGE_MAX_BODY } from '@/Components/Messages/messages';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
-import type { Task, TaskPerson } from '@/Components/Tasks/TaskList.vue';
+import type { Task, TaskEmployeeRef, TaskPerson } from '@/Components/Tasks/TaskList.vue';
 import { flashSeq, lastFlash } from '@/lib/flashChannel';
 
 /**
@@ -95,14 +95,34 @@ export interface TaskGeneratedFrom {
     can_manage: boolean;
 }
 
+/** One row of the Subtasks panel (flow F2), as `TaskResource::subtaskRows()` sends it. */
+export interface TaskSubtask {
+    id: number;
+    title: string;
+    status: string;
+    status_label: string;
+    status_tone: StatusKey;
+    assignees: (TaskEmployeeRef & { is_primary: boolean })[];
+    due_date: string | null;
+    is_overdue: boolean;
+    /**
+     * The one move the row's check makes — one step forward along the status machine — present
+     * only when `TaskPolicy::transition` lets this reader make it.
+     */
+    check_to?: { value: string; label: string };
+}
+
 /** A task as the detail endpoints send it: the list payload plus the panels' relations. */
 export interface TaskDetail extends Task {
     /** Who wrote the summary on the task. Completion checks this against the primary. */
     work_summary_by: TaskPerson | null;
     work_summary_at: string | null;
     first_completion: TaskFirstCompletion | null;
-    subtasks_done_count: number;
     checklist: TaskChecklistItem[];
+    /** Flow F2: the subtasks this reader may see. Absent on a list payload. */
+    subtasks: TaskSubtask[];
+    /** `TaskPolicy::createSubtask` — false on a subtask (one level deep) and when archived. */
+    can_add_subtask: boolean;
     links: TaskLink[];
     dependencies: TaskStub[];
     dependents: TaskStub[];

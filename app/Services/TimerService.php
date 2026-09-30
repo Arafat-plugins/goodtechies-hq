@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\TaskChanged;
 use App\Exceptions\TimerStateException;
 use App\Models\Employee;
 use App\Models\Task;
@@ -15,6 +16,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 
 /**
@@ -55,6 +57,7 @@ class TimerService
     public function __construct(
         private readonly SettingsService $settings,
         private readonly AuditLogger $audit,
+        private readonly TaskService $tasks,
     ) {}
 
     /* ============================================================== reading the state */
@@ -129,8 +132,13 @@ class TimerService
      * Idempotent on `$clientUuid`: a widget that sent the start, lost the connection before the
      * reply and sent it again gets back the entry it already made, not a second one.
      */
-    public function start(Employee $employee, Task $task, string $clientUuid, ?Carbon $at = null): TimeEntry
-    {
+    public function start(
+        Employee $employee,
+        Task $task,
+        string $clientUuid,
+        ?Carbon $at = null,
+        bool $countsTowardHours = true,
+    ): TimeEntry {
         $existing = $this->byClientUuid($clientUuid);
 
         if ($existing !== null) {
@@ -152,7 +160,7 @@ class TimerService
 
         $startedAt = $this->notInTheFuture($at ?? Carbon::now());
 
-        return $this->createOrRecover($clientUuid, fn (): TimeEntry => TimeEntry::create([
+        $entry = $this->createOrRecover($clientUuid, fn (): TimeEntry => TimeEntry::create([
             'employee_id' => $employee->getKey(),
             'task_id' => $task->getKey(),
             'project_id' => $task->project_id,
@@ -163,7 +171,68 @@ class TimerService
             // The first heartbeat is the start itself: otherwise an entry whose tab is closed
             // in its first minute would have nothing for rule 1 to measure from.
             'last_heartbeat_at' => $startedAt,
+            // False for an office/Admin task timer: a breakdown of a clocked day, never hours
+            // (decision 12-73). The remote timer's own start leaves it at true.
+            'counts_toward_hours' => $countsTowardHours,
         ]));
+
+        if ($entry->wasRecentlyCreated) {
+            $this->announce($entry, everyViewer: false);
+        }
+
+        return $entry;
+    }
+
+    /**
+     * ▶ on a task card (flow F3): make `$task` the one this employee is timing.
+     *
+     * - Nothing open: an ordinary `start()`.
+     * - Already open on THIS task: running stays running; paused resumes. Pressing ▶ twice is
+     *   not two sessions.
+     * - Open on ANOTHER task: that one is stopped here and now, then this one starts. One open
+     *   entry per person is still the index's promise — the stop and the start are one
+     *   transaction, so a failed start leaves the old session running rather than lost.
+     *
+     * Idempotent on `$clientUuid` the way `start()` is: a retried press that already landed
+     * gets its own entry back rather than switching away from it.
+     */
+    public function switchTo(Employee $employee, Task $task, string $clientUuid, bool $countsTowardHours = true): TimeEntry
+    {
+        $existing = $this->byClientUuid($clientUuid);
+
+        if ($existing !== null && (int) $existing->employee_id === (int) $employee->getKey()) {
+            return $existing;
+        }
+
+        return DB::transaction(function () use ($employee, $task, $clientUuid, $countsTowardHours): TimeEntry {
+            $current = $this->current($employee);
+
+            if ($current !== null && (int) $current->task_id === (int) $task->getKey()) {
+                return $current->isPaused() ? $this->resume($current) : $current;
+            }
+
+            if ($current !== null) {
+                $this->stop($current);
+            }
+
+            return $this->start($employee, $task, $clientUuid, null, $countsTowardHours);
+        });
+    }
+
+    /**
+     * Stop this employee's open task-timer BREAKDOWN entry, if there is one — the office clock's
+     * clock-out calls this (flow F3: an office/Admin entry cannot outlive the clock-in it
+     * belongs to). A remote entry is never touched here: that timer is its own day.
+     */
+    public function stopBreakdownFor(Employee $employee, ?Carbon $at = null): ?TimeEntry
+    {
+        $entry = $this->current($employee);
+
+        if ($entry === null || $entry->countsTowardHours()) {
+            return null;
+        }
+
+        return $this->stop($entry, $at);
     }
 
     /**
@@ -183,6 +252,8 @@ class TimerService
             'paused_at' => $at,
             'last_heartbeat_at' => $this->latest($entry->last_heartbeat_at, $at),
         ])->save();
+
+        $this->announce($entry, everyViewer: false);
 
         return $entry;
     }
@@ -205,6 +276,8 @@ class TimerService
             'paused_at' => null,
             'last_heartbeat_at' => $this->latest($entry->last_heartbeat_at, $at),
         ])->save();
+
+        $this->announce($entry, everyViewer: false);
 
         return $entry;
     }
@@ -242,6 +315,10 @@ class TimerService
         }
 
         $this->refreshTaskTotal((int) $entry->task_id);
+
+        // Every viewer, not only the watchers: the task's total moved, and that number is on
+        // every card that shows the task.
+        $this->announce($entry, everyViewer: true);
 
         return $entry;
     }
@@ -949,6 +1026,42 @@ class TimerService
     /* ====================================================================== internals */
 
     /**
+     * Ring the boards (flow F1, kind `timer`) — after the commit, through `TaskChanged`.
+     *
+     * **Who hears it is the privacy rule, not a courtesy.** A start, pause or resume changes
+     * only who is timing the card, and that is shown to watchers (`TimeEntryPolicy::watchLive`)
+     * and to the person whose timer it is — nobody else's board changes, so nobody else is rung
+     * and the doorbell does not tell an employee that a colleague has started work. A stop moves
+     * the task's total, which every viewer's card shows, so every viewer is rung. The payload is
+     * `{task_id, kind}` either way; nobody learns a name from the frame.
+     */
+    private function announce(TimeEntry $entry, bool $everyViewer): void
+    {
+        $task = Task::query()->find($entry->task_id);
+
+        if ($task === null) {
+            return;
+        }
+
+        $viewerIds = $this->tasks->viewerIds($task);
+
+        if (! $everyViewer) {
+            $ownerId = (int) Employee::query()->whereKey($entry->employee_id)->value('user_id');
+
+            $viewerIds = User::query()
+                ->whereIn('id', $viewerIds)
+                ->get()
+                ->filter(fn (User $user): bool => (int) $user->getKey() === $ownerId
+                    || Gate::forUser($user)->allows('watchLive', TimeEntry::class))
+                ->map(fn (User $user): int => (int) $user->getKey())
+                ->values()
+                ->all();
+        }
+
+        event(new TaskChanged((int) $task->getKey(), 'timer', $viewerIds));
+    }
+
+    /**
      * A flag is a fact with a reason: the timestamp and the sentence are written together, and
      * there is no way to set one without the other.
      */
@@ -1029,10 +1142,13 @@ class TimerService
      */
     private function refreshTaskTotal(int $taskId): void
     {
+        // `tracked()`, not `counted()`: a task's total includes an office/Admin task-timer
+        // breakdown row, which is what that row is for — it is only a PERSON's hours that must
+        // never see it (decision 12-73).
         $seconds = (int) TimeEntry::query()
             ->where('task_id', $taskId)
             ->stopped()
-            ->counted()
+            ->tracked()
             ->sum('duration_seconds');
 
         DB::table('tasks')->where('id', $taskId)->update(['tracked_seconds' => $seconds]);

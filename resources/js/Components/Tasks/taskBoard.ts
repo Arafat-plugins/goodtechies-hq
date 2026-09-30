@@ -35,16 +35,28 @@ export interface BoardProject {
  * `available_transitions`. Everything the status dialogs read (`work_summary`,
  * `work_summary_by`, `primary_assignee`, `permissions`) is unconditional and is here.
  *
- * There is deliberately **no `comment_count` and no `attachment_count`**: comments and
- * attachments are slice 4, and a card that printed a zero for them would be inventing a
- * number the server never sent.
+ * `comment_count` and `attachment_count` are the footer's speech bubble and paperclip (brief
+ * 012): the messages in the task's discussion and its current files, both `withCount`s the server
+ * sets on every query that produces a card. A comment rings `commented` (flow F1), so the board's
+ * silent reload brings the new number without anybody reloading.
  */
 export interface BoardCard
     extends Omit<
         TaskDetail,
-        'checklist' | 'links' | 'dependencies' | 'dependents' | 'available_transitions' | 'project'
+        | 'checklist'
+        | 'links'
+        | 'dependencies'
+        | 'dependents'
+        | 'available_transitions'
+        | 'project'
+        | 'subtasks'
+        | 'can_add_subtask'
     > {
     project?: BoardProject | null;
+    /** Messages in the task's discussion (`TaskResource`, `Task::discussionMessages()`). */
+    comment_count: number;
+    /** Current files on the task, one per file whatever its version history. */
+    attachment_count: number;
 }
 
 export interface BoardColumn {
@@ -65,6 +77,14 @@ export interface BoardPayload {
     total: number;
     overdue_count: number;
 }
+
+/**
+ * The lanes a task may be CREATED in — `TaskService::BIRTH_STATUSES`, which `StoreTaskRequest`
+ * validates against. Every later status is reached through the machine, so the Board offers its
+ * lane "Add task" on these two lanes and no others (brief 012), and the quick-add modal accepts a
+ * preset only from this list.
+ */
+export const BIRTH_STATUSES: readonly string[] = ['backlog', 'todo'];
 
 /** `{from_status: [allowed_to, …]}` — the role half, and only the role half. */
 export type TransitionMap = Record<string, string[]>;
@@ -109,6 +129,8 @@ export function asDetail(card: BoardCard, moves: TaskTransition[]): TaskDetail {
         links: [],
         dependencies: [],
         dependents: [],
+        subtasks: [],
+        can_add_subtask: false,
         available_transitions: moves,
     };
 }

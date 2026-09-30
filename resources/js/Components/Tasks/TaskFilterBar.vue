@@ -4,8 +4,9 @@ import type { TaskFilters } from '@/Components/Tasks/TaskList.vue';
 /**
  * The toolbar every Tasks view wears — List, Board, Calendar and Gantt: `#leading` (the page's
  * view switcher) and the scope dropdown on the left; Manage tags, Add filter and `#trailing`
- * (the page's New task) on the right. Overdue only and Show archived are yes/no entries in
- * *Add filter* (FilterBar's `toggle` kind) and removable chips once set, like every other filter. There is no search box: the
+ * (the page's New task) on the right. Show archived and Show subtasks are yes/no entries in
+ * *Add filter* (FilterBar's `toggle` kind) and removable chips once set, like every other filter.
+ * Due today and Overdue are the scope dropdown's alone (brief 017). There is no search box: the
  * top bar's Ctrl K is the search, and the server still reads `search` from a URL.
  *
  * It exists because there are now three screens reading one `TaskService::filters()`, and a
@@ -37,7 +38,11 @@ export function taskFiltersActive(filters: TaskFilters): boolean {
         // A scope narrows too: an empty "Overdue" must offer the way back to All tasks.
         filters.scope !== null ||
         filters.overdue ||
-        filters.archived
+        filters.archived ||
+        // "Show subtasks" widens rather than narrows, but it is still a setting *Clear filters*
+        // must undo. Under a personal scope the server turns it on by itself, which is not a
+        // chip anybody set.
+        (Boolean(filters.subtasks) && !filters.mine)
     );
 }
 </script>
@@ -97,6 +102,9 @@ const props = withDefaults(
     { clearKeeps: () => [], canManageTags: false },
 );
 
+/** Bucket values the scope dropdown already offers, so *Add filter* does not repeat them. */
+const RETIRED_BUCKETS = ['due_today', 'overdue'];
+
 const filterDefs = computed<FilterDef[]>(() => {
     const defs: FilterDef[] = [
         { key: 'status', label: 'Status', kind: 'select', options: props.statuses },
@@ -135,16 +143,27 @@ const filterDefs = computed<FilterDef[]>(() => {
      * broadest of the filters and the one a reader arrives with rather than reaches for.
      */
     if (props.buckets?.length) {
-        defs.push({ key: 'bucket', label: 'Bucket', kind: 'select', options: props.buckets });
+        defs.push({
+            key: 'bucket',
+            label: 'Bucket',
+            kind: 'select',
+            // Due today / Overdue live in the scope dropdown only (brief 017). Hidden rather than
+            // dropped, so an old `?bucket=overdue` link still gets a labelled, removable chip.
+            options: props.buckets.map((option) =>
+                RETIRED_BUCKETS.includes(option.value) ? { ...option, hidden: true } : option,
+            ),
+        });
     }
 
     /*
-     * The two yes/no filters close the list. Same parameters as the checkboxes they replace
-     * (`overdue=1`, `archived=1`), so the server and every existing link read them unchanged.
+     * The yes/no filters close the list. `overdue=1` is no longer offered — the scope dropdown's
+     * Overdue says it — but the server still reads it, so a link carrying it keeps its chip.
      */
     defs.push(
-        { key: 'overdue', label: 'Overdue only', kind: 'toggle' },
+        { key: 'overdue', label: 'Overdue only', kind: 'toggle', hidden: true },
         { key: 'archived', label: 'Show archived', kind: 'toggle' },
+        // Flow F2 (decision 12-71): subtasks are off a general view unless this is on.
+        { key: 'subtasks', label: 'Show subtasks', kind: 'toggle' },
     );
 
     return defs;
@@ -174,6 +193,8 @@ const appliedFilters = computed<Record<string, string | null>>(() => ({
     // What the server applied, so a stray `?overdue=0` never draws a chip.
     overdue: props.filters.overdue ? '1' : null,
     archived: props.filters.archived ? '1' : null,
+    // Only the one somebody set: a personal scope includes subtasks on the server's own say-so.
+    subtasks: props.filters.subtasks && !props.filters.mine ? '1' : null,
 }));
 
 const scopeValue = computed(() => SCOPES.find((option) => option.value === props.filters.scope)?.value ?? 'all');

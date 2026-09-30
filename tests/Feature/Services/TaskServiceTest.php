@@ -317,6 +317,8 @@ it('defaults every filter key so the payload shape never varies', function () {
         'overdue', 'archived', 'as_of',
         // The Tasks toolbar's scope dropdown (`?scope=`), echoed so every view can show it.
         'scope',
+        // "Show subtasks" (decision 12-71): true under a personal scope or when asked for.
+        'subtasks',
     ]);
 })->group('phase2');
 

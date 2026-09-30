@@ -83,6 +83,9 @@ class TaskController extends Controller
     /** What the detail page needs on top of the list's relations. */
     private const DETAIL_RELATIONS = [
         'checklistItems.completer',
+        // Flow F2: the Subtasks panel's rows — each one's people, as a card sends them, and
+        // their assignees again for TaskPolicy::view per row, read off the loaded relation.
+        'subtasks.assignees.user',
         'links',
         'dependencies',
         'dependents',
@@ -426,6 +429,9 @@ class TaskController extends Controller
                 'checklistItems',
                 'checklistItems as checklist_items_done_count' => fn ($query) => $query->where('is_done', true),
                 'files as attachment_count',
+                // The speech bubble beside it (brief 012): messages in the task's discussion.
+                'discussionMessages as comment_count',
+                ...TaskService::subtaskCounts(),
             ])
             ->whereKey($task->getKey())
             ->firstOrFail();

@@ -11,7 +11,8 @@ import {
     Send,
     X,
 } from '@lucide/vue';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { DRAWER_FOOTER_INSET } from '@/Components/drawerFooter';
 import EmptyState from '@/Components/EmptyState.vue';
 import { FILE_ACCEPT, FILE_MAX_LABEL, rejectionFor } from '@/Components/Files/files';
 import MentionPicker from '@/Components/Messages/MentionPicker.vue';
@@ -156,8 +157,17 @@ const props = withDefaults(
         description?: string | null;
         /** How tall the scrolling list is. The page gives it a viewport; a panel lets it grow. */
         scroll?: boolean;
+        /** Opt-in composer placeholder. `''` draws none (the task detail, brief 016). */
+        placeholder?: string | null;
+        /**
+         * Opt-in (brief 016): `footer` pins the composer to the bottom of the `DetailDrawer` it
+         * sits in, as one compact row — icon-only Attach and Mentions, no placeholder, the helper
+         * line kept for screen readers only and the character count shown only near the limit.
+         * Outside a drawer it falls back to `inline`, which is what every other mount is.
+         */
+        composerPlacement?: 'inline' | 'footer';
     }>(),
-    { heading: null, description: null, scroll: false },
+    { heading: null, description: null, scroll: false, placeholder: null, composerPlacement: 'inline' },
 );
 
 const emit = defineEmits<{
@@ -235,6 +245,46 @@ const stillRecording = computed(() => voiceActive.value && voiceClip.value === n
 
 /** The textarea grows with what is typed and then scrolls inside itself. */
 const COMPOSER_MAX_PX = 160;
+/** The pinned row's ceiling: about five lines, so the drawer body keeps most of the panel. */
+const COMPOSER_PINNED_MAX_PX = 116;
+
+/* ------------------------------------------------------------------ pinned composer (brief 016) */
+
+const reportInset = inject(DRAWER_FOOTER_INSET, null);
+/** Pinned only when asked for AND inside a drawer that can make room for it. */
+const composerPinned = computed(() => props.composerPlacement === 'footer' && reportInset !== null);
+const composerEl = ref<HTMLFormElement | null>(null);
+/** Brief 016: the count comes back only when it is worth reading. */
+const COUNT_SHOWN_BELOW = 200;
+let insetObserver: ResizeObserver | null = null;
+
+watch(
+    [composerEl, composerPinned],
+    ([el, isPinned]) => {
+        insetObserver?.disconnect();
+        insetObserver = null;
+
+        if (reportInset === null) {
+            return;
+        }
+
+        if (!isPinned || el === null) {
+            reportInset(0);
+
+            return;
+        }
+
+        insetObserver = new ResizeObserver(() => reportInset(el.offsetHeight));
+        insetObserver.observe(el);
+        reportInset(el.offsetHeight);
+    },
+    { flush: 'post' },
+);
+
+onBeforeUnmount(() => {
+    insetObserver?.disconnect();
+    reportInset?.(0);
+});
 
 function field(): HTMLTextAreaElement | undefined {
     return bodyEl.value?.$el as HTMLTextAreaElement | undefined;
@@ -248,7 +298,7 @@ function grow(): void {
     }
 
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_PX)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, composerPinned.value ? COMPOSER_PINNED_MAX_PX : COMPOSER_MAX_PX)}px`;
 }
 
 function clearPicked(): void {
@@ -1332,9 +1382,24 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 most people, which is ConversationPolicy asking for `announcements.send` — not a
                 role read in this file.
             -->
+            <!--
+                Brief 016: pinned, the form is drawn `absolute bottom-0` against the drawer's
+                panel (the nearest positioned ancestor, outside the scroll container), so it stays
+                put while the body scrolls under it. It is still here in the DOM — Tab order,
+                the one instance and its state are unchanged; `DRAWER_FOOTER_INSET` pads the body.
+            -->
             <form
                 v-if="thread.can_post"
-                class="flex min-w-0 shrink-0 flex-col gap-2 border-t pt-3"
+                ref="composerEl"
+                :class="
+                    cn(
+                        'flex min-w-0 shrink-0 flex-col gap-2',
+                        composerPinned
+                            ? 'absolute inset-x-0 bottom-0 z-10 border-t bg-background px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]'
+                            : 'border-t pt-3',
+                    )
+                "
+                :data-composer-pinned="composerPinned || undefined"
                 novalidate
                 @submit.prevent="post"
             >
@@ -1424,23 +1489,108 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     Messaging polish: the composer is ONE pill (DESIGN.md §1.7b) — Attach, the
                     textarea, the mic and "@ Mentions" inside it, and Send joined to its right end
                     as a `--primary` segment. The textarea has no border or ring of its own; its
-                    focus indicator is painted on the pill. Since 2026-09-29 (decision 12-70)
-                    that indicator is the pill's 1 px border turning `--ring` (opaque, 3.54:1 on
-                    the canvas, 3.61:1 on a card) with NO `ring-3` spread — the client read the
-                    3 px halo as "a big border" on every click. The one exception to the ring rule;
-                    every other input keeps its ring. Below `sm` the words go and the icons stay,
+                    focus indicator was painted on the pill. Since 2026-09-30 (decision 12-72,
+                    superseding 12-70's 1 px `--ring` border) the pill paints NO focus border or
+                    ring: the client asked for none on any text field anywhere; the caret shows
+                    focus. The pill's border stays `--input` (or `--destructive` on an error). Below `sm` the words go and the icons stay,
                     each keeping its accessible name.
 
                     `VoiceRecorder` has two roots: its strip (`order-first basis-full`) takes a
                     line of its own at the top of the pill while a clip is in hand, and the mic
                     sits after the textarea.
                 -->
+                <!--
+                    Brief 016, the pinned row: [Attach] [textarea] [mic] [@] [Send], every
+                    control the same 32 px ghost icon button with an accessible name and a
+                    tooltip, Send the one `--primary` disc. No placeholder: the caret shows focus,
+                    and (decision 12-72) the pill paints no focus border.
+                -->
                 <div
+                    v-if="composerPinned"
+                    data-testid="composer-pill"
+                    :class="
+                        cn(
+                            'flex min-w-0 flex-wrap items-end gap-1 rounded-3xl border border-input bg-card p-1 shadow-flat',
+                            fieldError && 'border-destructive',
+                        )
+                    "
+                >
+                    <TooltipProvider :delay-duration="150">
+                        <Tooltip>
+                            <TooltipTrigger as-child>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    class="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                                    :disabled="posting || attachBlocked"
+                                    :aria-label="
+                                        attachBlocked
+                                            ? 'Attach a file (unavailable: discard the voice message first)'
+                                            : 'Attach a file'
+                                    "
+                                    data-composer-attach
+                                    @click="pickerEl?.click()"
+                                >
+                                    <Paperclip aria-hidden="true" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {{ attachBlocked ? 'Discard the voice message first' : 'Attach a file' }}
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+
+                    <Textarea
+                        :id="bodyId"
+                        ref="bodyEl"
+                        v-model="body"
+                        :disabled="posting"
+                        :aria-describedby="fieldError ? `${errorId} ${hintId}` : hintId"
+                        :aria-invalid="fieldError ? true : undefined"
+                        rows="1"
+                        class="max-h-29 min-h-8 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-1.5 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
+                        @input="grow"
+                        @keydown.enter="onEnter"
+                    />
+
+                    <VoiceRecorder
+                        v-model:clip="voiceClip"
+                        v-model:active="voiceActive"
+                        :disabled="posting"
+                        :blocked="micBlocked"
+                    />
+
+                    <MentionPicker
+                        :people="thread.mentionable"
+                        :disabled="posting"
+                        @pick="mention"
+                    />
+
+                    <TooltipProvider :delay-duration="150">
+                        <Tooltip>
+                            <TooltipTrigger as-child>
+                                <Button
+                                    type="submit"
+                                    size="icon-sm"
+                                    class="shrink-0 rounded-full"
+                                    :disabled="posting || stillRecording"
+                                    :aria-label="stillRecording ? 'Send (unavailable while recording)' : posting ? 'Sending' : 'Send'"
+                                >
+                                    <Send aria-hidden="true" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ stillRecording ? 'Stop recording first' : 'Send' }}</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+
+                <div
+                    v-else
                     data-testid="composer-pill"
                     :class="
                         cn(
                             'flex min-w-0 items-stretch rounded-3xl border border-input bg-card shadow-flat transition-[color,box-shadow]',
-                            'has-[textarea:focus-visible]:border-ring',
                             fieldError && 'border-destructive',
                         )
                     "
@@ -1487,7 +1637,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                             :aria-describedby="fieldError ? `${errorId} ${hintId}` : hintId"
                             :aria-invalid="fieldError ? true : undefined"
                             rows="1"
-                            :placeholder="isAnnouncements ? 'Tell everybody.' : 'Say something.'"
+                            :placeholder="(placeholder ?? (isAnnouncements ? 'Tell everybody.' : 'Say something.')) || undefined"
                             class="max-h-40 min-h-9 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-2 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
                             @input="grow"
                             @keydown.enter="onEnter"
@@ -1532,7 +1682,21 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     The shortcut is stated rather than discovered — shorter since the pill, but
                     still said out loud: Enter sending applies to the task discussion too.
                 -->
-                <p :id="hintId" class="min-w-0 text-xs text-muted-foreground">
+                <!--
+                    Brief 016: pinned, the line is still the field's description for a screen
+                    reader, and off screen; the count alone comes back near the limit.
+                -->
+                <p
+                    v-if="composerPinned && remaining < COUNT_SHOWN_BELOW"
+                    class="-mt-1 min-w-0 px-3 text-right text-xs text-muted-foreground"
+                    aria-hidden="true"
+                    data-composer-count
+                >
+                    <span :class="remaining < 0 ? 'text-destructive' : undefined">
+                        <span class="tabular-nums">{{ remaining }}</span> characters left
+                    </span>
+                </p>
+                <p :id="hintId" :class="composerPinned ? 'sr-only' : 'min-w-0 text-xs text-muted-foreground'">
                     Enter sends · Shift + Enter for a new line · up to {{ FILE_MAX_LABEL }} per file ·
                     voice up to {{ VOICE_MAX_LABEL }} ·
                     <span :class="remaining < 0 ? 'text-destructive' : undefined">

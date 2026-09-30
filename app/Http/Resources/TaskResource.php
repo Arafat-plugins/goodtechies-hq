@@ -7,7 +7,10 @@ use App\Models\Tag;
 use App\Models\Task;
 use App\Models\TaskChecklistItem;
 use App\Models\TaskLink;
+use App\Models\TimeEntry;
 use App\Models\User;
+use App\Services\TaskService;
+use App\Services\TaskTimerService;
 use App\Support\TaskStatus;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -54,7 +57,25 @@ class TaskResource extends JsonResource
             'is_overdue' => $this->resource->isOverdue($this->asOf($request)),
 
             'estimated_minutes' => $this->estimated_minutes,
+            // The task's total, `3h 20m` on the card — every approved entry on it, a remote
+            // one or an office/Admin breakdown (`TimeEntry::scopeTracked`, decision 12-73).
+            // Sent to every reader who may open the task, exactly as the drawer's Time section
+            // has always shown it: it is a fact about the task and names nobody.
             'tracked_seconds' => (int) $this->tracked_seconds,
+
+            // Flow F3. The READER's own open timer on this task — `{state, started_at,
+            // elapsed_seconds}` — or null. Read from one per-request snapshot
+            // (`TaskTimerService::snapshotFor`), never a query per card.
+            'my_timer' => $this->myTimer($request, $user),
+
+            // Flow F3, watchers only (`TimeEntryPolicy::watchLive`): everybody ELSE timing this
+            // card, `[{employee_id, name, initials, started_at, state, elapsed_seconds}]`.
+            // ABSENT — not empty, not null — for anybody else: an employee learns nothing of a
+            // colleague's timer from the payload's shape either.
+            'running_timers' => $this->when(
+                $user !== null && $this->timerSnapshot($request, $user)['watch'],
+                fn (): array => $this->timerSnapshot($request, $user)['others'][(int) $this->resource->getKey()] ?? [],
+            ),
 
             // **Assignees who are on approved leave when this task is due** (Part D §5 and §9).
             // Resolved in SQL by `TaskService::query()`, so it costs no extra query and every
@@ -104,11 +125,31 @@ class TaskResource extends JsonResource
             'primary_assignee' => $this->primaryAssignee(),
             'tags' => $this->tags(),
 
-            // Checklists arrive in slice 2. The List view has a "Subtasks" column now, so the
-            // key exists now and reads 0 until there is a relation to count; when slice 2 adds
-            // its withCount the payload shape does not change.
-            'subtask_count' => (int) ($this->resource->checklist_items_count ?? 0),
-            'subtasks_done_count' => (int) ($this->resource->checklist_items_done_count ?? 0),
+            // The checklist's two numbers — the card's tick-box counter. These were sent as
+            // `subtask_count` / `subtasks_done_count` until there were real subtasks (decision
+            // 12-71); the checklist itself is unchanged, only its keys are named for it now.
+            'checklist_count' => (int) ($this->resource->checklist_items_count ?? 0),
+            'checklist_done_count' => (int) ($this->resource->checklist_items_done_count ?? 0),
+
+            // Flow F2: the parent's progress, `2/5` on the card. Live subtasks only — not
+            // deleted, not archived, not cancelled — and "done" is Completed. Both are
+            // `withCount`s (TaskService::subtaskCounts()), never a relation read per row. They
+            // count the parent's subtasks whoever is looking: progress is a fact about the
+            // parent, like `attachment_count`, and names nothing the viewer may not see.
+            'subtask_count' => (int) ($this->resource->subtask_count ?? 0),
+            'subtask_done_count' => (int) ($this->resource->subtask_done_count ?? 0),
+
+            // The parent, for a subtask — `↳ <parent title>` and the drawer's "Part of" link —
+            // and ONLY when TaskPolicy::view passes on the parent for this reader. Otherwise the
+            // key is absent, not null: an employee on the subtask alone learns nothing of the
+            // parent, not even that there is one they cannot see.
+            'parent' => $this->when(
+                $this->visibleParent($user) !== null,
+                fn (): array => [
+                    'id' => (int) $this->visibleParent($user)?->getKey(),
+                    'title' => (string) $this->visibleParent($user)?->title,
+                ],
+            ),
 
             // How many files are on the task, counting each one once whatever its version
             // history looks like. Slice 3's board card printed a paperclip with nothing beside
@@ -119,10 +160,21 @@ class TaskResource extends JsonResource
             // query per row to print a number.
             'attachment_count' => (int) ($this->resource->attachment_count ?? 0),
 
+            // The speech bubble on a card (brief 012): how many messages the task's discussion
+            // holds. A number, never text, and the same number for every reader who may open
+            // the task — the discussion's membership is `TaskPolicy::view`. A `withCount`
+            // (`Task::discussionMessages()`) set by the same three queries as the paperclip, so a
+            // board stays at a fixed query count; a comment rings `commented` (flow F1) and the
+            // card re-reads it.
+            'comment_count' => (int) ($this->resource->comment_count ?? 0),
+
             // The detail page's panels. Behind whenLoaded so the List view's payload does not
             // grow three relations per row it never draws.
             'checklist' => $this->whenLoaded('checklistItems', fn (): array => $this->checklist()),
             'links' => $this->whenLoaded('links', fn (): array => $this->links()),
+            // Flow F2: the drawer's Subtasks panel. Each row follows TaskPolicy::view for the
+            // SUBTASK itself, so an employee on the parent sees only the subtasks they may see.
+            'subtasks' => $this->whenLoaded('subtasks', fn (): array => $this->subtaskRows($request, $user)),
             // **There is no `attachments` array, and that is decision 2-30 closed.** It shipped a
             // full `FileResource` collection on every detail render — two signed-URL mintings and
             // two `FilePolicy` passes per attachment — and no screen read it: `FilePanel` fetches
@@ -156,8 +208,99 @@ class TaskResource extends JsonResource
                 fn (): ?array => $this->generatedFrom($user),
             ),
 
+            // Flow F2: may this reader add a subtask here — TaskPolicy::createSubtask, so a
+            // subtask (one level deep) and an archived task both say no. Detail only.
+            'can_add_subtask' => $this->when(
+                $request->attributes->get('task_detail') === true,
+                fn (): bool => $user !== null && Gate::forUser($user)->allows('createSubtask', $this->resource),
+            ),
+
             'permissions' => $this->permissions($user),
         ];
+    }
+
+    /**
+     * @return array{watch: bool, mine: array<int, TimeEntry>, others: array<int, list<array<string, mixed>>>}
+     */
+    private function timerSnapshot(Request $request, User $user): array
+    {
+        return app(TaskTimerService::class)->snapshotFor($user, $request);
+    }
+
+    /**
+     * @return array{state: string, started_at: string|null, elapsed_seconds: int}|null
+     */
+    private function myTimer(Request $request, ?User $user): ?array
+    {
+        if ($user === null) {
+            return null;
+        }
+
+        return TaskTimerService::present(
+            $this->timerSnapshot($request, $user)['mine'][(int) $this->resource->getKey()] ?? null,
+        );
+    }
+
+    /**
+     * The parent this reader may see, or null — no parent, or one TaskPolicy::view refuses.
+     * Reads the loaded relation when there is one (the lists eager-load `parent.assignees`).
+     */
+    private function visibleParent(?User $user): ?Task
+    {
+        if ($user === null || $this->resource->parent_id === null) {
+            return null;
+        }
+
+        $parent = $this->resource->parent;
+
+        return $parent !== null && Gate::forUser($user)->allows('view', $parent) ? $parent : null;
+    }
+
+    /**
+     * The Subtasks panel's rows: the ones this reader may view, not archived unless the parent
+     * is (then they all are, archived with it). `check_to` is the one status the row's check
+     * moves it to — TaskService::CHECK_STEP, offered only when TaskPolicy::transition allows
+     * that move for this reader; absent otherwise.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function subtaskRows(Request $request, ?User $user): array
+    {
+        if ($user === null) {
+            return [];
+        }
+
+        $gate = Gate::forUser($user);
+        $asOf = $this->asOf($request);
+        $parentArchived = $this->resource->isArchived();
+
+        return $this->resource->subtasks
+            ->filter(fn (Task $task): bool => ($parentArchived || ! $task->isArchived())
+                && $gate->allows('view', $task))
+            ->map(function (Task $task) use ($gate, $asOf): array {
+                $step = $task->status === null ? null : TaskStatus::tryFrom(TaskService::CHECK_STEP[$task->status->value] ?? '');
+
+                return [
+                    'id' => $task->id,
+                    'title' => $task->title,
+                    'status' => $task->status?->value,
+                    'status_label' => $task->status?->label(),
+                    'status_tone' => $task->status?->tone(),
+                    'assignees' => $task->assignees
+                        ->map(fn (Employee $employee): array => $this->employee($employee) + [
+                            'is_primary' => (bool) $employee->pivot?->is_primary,
+                        ])
+                        ->values()
+                        ->all(),
+                    'due_date' => $task->due_date?->toDateString(),
+                    'is_overdue' => $task->isOverdue($asOf),
+                    ...($step !== null && $gate->allows('transition', [$task, $step])
+                        ? ['check_to' => ['value' => $step->value, 'label' => $step->label()]]
+                        : []),
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     /**
@@ -439,6 +582,7 @@ class TaskResource extends JsonResource
                 'can_delete' => false,
                 'can_archive' => false,
                 'can_review' => false,
+                'can_track_time' => false,
             ];
         }
 
@@ -449,6 +593,10 @@ class TaskResource extends JsonResource
             'can_delete' => $gate->allows('delete', $this->resource),
             'can_archive' => $gate->allows('archive', $this->resource),
             'can_review' => $gate->allows('review', $this->resource),
+            // Flow F3: the ▶ is drawn on this card only when `TimeEntryPolicy::trackTask` says
+            // this reader may time it — assigned (or an Admin/Manager who sees it), and on a clock
+            // that allows it. The ONE rule; no copy here. Reads the loaded assignees, no query per card.
+            'can_track_time' => $gate->allows('trackTask', [TimeEntry::class, $this->resource]),
         ];
     }
 

@@ -28,6 +28,16 @@ class TimerStateException extends RuntimeException
         );
     }
 
+    /**
+     * Flow F3: an office/Admin task timer runs inside an open clock-in. The Form Request turns
+     * the ordinary case into a `clock_in` validation error the screen answers with its confirm;
+     * this is the service's own guard for every caller that did not come through it.
+     */
+    public static function clockInFirst(): self
+    {
+        return new self('Clock in first — a task timer runs inside your working day.');
+    }
+
     public static function alreadyStopped(): self
     {
         return new self('That session has already been stopped.');

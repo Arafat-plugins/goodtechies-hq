@@ -9,6 +9,7 @@ import TaskDetailDrawer from '@/Components/Tasks/TaskDetailDrawer.vue';
 import type { TaskFilters, TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
 import TaskViewSwitcher from '@/Components/Tasks/TaskViewSwitcher.vue';
 import type { BoardPayload, TransitionMap } from '@/Components/Tasks/taskBoard';
+import { BIRTH_STATUSES } from '@/Components/Tasks/taskBoard';
 import { Button } from '@/Components/ui/button';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useFlashAsToast } from '@/lib/flashChannel';
@@ -54,6 +55,18 @@ if (quickAddOpen.value) {
     syncQuery({ new: null });
 }
 
+/**
+ * The lane the modal was opened from, or null for the toolbar's New task (which starts in To do).
+ * Brief 012: each Backlog / To do lane's "Add task" presets its own status — the only two a task
+ * may be born in.
+ */
+const quickAddStatus = ref<string | null>(null);
+
+function openQuickAdd(status: string | null): void {
+    quickAddStatus.value = status;
+    quickAddOpen.value = true;
+}
+
 /* ------------------------------------------------------------------ drawer */
 
 /**
@@ -96,13 +109,15 @@ function openTask(taskId: number): void {
             search-placeholder="Search tasks…"
             empty-title="No tasks yet"
             empty-description="Tasks appear here as soon as work is planned on a project."
+            :addable-statuses="BIRTH_STATUSES"
             @open-task="openTask"
+            @add-task="openQuickAdd"
         >
             <template #toolbar-leading>
                 <TaskViewSwitcher surface="admin" current="board" />
             </template>
             <template #toolbar-trailing>
-                <Button type="button" @click="quickAddOpen = true">
+                <Button type="button" @click="openQuickAdd(null)">
                     <Plus aria-hidden="true" />
                     New task
                 </Button>
@@ -117,5 +132,6 @@ function openTask(taskId: number): void {
         :projects="projects"
         :priorities="priorities"
         :employees="employees"
+        :status="quickAddStatus"
     />
 </template>

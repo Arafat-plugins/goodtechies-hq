@@ -217,6 +217,10 @@ Route::prefix('admin')
             Route::put('/{task}/checklist/{item}', [TaskController::class, 'updateChecklistItem'])->name('checklist.update');
             Route::delete('/{task}/checklist/{item}', [TaskController::class, 'destroyChecklistItem'])->name('checklist.destroy');
 
+            // Flow F2 (decision 12-71): a subtask is a task, so there is nothing else to route —
+            // it is shown, moved, archived and deleted through the `/{task}` routes above.
+            Route::post('/{task}/subtasks', [TaskController::class, 'storeSubtask'])->name('subtasks.store');
+
             Route::post('/{task}/links', [TaskController::class, 'storeLink'])->name('links.store');
             Route::delete('/{task}/links/{link}', [TaskController::class, 'destroyLink'])->name('links.destroy');
 

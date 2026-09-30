@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Exceptions\TaskStateException;
+use App\Support\ConversationType;
 use App\Support\Permission;
 use App\Support\RecurrenceRule;
 use App\Support\RoleName;
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
@@ -316,6 +318,65 @@ class Task extends Model
     public function recurringPeriodLabel(): ?string
     {
         return RecurrenceRule::labelForPeriod($this->recurring_period);
+    }
+
+    /**
+     * The task this one is a subtask of (decision 12-71). One level deep: a task with a parent
+     * never has subtasks of its own — see TaskPolicy::createSubtask().
+     *
+     * `parent_id` is not fillable and not in TaskService::FIELDS: a subtask is born under its
+     * parent through TaskService::createSubtask() and is never re-parented.
+     *
+     * @return BelongsTo<Task, $this>
+     */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(Task::class, 'parent_id');
+    }
+
+    /**
+     * This task's subtasks, in the order they were added. SoftDeletes applies, so a deleted
+     * subtask is not here; an archived one is, and callers that count say so themselves.
+     *
+     * @return HasMany<Task, $this>
+     */
+    public function subtasks(): HasMany
+    {
+        return $this->hasMany(Task::class, 'parent_id')->orderBy('id');
+    }
+
+    /**
+     * The messages in this task's discussion — the card's comment count (brief 012).
+     *
+     * Through the task's own conversation (`conversations.type = task`, one per task by a unique
+     * index on `linked_task_id`). Every message is a person's: `MessageService::post()` is the
+     * only writer and always sets an author, and there are no system rows to leave out. Read
+     * as a `withCount` only (`comment_count`), never loaded — the number is what any viewer of
+     * the task may see, because the conversation's membership IS `TaskPolicy::view`.
+     *
+     * @return HasManyThrough<Message, Conversation, $this>
+     */
+    public function discussionMessages(): HasManyThrough
+    {
+        return $this->hasManyThrough(Message::class, Conversation::class, 'linked_task_id', 'conversation_id')
+            ->where('conversations.type', ConversationType::Task->value);
+    }
+
+    public function isSubtask(): bool
+    {
+        return $this->parent_id !== null;
+    }
+
+    /**
+     * Top-level tasks only — what a general Board, List, Calendar and Gantt show unless "Show
+     * subtasks" is on (TaskService::filtered()).
+     *
+     * @param  Builder<Task>  $query
+     * @return Builder<Task>
+     */
+    public function scopeTopLevel(Builder $query): Builder
+    {
+        return $query->whereNull('tasks.parent_id');
     }
 
     /**

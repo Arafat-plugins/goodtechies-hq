@@ -54,6 +54,20 @@ class TaskPolicy extends Policy
     }
 
     /**
+     * Split a task into subtasks (decision 12-71): the create rule, on a parent the user can see
+     * and that is still live, and ONE LEVEL DEEP — a subtask cannot have subtasks, so this says
+     * no for one and the endpoint answers 403. Admin and Manager, as for creating a task.
+     */
+    public function createSubtask(User $user, Task $parent): bool
+    {
+        return $this->create($user)
+            && $user->hasRole(RoleName::ADMIN, RoleName::MANAGER)
+            && ! $parent->isSubtask()
+            && ! $parent->isArchived()
+            && $this->view($user, $parent);
+    }
+
+    /**
      * An archived task is read-only for everyone; unarchive it first. Both assignees of a
      * two-person task may edit it — the primary's privilege is completion, not editing.
      *

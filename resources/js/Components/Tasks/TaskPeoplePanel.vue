@@ -37,12 +37,20 @@ import { Textarea } from '@/Components/ui/textarea';
 
 const MAX_ASSIGNEES = 2;
 
-const props = defineProps<{
-    task: TaskDetail;
-    surface: TaskSurface;
-    /** The assignable employees. Only the Admin detail page is sent this list. */
-    employees?: TaskNamedRef[];
-}>();
+const props = withDefaults(
+    defineProps<{
+        task: TaskDetail;
+        surface: TaskSurface;
+        /** The assignable employees. Only the Admin detail page is sent this list. */
+        employees?: TaskNamedRef[];
+        /**
+         * Brief 014: `row` draws the assignees as the value of the details' Assignee row —
+         * avatars and names, the whole value a button into the same assign dialog.
+         */
+        variant?: 'card' | 'row';
+    }>(),
+    { variant: 'card' },
+);
 
 const emit = defineEmits<{ settled: [] }>();
 
@@ -189,7 +197,48 @@ defineExpose({ openHandOff });
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4">
+    <div v-if="variant === 'row'" class="flex min-w-0 flex-wrap items-center gap-1" data-task-assignee-row>
+        <component
+            :is="mayAssign ? 'button' : 'div'"
+            :type="mayAssign ? 'button' : undefined"
+            :class="
+                cn(
+                    'flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-1 text-left text-sm',
+                    mayAssign && 'outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring',
+                )
+            "
+            :aria-label="mayAssign ? 'Change assignees' : undefined"
+            @click="mayAssign ? openAssign() : undefined"
+        >
+            <span v-if="task.assignees.length === 0" class="flex items-center gap-2 text-muted-foreground">
+                <span class="inline-flex size-6 shrink-0 rounded-full border border-dashed border-muted-foreground" aria-hidden="true" />
+                No assignee
+            </span>
+            <span v-for="assignee in task.assignees" :key="assignee.id" class="flex min-w-0 items-center gap-2">
+                <Avatar class="size-6 shrink-0">
+                    <AvatarFallback :class="cn('text-xs', personTone(assignee.id).avatar)">{{ initials(assignee.name) }}</AvatarFallback>
+                </Avatar>
+                <span class="min-w-0 break-words">{{ assignee.name ?? '—' }}</span>
+                <!-- The word, not just the star: colour and shape are never the only carrier. -->
+                <span v-if="assignee.is_primary && task.assignees.length > 1" class="text-xs text-muted-foreground">
+                    (primary)
+                </span>
+            </span>
+        </component>
+        <Button
+            v-if="mayHandOff"
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Hand over"
+            title="Hand over"
+            @click="openHandOff"
+        >
+            <ArrowLeftRight aria-hidden="true" />
+        </Button>
+    </div>
+
+    <Card v-else class="min-w-0 gap-4">
         <CardHeader>
             <CardTitle class="text-sm font-medium">Assignees</CardTitle>
             <CardDescription>

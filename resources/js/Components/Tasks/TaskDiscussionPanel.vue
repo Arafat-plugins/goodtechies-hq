@@ -31,6 +31,8 @@ const props = defineProps<{
     task: TaskDetail;
     surface: TaskSurface;
     discussion: TaskDiscussion;
+    /** Brief 016: the drawer pins the composer to its bottom edge; the page keeps it inline. */
+    composerPlacement?: 'inline' | 'footer';
 }>();
 
 /** A message landed, so the task's activity trail has a new line on it. */
@@ -46,7 +48,8 @@ const routes = computed(() => taskThreadRoutes(props.surface, props.task.id));
                 :thread="discussion"
                 :routes="routes"
                 heading="Discussion"
-                description="Questions and answers about this task, oldest first."
+                placeholder=""
+                :composer-placement="composerPlacement ?? 'inline'"
                 @settled="emit('settled')"
             />
         </CardContent>

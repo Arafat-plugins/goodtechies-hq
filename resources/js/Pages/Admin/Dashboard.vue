@@ -35,7 +35,10 @@ import StatCard from '@/Components/StatCard.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import { DASHBOARD_POLL_MS } from '@/Components/Realtime/live';
-import { useLiveProps } from '@/Components/Realtime/reload';
+import { useLiveProps, useLiveTaskProps } from '@/Components/Realtime/reload';
+import type { WorkingNowRow } from '@/Components/Timer/taskTimer';
+import { workingNowPing } from '@/Components/Timer/taskTimer';
+import WorkingNowPanel from '@/Components/Timer/WorkingNowPanel.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 
 defineOptions({ layout: AdminLayout });
@@ -235,6 +238,11 @@ const props = defineProps<{
      * (Part C §1), which is why every key is optional.
      */
     finance: FinanceMonthSummary & DashboardPayrollCard;
+    /**
+     * Every open task timer (flow F3) — sent to a watcher (`TimeEntryPolicy::watchLive`) and
+     * ABSENT for anybody else, so the card is not drawn at all rather than drawn empty.
+     */
+    workingNow?: WorkingNowRow[];
 }>();
 
 /**
@@ -453,6 +461,15 @@ useLiveProps(
     ['workStats', 'attention', 'taskStatuses', 'tasksByEmployee', 'attendance', 'upcomingDeadlines'],
     { intervalMs: DASHBOARD_POLL_MS },
 );
+
+/**
+ * "Working now" is the one card here read as a clock, so it does not wait for the minute poll:
+ * it re-reads on `tasks.{me}` when a `task.changed` frame of kind `timer` arrives (flow F1/F3),
+ * as a partial reload of `workingNow` alone. A reader without the prop never asks for it.
+ */
+if (props.workingNow !== undefined) {
+    useLiveTaskProps(['workingNow'], { accept: workingNowPing });
+}
 </script>
 
 <template>
@@ -530,6 +547,20 @@ useLiveProps(
                 :sub="attendance.on_leave === 0 ? 'Nobody is on approved leave today' : 'Approved leave covering today'"
                 :icon="CalendarOff"
                 :href="attendance.leave_href"
+            />
+        </section>
+
+        <!--
+            Working now — who is timing which task, and for how long, live (flow F3). The first
+            five, then "+N more" to Admin → Workforce → Time, which lists them all. Only for a
+            reader the server sent the rows to.
+        -->
+        <section v-if="workingNow !== undefined" aria-labelledby="dashboard-working-now" class="min-w-0">
+            <WorkingNowPanel
+                :rows="workingNow"
+                :limit="5"
+                more-href="/admin/time"
+                heading-id="dashboard-working-now"
             />
         </section>
 

@@ -11,13 +11,14 @@ import {
     isTaskListPath,
     readSavedFilters,
     restoreFor,
+    savableFilters,
     storageKey,
     withFilters,
     writeSavedFilters,
 } from '../../resources/js/lib/taskFilterMemory.ts';
 
 const url = (path: string) => new URL(path, 'http://hq.test');
-const saved = { tag_id: '3', overdue: '1' };
+const saved = { tag_id: '3', archived: '1' };
 
 test('the four list views on both surfaces are Tasks list paths; a task page is not', () => {
     for (const path of ['/admin/tasks', '/admin/tasks/board', '/admin/tasks/calendar', '/employee/tasks/gantt']) {
@@ -36,6 +37,10 @@ test('only filter keys are kept: never detail, new, group_by, the calendar windo
     );
     assert.deepEqual(filtersOf('status=&overdue=1&archived=1'), { overdue: '1', archived: '1' });
     assert.deepEqual(filtersOf('project_id=<script>'), {});
+});
+
+test('"Show subtasks" is a saved filter key (flow F2)', () => {
+    assert.deepEqual(filtersOf('subtasks=1&status=todo'), { subtasks: '1', status: 'todo' });
 });
 
 test('a visit into Tasks from elsewhere without filters gets the saved set', () => {
@@ -63,7 +68,7 @@ test('nothing saved, or an empty set, restores nothing', () => {
 });
 
 test('restoring keeps every other parameter', () => {
-    assert.equal(withFilters(url('/admin/tasks?detail=9&group_by=project'), saved).search, '?detail=9&group_by=project&tag_id=3&overdue=1');
+    assert.equal(withFilters(url('/admin/tasks?detail=9&group_by=project'), saved).search, '?detail=9&group_by=project&tag_id=3&archived=1');
 });
 
 test('storage is per user id, validated on read, and survives a throwing localStorage', () => {
@@ -100,6 +105,39 @@ test('storage is per user id, validated on read, and survives a throwing localSt
 
     assert.equal(readSavedFilters(7), null);
     assert.doesNotThrow(() => writeSavedFilters(7, saved));
+
+    delete g.window;
+});
+
+test('brief 017: overdue=1 and a due_today/overdue bucket are never saved or restored', () => {
+    assert.deepEqual(savableFilters({ overdue: '1', bucket: 'due_today', tag_id: '3' }), { tag_id: '3' });
+    assert.deepEqual(savableFilters({ bucket: 'overdue', scope: 'overdue' }), { scope: 'overdue' });
+    assert.deepEqual(savableFilters({ bucket: 'open' }), { bucket: 'open' });
+
+    const store = new Map<string, string>();
+    const g = globalThis as unknown as { window?: unknown };
+
+    g.window = {
+        localStorage: {
+            getItem: (key: string) => store.get(key) ?? null,
+            setItem: (key: string, value: string) => void store.set(key, value),
+        },
+    };
+
+    // An old saved set that carries them: those keys are dropped on read.
+    store.set(storageKey(5), JSON.stringify({ overdue: '1', bucket: 'overdue', tag_id: '2' }));
+    assert.deepEqual(readSavedFilters(5), { tag_id: '2' });
+
+    // One that carried nothing else restores nothing.
+    store.set(storageKey(6), JSON.stringify({ overdue: '1' }));
+    assert.equal(restoreFor(url('/admin/tasks/board'), '/admin/dashboard', readSavedFilters(6)), null);
+
+    // A page carrying them does not save them.
+    writeSavedFilters(5, filtersOf('overdue=1&bucket=due_today&status=todo'));
+    assert.deepEqual(JSON.parse(store.get(storageKey(5)) ?? '{}'), { status: 'todo' });
+
+    // The server still reads them, so a link carrying one is still an explicit filter.
+    assert.equal(restoreFor(url('/admin/tasks?overdue=1'), null, { tag_id: '2' }), null);
 
     delete g.window;
 });

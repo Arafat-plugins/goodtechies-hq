@@ -19,6 +19,7 @@ use App\Http\Controllers\Shared\ProfileSessionController;
 use App\Http\Controllers\Shared\ProfileTwoFactorController;
 use App\Http\Controllers\Shared\SalaryController;
 use App\Http\Controllers\Shared\SearchController;
+use App\Http\Controllers\Shared\TaskTimerController;
 use App\Http\Controllers\Shared\TeamController;
 use App\Models\Notification;
 use App\Support\Permission;
@@ -201,6 +202,20 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
         ->name('attendance.show');
     Route::post('/attendance/clock-in', [AttendanceController::class, 'clockIn'])->name('attendance.clock-in');
     Route::post('/attendance/clock-out', [AttendanceController::class, 'clockOut'])->name('attendance.clock-out');
+
+    // The task timer for everyone who works tasks (flow F3, decision 12-73): ▶ on a board card
+    // or in the drawer, then ⏸ / resume / ⏹ on whatever is open. Shared for the clock's reason —
+    // an Admin and Yaseen press the same button — and gated by `TimeEntryPolicy::trackTasks`
+    // (403: the Accountant) with the task resolved through `Task::visibleTo()` (404) and the
+    // assignment asked by `trackTask` (403). Office employees and Admins must be clocked in;
+    // clock-out above stops the timer. The remote widget's `/employee/time/*` is untouched.
+    Route::post('/tasks/{task}/timer', [TaskTimerController::class, 'start'])
+        ->whereNumber('task')
+        ->name('task-timer.start');
+    Route::post('/task-timer/pause', [TaskTimerController::class, 'pause'])->name('task-timer.pause');
+    Route::post('/task-timer/resume', [TaskTimerController::class, 'resume'])->name('task-timer.resume');
+    Route::post('/task-timer/stop', [TaskTimerController::class, 'stop'])->name('task-timer.stop');
+    Route::post('/task-timer/heartbeat', [TaskTimerController::class, 'heartbeat'])->name('task-timer.heartbeat');
 
     // My Leave, and applying for it (master prompt Part D §9, Phase 5). Shared rather than one
     // set per surface for the reason the clock above is, and Part C §1 states it outright:

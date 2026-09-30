@@ -10,6 +10,7 @@ use App\Http\Requests\Task\ChangeTaskStatusRequest;
 use App\Http\Requests\Task\HandOffTaskRequest;
 use App\Http\Requests\Task\ReorderTaskRequest;
 use App\Http\Requests\Task\StoreChecklistItemRequest;
+use App\Http\Requests\Task\StoreSubtaskRequest;
 use App\Http\Requests\Task\StoreTaskDependencyRequest;
 use App\Http\Requests\Task\StoreTaskLinkRequest;
 use App\Http\Requests\Task\StoreTaskRequest;
@@ -74,6 +75,9 @@ class TaskController extends Controller
     /** What the detail page needs on top of the list's relations. */
     private const DETAIL_RELATIONS = [
         'checklistItems.completer',
+        // Flow F2: the Subtasks panel's rows — each one's people, as a card sends them, and
+        // their assignees again for TaskPolicy::view per row, read off the loaded relation.
+        'subtasks.assignees.user',
         'links',
         'dependencies',
         'dependents',
@@ -375,6 +379,21 @@ class TaskController extends Controller
         ), 'Task handed over.');
     }
 
+    /**
+     * Flow F2: a subtask under this task. The service asks TaskPolicy::createSubtask — Admin or
+     * Manager, a live parent, one level deep — and a refusal is a 403, a subtask of a subtask
+     * included.
+     */
+    public function storeSubtask(StoreSubtaskRequest $request, Task $task): RedirectResponse
+    {
+        return $this->run($request, $task, fn (Task $task) => $this->tasks->createSubtask(
+            $request->user(),
+            $task,
+            ['title' => $request->title(), 'due_date' => $request->dueDate()],
+            $request->assigneeId(),
+        ), 'Subtask added.');
+    }
+
     public function storeChecklistItem(StoreChecklistItemRequest $request, Task $task): RedirectResponse
     {
         return $this->run($request, $task, fn (Task $task) => $this->tasks->addChecklistItem(
@@ -489,6 +508,9 @@ class TaskController extends Controller
                 'checklistItems',
                 'checklistItems as checklist_items_done_count' => fn ($query) => $query->where('is_done', true),
                 'files as attachment_count',
+                // The speech bubble beside it (brief 012): messages in the task's discussion.
+                'discussionMessages as comment_count',
+                ...TaskService::subtaskCounts(),
             ])
             ->whereKey($task->getKey())
             ->firstOrFail();

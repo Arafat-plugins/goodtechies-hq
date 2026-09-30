@@ -13,8 +13,11 @@ import MembersCard from '@/Components/Projects/MembersCard.vue';
 import type { EmployeeOption, Option, Project } from '@/Components/Projects/ProjectForm.vue';
 import ProjectMetaList from '@/Components/Projects/ProjectMetaList.vue';
 import StatusActions from '@/Components/Projects/StatusActions.vue';
+import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import RecurringPanel from '@/Components/Recurring/RecurringPanel.vue';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
+import { workingNowPing, type WorkingNowRow } from '@/Components/Timer/taskTimer';
+import WorkingNowPanel from '@/Components/Timer/WorkingNowPanel.vue';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 import {
@@ -37,7 +40,14 @@ const props = defineProps<{
     assignableEmployees: EmployeeOption[];
     /** The project's channel (Phase 6). The Discussion tab fetches the thread itself. */
     discussionConversationId: number;
+    /** Open task timers on this project (flow F3) — absent for anybody without `watchLive`. */
+    workingNow?: WorkingNowRow[];
 }>();
+
+/** A `task.changed` kind `timer` frame re-reads `workingNow` alone (flow F1). */
+if (props.workingNow !== undefined) {
+    useLiveTaskProps(['workingNow'], { accept: workingNowPing });
+}
 
 const project = computed(() => props.project.data);
 const permissions = computed(() => project.value.permissions ?? {});
@@ -175,6 +185,10 @@ function confirmArchiveToggle(): void {
                 {{ project.is_archived ? 'Unarchive' : 'Archive' }}
             </Button>
         </template>
+
+        <section v-if="workingNow?.length" aria-labelledby="project-working-now" class="min-w-0">
+            <WorkingNowPanel :rows="workingNow" heading-id="project-working-now" />
+        </section>
 
         <Tabs v-model="tab" class="min-w-0 gap-4">
             <!-- The trigger row scrolls on its own at 375 so the page itself never does. -->

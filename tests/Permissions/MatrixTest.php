@@ -685,6 +685,9 @@ function permissionMatrix(): array
         ['POST', 'admin/tasks/{task}/reorder', $adminAction],
         ['PUT', 'admin/tasks/{task}/assignees', $adminAction],
         ['POST', 'admin/tasks/{task}/handoff', $adminAction],
+        // Flow F2: a subtask under the matrix's task. Admin only on this surface; the Manager is
+        // on the employee surface, which has no create route (decision 12-71).
+        ['POST', 'admin/tasks/{task}/subtasks', $adminAction],
         ['POST', 'admin/tasks/{task}/checklist', $adminAction],
         ['PUT', 'admin/tasks/{task}/checklist/{item}', $adminAction, ['{item}' => 'checklist:List every page with a wrong canonical']],
         ['DELETE', 'admin/tasks/{task}/checklist/{item}', $consumed, ['{item}' => 'checklist:Point each model page at itself']],
@@ -1196,6 +1199,25 @@ function permissionMatrix(): array
         // person holding the phone at the door needs a sentence.
         ['POST', 'attendance/clock-in', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
         ['POST', 'attendance/clock-out', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
+
+        // Shared — the task timer for everyone who works tasks (flow F3, decision 12-73). No
+        // surface, like the clock: an Admin and Yaseen press the same ▶. `{task}` is another of
+        // Tapu's SEO tasks — the default one has been archived by the employee archive row above
+        // by the time this runs, and an archived task has no ▶ — so the start row states all
+        // three refusals in one line:
+        //   ADMIN / MANAGER 302 — they SEE every task and may time any of them, assigned or
+        //                         not, under their own record (`TimeEntryPolicy::trackTask`,
+        //                         brief 021): the 422 `clock_in` question or a started timer
+        //   EMPLOYEE        404 — Yaseen may not see Tapu's task, so it is absent
+        //   REMOTE_EMPLOYEE 302 — his own task; ▶ starts the timer he already had
+        //   ACCOUNTANT      403 — holds no `tasks.view`: may not run a task timer at all
+        // Pause / resume / stop / heartbeat act on "my open entry" and take no id: 302 (a flash
+        // when nothing is open) or 200 for everyone who may time, 403 for the Accountant.
+        ['POST', 'tasks/{task}/timer', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403], ['{task}' => 'task:Optimize Home Model pages']],
+        ['POST', 'task-timer/pause', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        ['POST', 'task-timer/resume', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        ['POST', 'task-timer/stop', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
+        ['POST', 'task-timer/heartbeat', ['guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 200, 'EMPLOYEE' => 200, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
 
         // Shared — My Leave, and applying for it (Phase 5). No surface, like the clock above
         // and the bell below: applying for leave is a fact about the person and not about the

@@ -57,7 +57,7 @@ it('sends the assignee picker its options', function () {
         );
 })->group('phase2');
 
-it('counts the checklist on the list, which is what the Subtasks column reads', function () {
+it('counts the checklist on the list, which is what the card\'s checklist counter reads', function () {
     $this->actingAs($this->admin)
         ->get(route('admin.tasks.index', ['group_by' => 'status']))
         ->assertOk()
@@ -66,8 +66,10 @@ it('counts the checklist on the list, which is what the Subtasks column reads', 
                 ->flatMap(fn (array $group): array => $group['tasks'])
                 ->keyBy('id');
 
-            expect($tasks[$this->task->id]['subtask_count'])->toBe(4)
-                ->and($tasks[$this->task->id]['subtasks_done_count'])->toBe(1);
+            // Decision 12-71: the checklist's keys are named for it now that `subtask_count`
+            // counts real subtasks.
+            expect($tasks[$this->task->id]['checklist_count'])->toBe(4)
+                ->and($tasks[$this->task->id]['checklist_done_count'])->toBe(1);
         });
 })->group('phase2');
 
