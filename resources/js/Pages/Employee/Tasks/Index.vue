@@ -79,7 +79,7 @@ function openTask(task: Task): void {
 <template>
     <Head title="My Tasks" />
 
-    <PageShell title="Tasks" title-hidden>
+    <PageShell title="Tasks" title-hidden bleed>
         <GanttNarrowNotice />
 
         <TaskList

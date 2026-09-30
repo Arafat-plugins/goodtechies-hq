@@ -45,7 +45,7 @@ if (quickAddOpen.value) {
 <template>
     <Head title="Tasks — Gantt" />
 
-    <PageShell title="Tasks" title-hidden>
+    <PageShell title="Tasks" title-hidden bleed>
         <TaskGantt
             :gantt="gantt"
             :can-plan="can_plan"

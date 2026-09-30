@@ -15,6 +15,15 @@ import {
     type UserVisit,
 } from '@/lib/net';
 import { noteRefusedVisit, reportStatus, trackVisitFinish, trackVisitStart } from '@/lib/session';
+import { trackInputModality } from '@/lib/inputModality';
+import {
+    filtersOf,
+    isTaskListPath,
+    readSavedFilters,
+    restoreFor,
+    withFilters,
+    writeSavedFilters,
+} from '@/lib/taskFilterMemory';
 import { toast } from '@/lib/toast';
 import { disarmUnsavedGuard } from '@/lib/unsavedGuard';
 import { isVersionAnswer, markNewVersion } from '@/lib/version';
@@ -51,6 +60,73 @@ router.on('before', (event) => {
         clearAllDrafts();
         disarmUnsavedGuard();
     }
+});
+
+/**
+ * Brief 008: each person's Tasks filters outlive a reload, a trip to the Dashboard and a sign-out
+ * (`lib/taskFilterMemory.ts` says what is kept and why). Two listeners and one check at boot:
+ *
+ * - every page that arrives (`success`, which also covers the filter bar's `replace` visits
+ *   that fire no `navigate`; `navigate` for back/forward) saves the Tasks filters its URL
+ *   carries, keyed by the signed-in user's id;
+ * - a visit INTO Tasks from elsewhere with no filter of its own is cancelled here and sent
+ *   again carrying the saved set, so the unfiltered list is never requested or painted.
+ *   Partial reloads (the live refresh, flow F1), prefetches and non-GETs pass untouched.
+ */
+let signedInUserId: number | null = null;
+
+function userIdOf(props: unknown): number | null {
+    const id = (props as { auth?: { user?: { id?: unknown } | null } }).auth?.user?.id;
+
+    return typeof id === 'number' ? id : null;
+}
+
+function rememberTaskFilters(page: { url: string; props: unknown }): void {
+    signedInUserId = userIdOf(page.props);
+
+    if (signedInUserId === null) {
+        return;
+    }
+
+    const url = new URL(page.url, window.location.origin);
+
+    if (isTaskListPath(url.pathname)) {
+        writeSavedFilters(signedInUserId, filtersOf(url.searchParams));
+    }
+}
+
+router.on('success', (event) => rememberTaskFilters(event.detail.page));
+router.on('navigate', (event) => rememberTaskFilters(event.detail.page));
+
+router.on('before', (event) => {
+    const { visit } = event.detail;
+
+    if (
+        signedInUserId === null ||
+        visit.method !== 'get' ||
+        visit.only.length > 0 ||
+        visit.except.length > 0 ||
+        visit.reset.length > 0
+    ) {
+        return;
+    }
+
+    const saved = restoreFor(visit.url, window.location.pathname, readSavedFilters(signedInUserId));
+
+    if (saved === null) {
+        return;
+    }
+
+    // A hover prefetch of the unfiltered list would be wasted; the click itself is restored.
+    if (!visit.prefetch) {
+        router.visit(withFilters(visit.url, saved).href, {
+            replace: visit.replace,
+            preserveScroll: visit.preserveScroll,
+            preserveState: visit.preserveState,
+        });
+    }
+
+    return false;
 });
 
 router.on('start', (event) => {
@@ -219,6 +295,9 @@ router.on('httpException', (event) => {
 
 const pages = import.meta.glob<{ default: DefineComponent }>('./Pages/**/*.vue');
 
+// Pointer vs keyboard, for the menu-item ring rule at the end of app.css.
+trackInputModality();
+
 createInertiaApp({
     title: (title) => (title ? `${title} — ${appName}` : appName),
     resolve: async (name) => {
@@ -238,6 +317,20 @@ createInertiaApp({
         clearDraftsNotOwnedBy(
             (props.initialPage.props as { auth?: { user?: { id?: number } | null } }).auth?.user?.id ?? null,
         );
+
+        // Brief 008: a first load of a Tasks view with no filters (a typed URL, a bookmark) is
+        // swapped for the saved set before anything mounts, so the unfiltered list never paints.
+        const userId = userIdOf(props.initialPage.props);
+        const initialUrl = new URL(props.initialPage.url, window.location.origin);
+        const saved = userId === null ? null : restoreFor(initialUrl, null, readSavedFilters(userId));
+
+        if (saved !== null) {
+            window.location.replace(withFilters(initialUrl, saved).href);
+
+            return;
+        }
+
+        rememberTaskFilters(props.initialPage);
 
         createApp({ render: () => h(App, props) })
             .use(plugin)

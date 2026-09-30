@@ -198,7 +198,7 @@ function choose(person: MessagePerson | undefined): void {
         <div
             v-if="open"
             :class="labelled ? 'right-0' : 'left-0'"
-            class="absolute bottom-full z-20 mb-2 flex w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-md border bg-popover p-2 text-popover-foreground shadow-overlay"
+            class="absolute bottom-full z-20 mb-2 flex w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-md bg-popover p-2 text-popover-foreground shadow-overlay"
             @keydown.esc.prevent.stop="hide()"
         >
             <label :for="inputId" class="sr-only">Find somebody to mention</label>

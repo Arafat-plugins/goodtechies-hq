@@ -53,11 +53,13 @@ thing that matters on a screen. Three oranges on one screen means two of them ar
 
 ### 1.2 Neutral ramp — hue 260.6, chroma 0.006
 
-Light ramp steps: `0.985 / 0.97 / 0.922 / 0.70 / 0.52 / 0.30`. Dark mirrors it.
+Light ramp steps: `0.985 / 0.97 / 0.922 / 0.70 / 0.52 / 0.30`. Dark mirrors it. The canvas sits
+above the ramp at `0.993 / 0.002` since 2026-09-29 (the client asked for a whiter page); the
+sidebar keeps step `0.985`, which is what makes it the "one shade off the canvas" §1.7 describes.
 
 | Variable | Light | Dark | Use it for |
 | --- | --- | --- | --- |
-| `--background` | `oklch(0.985 0.006 260.6)` `#F8FAFE` | `oklch(0.1582 0.0118 260.6)` `#0A0D12` | The page canvas. Set once on `body`; a page does not repaint it. |
+| `--background` | `oklch(0.993 0.002 260.6)` `#FCFDFE` (was `#F8FAFE` until 2026-09-29) | `oklch(0.1582 0.0118 260.6)` `#0A0D12` | The page canvas. Set once on `body`; a page does not repaint it. Deliberately **not** pure white: `--card` is, and a card keeps its hairline and `shadow-raised`, so it still reads as a panel. |
 | `--foreground` | `oklch(0.30 0.006 260.6)` `#2C2E31` | `oklch(0.97 0.006 260.6)` `#F3F5F9` | Body text, headings, any value a person reads. |
 | `--card` | `oklch(1 0 0)` `#FFFFFF` | `oklch(0.21 0.006 260.6)` `#17181B` | A panel one elevation above the canvas. Stays pure white in light mode (decision 0.5-25). |
 | `--card-foreground` | `#2C2E31` | `#F3F5F9` | Text on a card. Same value as `--foreground`; use it inside a card so a future card recolour carries. |
@@ -158,10 +160,23 @@ No priority → no flag. Measured in §2.2.
 | --- | --- | --- | --- |
 | `--elevation-flat` / `shadow-flat` | `0 0 #0000` | `0 0 #0000` | Table rows, list items, nav rows. Things that sit *in* a surface. A **transparent** shadow, never the keyword `none` — see below. |
 | `--elevation-raised` / `shadow-raised` | `0 1px 2px 0 oklch(0 0 0/.05), 0 1px 3px 0 oklch(0 0 0/.06)` | `…/.30`, `…/.36` | Cards and panels — one step above the canvas. |
-| `--elevation-overlay` / `shadow-overlay` | `0 10px 15px -3px oklch(0 0 0/.10), 0 4px 6px -4px oklch(0 0 0/.10)` | `…/.50`, `…/.50` | Dialog, popover, drawer, command palette, toast. |
+| `--elevation-overlay` / `shadow-overlay` | `0 10px 15px -3px oklch(0 0 0/.10), 0 4px 6px -4px oklch(0 0 0/.10), 0 0 8px 0 oklch(0 0 0/.06)` | `…/.50`, `…/.50`, `0 0 12px 0 oklch(0 0 0/.45)` | Dialog, popover, drawer, command palette, toast. The third (all-round) layer was added 2026-09-29 — see *Overlay panels carry no border* below. |
 
 Dark carries its own deeper values because a 5 % black shadow is invisible on `#0A0D12`
 (decision 0.5-10). **The rule: one surface may not sit on another at the same elevation.**
+
+**Overlay panels carry no border; elevation only (2026-09-29).** The client asked for the border to
+go from every dropdown and hover panel. The panels are generated files, so the rule is one
+unlayered block at the end of `app.css`, keyed on each primitive's `data-slot`:
+`dropdown-menu-content`, `dropdown-menu-sub-content`, `select-content`, `popover-content`,
+`hover-card-content`, `tooltip-content`, `combobox-list` → `border-width: 0`. Unlayered, so the
+generated `border` utility cannot win it back. Bespoke overlays drop it at the call site:
+`Messages/MentionPicker.vue`'s panel and `Shell/GlobalSearch.vue`'s palette (`border-0` on its
+`DialogContent`; other dialogs keep theirs). `Command` draws none. Separators and header/footer
+rules *inside* a panel stay. Without the hairline, the old two layers only fell *below* a panel, so
+a white menu on a white card (and `--popover` on `--card` in dark, which are the same colour) had
+no side edges: `--elevation-overlay` gained an all-round blur layer in both themes. The tooltip is
+unchanged — it never had a border or a shadow, and its inverted `--foreground` fill separates it.
 
 **Why `shadow-xs` kept coming back.** `app.css` adds these three to the `--shadow-*` namespace and
 never clears Tailwind's own scale, so `shadow-xs` / `shadow-sm` / `shadow-md` / `shadow-lg` all
@@ -282,20 +297,24 @@ of a threshold; the older figures are left as measured rather than churned.
 
 ### 2.1 Text on a surface — 4.5:1
 
+**The light `--background` rows were re-measured on 2026-09-29** when the canvas went from `#F8FAFE`
+to `#FCFDFE`, with the Phase 12 8-bit helper (`tests/Support/Colour.php`); every one moved up
+(the canvas only got lighter behind dark text and marks). No dark row changed.
+
 | Pair | Light | Dark |
 | --- | --- | --- |
-| `--foreground` / `--background` | 13.06:1 ✅ | 17.84:1 ✅ |
+| `--foreground` / `--background` | 13.37:1 ✅ | 17.84:1 ✅ |
 | `--foreground` / `--card` (= `--popover`) | 13.63:1 ✅ | 16.25:1 ✅ |
 | `--foreground` / `--muted` (= `--secondary`, `--accent`) | 12.50:1 ✅ | 14.25:1 ✅ |
-| `--muted-foreground` / `--background` | 5.28:1 ✅ | 7.28:1 ✅ |
+| `--muted-foreground` / `--background` | 5.41:1 ✅ | 7.28:1 ✅ |
 | `--muted-foreground` / `--card` | 5.51:1 ✅ | 6.63:1 ✅ |
 | `--muted-foreground` / `--muted` | 5.05:1 ✅ | 5.82:1 ✅ |
 | `--primary-foreground` / `--primary` | 4.99:1 ✅ | 7.31:1 ✅ |
-| `--primary` / `--background` (link on the canvas) | 4.92:1 ✅ | 7.31:1 ✅ |
+| `--primary` / `--background` (link on the canvas) | 5.05:1 ✅ | 7.31:1 ✅ |
 | `--primary` / `--card` (link on a card) | 5.13:1 ✅ | 6.66:1 ✅ |
-| `--primary-hover` / `--background` | 6.34:1 ✅ | 8.85:1 ✅ |
+| `--primary-hover` / `--background` | 6.48:1 ✅ | 8.85:1 ✅ |
 | `--primary-hover` / `--card` | 6.62:1 ✅ | 8.06:1 ✅ |
-| `--destructive` / `--background` (`text-destructive`) | 4.56:1 ✅ | 6.73:1 ✅ |
+| `--destructive` / `--background` (`text-destructive`) | 4.68:1 ✅ | 6.73:1 ✅ |
 | `--destructive` / `--card` | 4.76:1 ✅ | 6.13:1 ✅ |
 | white / `--destructive` — **raw token** | 4.76:1 ✅ | 2.89:1 ❌ |
 | white / `--destructive`/60 over `--card` — **as shadcn renders it in dark** | — | 6.00:1 ✅ |
@@ -323,7 +342,7 @@ button and badge render `bg-destructive/60` over `--card` in dark, which is the 
 
 | Pair | Light | Dark |
 | --- | --- | --- |
-| `--brand` / `--background` | 3.45:1 ✅ | 6.73:1 ✅ |
+| `--brand` / `--background` | 3.54:1 ✅ | 6.73:1 ✅ |
 | `--brand` / `--card` | 3.61:1 ✅ | 6.13:1 ✅ |
 | `--sidebar-rail` / `--sidebar` | 3.45:1 ✅ | 6.26:1 ✅ |
 | `--sidebar-rail` / `--sidebar-accent` (rail on the active row's fill) | 3.26:1 ✅ | 5.45:1 ✅ |
@@ -345,7 +364,7 @@ button and badge render `bg-destructive/60` over `--card` in dark, which is the 
 | `--priority-medium` / `--card` (flag) | 4.22:1 ✅ | 6.78:1 ✅ |
 | `--priority-low` / `--card` (flag) | 5.51:1 ✅ | 6.62:1 ✅ |
 | `--status-*-border` / `--card` (all eight) | 1.41–1.46:1 ❌ | 1.73–1.80:1 ❌ |
-| `--border` / `--background` (hairline) | 1.21:1 ❌ | 1.27:1 ❌ |
+| `--border` / `--background` (hairline) | 1.24:1 ❌ | 1.27:1 ❌ |
 | `--border` / `--card` (hairline) | 1.26:1 ❌ | 1.33:1 ❌ |
 | `--input` / `--card` (field boundary) | 1.26:1 ❌ | 1.33:1 ❌ |
 
@@ -356,13 +375,13 @@ Every row below is composited the way the browser composites it and recomputed b
 
 | Focus indicator, as rendered | Light | Dark |
 | --- | --- | --- |
-| `--ring` / `--background` | 3.45:1 ✅ | 6.75:1 ✅ |
+| `--ring` / `--background` | 3.54:1 ✅ | 6.75:1 ✅ |
 | `--ring` / `--card` (= `--popover`) | 3.61:1 ✅ | 6.15:1 ✅ |
 | `--ring` / `--muted` (= `--secondary`, `--accent`) | 3.30:1 ✅ | 5.39:1 ✅ |
 | `--ring` / `--sidebar` | 3.45:1 ✅ | 6.28:1 ✅ |
 | `--ring` / `--brand-tint` (= `--sidebar-accent`, the selected row) | 3.25:1 ✅ | 5.47:1 ✅ |
 | `--primary-foreground` / `--primary` (the DM bubble's own ring) | 5.01:1 ✅ | 7.31:1 ✅ |
-| `--destructive` / `--background` (destructive button, badge, invalid field) | 4.56:1 ✅ | 6.74:1 ✅ |
+| `--destructive` / `--background` (destructive button, badge, invalid field) | 4.68:1 ✅ | 6.74:1 ✅ |
 | `--destructive` / `--card` | 4.77:1 ✅ | 6.15:1 ✅ |
 | `--destructive` / `--muted` | 4.37:1 ✅ | 5.39:1 ✅ |
 | `--ring` / `--accent` — the **inset** ring on a highlighted menu, command or select item | 3.30:1 ✅ | 5.39:1 ✅ |
@@ -394,6 +413,14 @@ Three things that follow from those rows, all of them now in the code:
   a `p-1` container: an outside ring would overlap its neighbour and clip at the edge. Inset, it is
   drawn over the item's own `--accent` fill at 3.30:1 / 5.39:1, and on a destructive item over
   `--destructive` at 4.37:1 / 5.39:1.
+  **It is the keyboard's ring, and since 2026-09-29 only the keyboard gets it.** reka highlights an
+  item for the pointer too, so every mouse hover framed the row in orange, and a Select opened by a
+  click framed its selected row — the client's "border on hover". `app.css` now clears
+  `--tw-ring-shadow` on an item that is `:hover`ed, and on every item while
+  `<html data-input-modality="pointer">` (`lib/inputModality.ts`, set on `pointerdown`, flipped
+  back on any `keydown`). `:focus-visible` could not do it: Chromium reports the click-opened
+  Select's row as focus-visible. The `bg-accent` fill still marks the pointer's row; the first
+  arrow key brings the ring back.
 - **`--ring` cannot go on a `--primary` fill.** At 1.43:1 light and 1.08:1 dark it is invisible
   rather than weak, and no opacity rescues it — it is the same hue two lightness steps away. A
   control inside a DM's own bubble paints `ring-primary-foreground` instead (§2.4).
@@ -401,7 +428,7 @@ Three things that follow from those rows, all of them now in the code:
   ring *colour*; the width comes from the control's own `focus-visible:ring-3`, so it paints nothing
   until the field is focused and what it paints then is the focus ring, recoloured. At `/20` it
   replaced a 3.45:1 indicator with a 1.43:1 one on exactly the fields a person is most likely to be
-  tabbing through. Opaque, it is 4.56:1.
+  tabbing through. Opaque, it is 4.68:1 on the canvas.
 
 One ratio is recorded and never rendered: `--ring` / `--brand-tint-strong` (hover on an
 already-selected row) is **2.92:1 ❌** light, 4.50:1 ✅ dark. A Tailwind ring is drawn *outside* the
@@ -428,7 +455,7 @@ armed from staged, and both states are also in the button's accessible name and 
 - **`--border` and `--input`** are shadcn's own hairlines. A separator is decorative. A *field*
   boundary is not — a text input identified only by a 1.26:1 hairline is a genuine 1.4.11
   shortfall in the shadcn default, and it is recorded here so nobody re-derives it. It is not
-  fixed in this file's scope; the focus state is fine (`--ring` at 3.45:1, opaque, since 2026-09-26)
+  fixed in this file's scope; the focus state is fine (`--ring` at 3.54:1 on the canvas, opaque, since 2026-09-26)
   and `aria-invalid` swaps the border to `--destructive` at 4.56:1.
 
 ### 2.3 The recorded failure that is a rule
@@ -476,7 +503,13 @@ Three things this table is load-bearing for:
 **Messaging polish (28 Sep 2026).** The composer is one pill (`rounded-3xl`, `border-input`,
 `bg-card`): Attach, the textarea, the mic and "@ Mentions" inside it, and **Send joined to its right
 end** as a `--primary` segment (`rounded-r-3xl`). The textarea has no border of its own; its focus
-ring is painted on the pill (`has-[textarea:focus-visible]:ring-3 ring-ring`), opaque as always.
+indicator is painted on the pill. **Since 2026-09-29 (decision 12-70) it is the pill's own 1 px
+border turning `--ring` (`has-[textarea:focus-visible]:border-ring`), with no `ring-3` spread** —
+the client read the 3 px halo as "a big border" on every click. It is the one exception to "every
+control writes `focus-visible:ring-3 ring-ring`"; every other input keeps its ring. Still opaque
+and still ≥ 3:1: `--ring` is 3.54:1 on the canvas and 3.61:1 on the pill's own `--card` (6.75 /
+6.15 dark), it paints on click and on `Tab` alike (a textarea is always focus-visible), and it
+replaces a hairline of 1.26:1, so the change itself is the indicator.
 Below `sm` the Attach / Mentions / Send words go and the icons stay, each with its accessible name.
 An attachment is a **card of its own size** (`w-fit`, file cards `sm:max-w-xs`, images inside
 `max-w-xs × max-h-64` at their natural ratio); only the card is a link, never the message row.
@@ -513,14 +546,14 @@ Every signature below was read from the component's own `defineProps` / `defineE
 | Component | What it does | Signature | Reach for it when |
 | --- | --- | --- | --- |
 | `Shell/SkipToContent.vue` | The skip link (WCAG 2.4.1). Off-screen until focused, then the first thing on the page; it **moves focus** to `<main>`, not just the scroll position. | no props · targets `#main-content` | Never directly, and never anywhere but as the **first child** of a `Layouts/*.vue`. The layout's `<main>` must carry `id="main-content" tabindex="-1" outline-none`. Not on `AuthLayout` — its content is already the first stop. |
-| `PageShell.vue` | The standard page head: breadcrumb, title (or greeting), description, an actions area and an optional tabs strip, above the page body. Absorbed the deleted `PageHeader.vue`. | props `title: string`, `description?`, `breadcrumb?: Crumb[]`, `greeting?: { name: string; today: string }` · slots `actions`, `tabs`, default · exports `interface Crumb { label: string; href?: string }` | Always, at the top of every Inertia page. `greeting` replaces the title with "Good morning, Name" over the date — dashboards only. |
+| `PageShell.vue` | The standard page head: breadcrumb, title (or greeting), description, an actions area and an optional tabs strip, above the page body. Absorbed the deleted `PageHeader.vue`. | props `title: string`, `description?`, `breadcrumb?: Crumb[]`, `greeting?: { name: string; today: string }`, `bleed?: boolean` · slots `actions`, `tabs`, default · exports `interface Crumb { label: string; href?: string }` | Always, at the top of every Inertia page. `greeting` replaces the title with "Good morning, Name" over the date — dashboards only. **`bleed`** (29 Sep 2026, brief 008) makes the page a full-width work surface: the shell's `<main>` drops its max width for 16 px gutters and a 12 px top band (the layouts read `data-page-bleed`), and the page's rhythm tightens from `gap-6` to `gap-3`. **Tasks views only**; every other page keeps the standard padding. |
 | `Shell/AppSidebar.vue` | The fixed `lg`-and-up rail: wordmark, nav groups, "Coming soon" disclosure, rail toggle. | props `groups: NavGroup[]`, `homeHref: string` | Only from a `Layouts/*.vue`. A page never mounts it. |
 | `Shell/AppSidebarNav.vue` | Renders the live nav groups; drops every item with a `phase` (decision 0.5-3). | props `groups: NavGroup[]`, `rail?: boolean = false` · emits `navigate` | Only from `AppSidebar` / `MobileNavSheet`. |
 | `Shell/SidebarComingSoon.vue` | The one closed disclosure at the bottom holding every unbuilt row, with its phase badge. | props `groups: NavGroup[]` | Never directly — it is how unbuilt work is shown, and the only way. |
 | `Shell/SidebarRailToggle.vue` | Collapse-to-icons control. | props `rail: boolean` · emits `update:rail` | Only from `AppSidebar`. |
 | `Shell/MobileNavSheet.vue` | The below-`lg` off-canvas drawer and its hamburger. | props `groups: NavGroup[]`, `homeHref: string` | Only from `AppTopBar`. |
 | `Shell/AppTopBar.vue` | Sticky `h-14` bar: hamburger, breadcrumb, then search / create / bell / user menu. | props `groups: NavGroup[]`, `homeHref: string`, `breadcrumb?: string \| null = null` | Only from a layout. Pass `breadcrumb` when the last crumb is a record's name the URL cannot give. |
-| `Shell/GlobalSearch.vue` | The ⌘K / Ctrl+K command palette. Navigation-only for now. | props `groups: NavGroup[]` | Only from `AppTopBar`. |
+| `Shell/GlobalSearch.vue` | The ⌘K / Ctrl+K command palette: nav rows matched in the browser, record rows from `GET /search`. | props `groups: NavGroup[]` | Only from `AppTopBar`. **Records are searched in the current section only** (29 Sep 2026, brief 010): `lib/searchScope.ts` maps the page to `SearchableType`s (Tasks → tasks, Projects → projects, Clients, Messages, Meetings, Team/Employees → people, Finance income/expenses) and sends them as `type=`; a Dashboard, or a page with no searchable type of its own, searches everything. The trigger (`Search tasks`), the placeholder (`Search tasks…`) and a `bg-muted` scope label inside the input row (`Tasks only` / `Everything`) name the scope. No "search everything" switch — the Dashboard is where that lives. |
 | `Shell/QuickCreate.vue` · `UserMenu.vue` · `ThemeToggle.vue` | The `+` menu, the avatar menu, and the Light/Dark/System control inside it. | no props | Only from `AppTopBar` (`ThemeToggle` from `UserMenu`). |
 | `Shell/NotificationBell.vue` | The bell: an unread badge capped at `9+`, and the newest ten behind it — read ones included, because a bell that empties itself as you glance at it gives you no way back to what you just dismissed. Loading is three `Skeleton` lines, a failed poll is an `error` `EmptyState`, an empty mailbox says *Nothing yet*. Footer links to the Center. **Not empty since Phase 2, slice 5.** | no props · reads `useNotificationBell()` (§4.8) | Only from `AppTopBar`. **It does not own the poll**, so a second mount cannot start a second interval, and it **removes itself** rather than greying out for somebody with no mailbox (§5.12) — it learns that by being refused once, which is `status === 'denied'`. The count is the server's: marking read writes and the write re-reads; nothing here subtracts one. |
 | `AppWordmark.vue` | The only sanctioned rendering of the mark: inline SVG + "GoodTechies HQ", cap-height matched. | props `variant?: 'lockup' \| 'mark' = 'lockup'`, `surface?: 'light' \| 'dark' = 'light'`, `size?: number = 28`, `class?` | Anywhere the mark appears. `surface="dark"` drops the tile so there is no black square on a dark surface. Never render the logo any other way. |
@@ -559,8 +592,8 @@ Every signature below was read from the component's own `defineProps` / `defineE
 | `lib/toast.ts` | Client-side feedback. | `toast.success(msg, opts?)`, `.error(…)`, `.loading(…)`, `.promise(promise, { loading, success, error })`, `.dismiss(id?)` | After a client action (a row archived, a copy-to-clipboard). |
 | `FlashMessage.vue` | Renders `page.props.flash.success` / `.error` as an `Alert`. | no props | Server-side flash on page load. It is already in each layout. **Never send one message through both this and `toast()`** — that is how a user gets told twice. |
 | `DetailDrawer.vue` | The right slide-over a list opens on a row. Deep-linkable: while open the URL carries `?detail=<id>`, written with `syncQuery()` — **not** `pushQuery()`. Esc, focus trap and focus restore come from reka's dialog. | props `open: boolean`, `title: string`, `subtitle?`, `width?: 'sm'\|'md'\|'lg'\|'xl' = 'md'`, `deepLinkId?: string\|number\|null` · emits `update:open` · slots `header-actions`, default, `footer` | Showing one record beside its list. **The page reads `queryParam('detail')` in `setup`, never in `onMounted`:** this component syncs the URL from a watcher with `immediate: true`, and a child's setup runs before its parent's `onMounted`, so a drawer that starts closed strips `?detail=` before an `onMounted` could read it and a pasted deep link opens nothing. Omitting `deepLinkId` keeps the drawer out of the URL. Slice 3 was its first caller: the two defects above (the URL write, the read timing) were both found by opening it from a row and pressing Esc. |
-| `FilterBar.vue` | Debounced search plus one removable chip per active filter, an *Add filter* popover and *Clear all*. Chip mode serialises straight to the query string, so a filtered list is a shareable URL. | props `search?: string\|null = null`, `active?=false`, `placeholder?='Search…'`, `inputId?='filter-bar-search'`, `filters?: FilterDef[]`, `extraActive?=false` · emits `update(search)` (300 ms after the last keystroke), `clear()` · slots `extra`, default · exports `FilterKind = 'select'\|'multi-select'\|'date-range'`, `FilterOption`, `FilterDef { key; label; kind; options?; searchPlaceholder? }` | Above every list. Passing `filters` turns chip mode on and the bar owns the query string; leaving it off keeps the plain search bar and the page owns navigation. A `date-range` filter writes `<key>_from` / `<key>_to`; a `multi-select` comma-joins into one key. |
-| `FilterChip.vue` | One chip: `Label: value ×`, as two adjacent buttons so each has its own accessible name. | props `label: string`, `value: string` · emits `edit`, `remove` | Never directly — `FilterBar` renders them. |
+| `FilterBar.vue` | Debounced search plus one removable chip per active filter, an *Add filter* popover and *Clear all*. Chip mode serialises straight to the query string, so a filtered list is a shareable URL. | props `search?: string\|null = null`, `active?=false`, `placeholder?='Search…'`, `inputId?='filter-bar-search'`, `filters?: FilterDef[]`, `extraActive?=false` · emits `update(search)` (300 ms after the last keystroke), `clear()` · slots `extra`, default · exports `FilterKind = 'select'\|'multi-select'\|'date-range'\|'toggle'`, `FilterOption`, `FilterDef { key; label; kind; options?; searchPlaceholder? }` | Above every list. Passing `filters` turns chip mode on and the bar owns the query string; leaving it off keeps the plain search bar and the page owns navigation. A `date-range` filter writes `<key>_from` / `<key>_to`; a `multi-select` comma-joins into one key. A **`toggle`** (29 Sep 2026, brief 008) is a yes/no filter picked straight from the *Add filter* list with no second level — set, it writes `<key>=1` and shows a label-only chip; removed, the key leaves the URL. The Tasks bar's *Overdue only* and *Show archived* live there. Opt-in. |
+| `FilterChip.vue` | One chip: `Label: value ×`, as two adjacent buttons so each has its own accessible name. When `value` is empty (a `toggle` filter) it draws a **label-only** chip, `Label ×`, with the label in full weight. | props `label: string`, `value: string` · emits `edit`, `remove` | Never directly — `FilterBar` renders them. |
 
 ### 4.4 Charts — `@unovis/vue` (decision 0.5-4)
 
@@ -603,6 +636,7 @@ endpoint checks again. A second copy of `TaskStatus::TRANSITIONS` in Vue is a co
 | Module | Exports | Notes |
 | --- | --- | --- |
 | `lib/utils.ts` | `cn(...inputs)` | `clsx` + `tailwind-merge`. Every conditional class goes through it. |
+| `lib/searchScope.ts` | `searchScopeFor(url) → { types: SearchType[] \| null; noun; label }`, `searchUrl(term, scope)`, `EVERYTHING` | The one route → search-types map for the ⌘K palette (brief 010). Pure, no imports; tested by `tests/js/searchScope.test.ts`. `types: null` is every type. |
 | `lib/tableState.ts` | `currentQuery()`, `queryOf(url)`, `queryParam(key, url?)`, `sortFrom(url)`, `pushQuery(patch, { keepPage })`, **`syncQuery(patch)`**, `resetQuery(keep)`, `readHiddenColumns(id)`, `writeHiddenColumns(id, hidden)`, `readDensity(id)`, `writeDensity(id, density)` | The URL carries what is shareable (search, filters, sort, page). `localStorage` holds only what is personal — hidden columns and density, under `hq.table.<id>.*`. Every storage call is wrapped in try/catch. **`pushQuery` vs `syncQuery`:** `pushQuery` navigates, for state the server answers; `syncQuery` rewrites the address bar with `history.replaceState` and asks for nothing, for state only the browser holds — which record an overlay is showing, or a one-shot `?new=1`. A visit for one of those is a round trip for an unchanged payload, and it destroys the row element an overlay must give focus back to. |
 | `lib/sidebarState.ts` | `navSlug(label)`, `groupStateKey(role, group)`, `readGroupOpen`, `writeGroupOpen`, `useSidebarRail(): Ref<boolean>`, `setSidebarRail(collapsed)` | Keys `hq.nav.rail` and `hq.nav.<role>.<group>`. |
 | `lib/theme.ts` | `type ThemeMode = 'light'\|'dark'\|'system'`, `THEME_KEY = 'hq.theme'`, `THEME_MODES`, `isThemeMode`, `resolveDark`, `applyTheme`, `useTheme(): Ref<ThemeMode>`, `setTheme(next)` | `system` is the default. The same key is read by an inline script in `resources/views/app.blade.php` before first paint, so the theme never flashes. The `dark` class lives on `<html>`. |
@@ -627,9 +661,9 @@ back on a refusal while the server's own sentence is spoken through the flash ch
 | Component | What it does | Signature | Reach for it when |
 | --- | --- | --- | --- |
 | `Tasks/TaskViewSwitcher.vue` | List · Board · Calendar, as **links** — the view is the URL, so a bookmark and the back button both work. | props `surface: TaskSurface`, `current: TaskView` · exports `type TaskView = 'list'\|'board'\|'calendar'` | The `tabs` slot of every Tasks `PageShell`, on both surfaces. It carries the query string across, dropping `?detail=` and `?new=` (overlay state, meaningless on the next route) and dropping `date_from`/`date_to` when the target is not the Calendar — those are the grid's **window**, and `TaskService` would read them on a List as a filter that silently clipped it to one month. Selected is `aria-current="page"` plus a `--card` pill on a `--muted` track; no tint, because the shell already spends the screen's one brand colour (§5.3). |
-| `Tasks/TaskFilterBar.vue` | The chip bar all three views wear: search, Status / Priority / Project / Tag (+ Assignee on Admin), and the Overdue / Archived checkboxes. | props `filters: TaskFilters`, `statuses`, `priorities`, `projects`, `tags`, `employees?`, `placeholder`, `idPrefix`, `clearKeeps?: string[] = []` · exposes `clearFilters()` · exports `taskFiltersActive(filters)` | Above any Tasks view. `idPrefix` keeps two bars' labels apart. `clearKeeps` is what an **empty state's** *Clear filters* preserves (`group_by` on the List, the window on the Calendar); the bar's own *Clear all* is `FilterBar`'s and keeps nothing, unchanged from slice 1. `taskFiltersActive` deliberately does **not** count `date_from`/`date_to` — a grid that called its own month a filter would offer to clear September. |
+| `Tasks/TaskFilterBar.vue` | The chip bar all three views wear: search, Status / Priority / Project / Tag (+ Assignee on Admin), and *Overdue only* / *Show archived* as `toggle` filters in *Add filter* (brief 008; they were checkboxes). | props `filters: TaskFilters`, `statuses`, `priorities`, `projects`, `tags`, `employees?`, `placeholder`, `idPrefix`, `clearKeeps?: string[] = []` · exposes `clearFilters()` · exports `taskFiltersActive(filters)` | Above any Tasks view. `idPrefix` keeps two bars' labels apart. `clearKeeps` is what an **empty state's** *Clear filters* preserves (`group_by` on the List, the window on the Calendar); the bar's own *Clear all* is `FilterBar`'s and keeps nothing, unchanged from slice 1. `taskFiltersActive` deliberately does **not** count `date_from`/`date_to` — a grid that called its own month a filter would offer to clear September. |
 | `Tasks/taskBoard.ts` | The Board's types and the two pieces of arithmetic a drop needs. | `BoardCard`, `BoardProject`, `BoardColumn`, `BoardPayload`, `TransitionMap`, `CardNeighbours` · `movesFor(status, transitions, columns)` · `asDetail(card, moves)` · `cloneColumns` · `moveCard(columns, cardId, from, to, index)` · `neighbours(column, cardId)` | Any board write. `movesFor` reads each move's label and tone off the payload's **own columns** — never a second status-to-colour map in Vue. `moveCard` computes `after_id` against the target list with the dragged card already removed, and picks the nearest card above **of the same project**: a column here is a status, but a column to the server is a *(project, status)* pair, so an anchor from another project is one `TaskService::reorder()` refuses outright. |
-| `Tasks/TaskBoard.vue` | Eight lanes in lifecycle order with counts, drag between and within, under one `N tasks · N overdue` line. **No status chip row** above the lanes (removed 29 Sep 2026, brief 007) — each lane's header carries its own count. | props `board: BoardPayload`, `transitions`, `filters`, `surface`, `statuses`, `priorities`, `projects`, `tags`, `employees?`, `searchPlaceholder`, `emptyTitle`, `emptyDescription` | The Board pages. A drop between lanes is `POST …/status` with `after_id`; inside one it is `POST …/reorder`. It mounts **one** headless `TaskStatusActions` re-bound per move rather than one per card — the dialogs are modal, and forty mounted focus traps is thirty-nine too many — and gives focus back by **card id**, because the optimistic move has already re-rendered the card that opened the dialog. Lanes are `w-72` and the strip is the only thing that scrolls sideways; the page never does. |
+| `Tasks/TaskBoard.vue` | Eight lanes in lifecycle order with counts, drag between and within, under one `N tasks · N overdue` line. **No status chip row** above the lanes (removed 29 Sep 2026, brief 007) — each lane's header carries its own count. | props `board: BoardPayload`, `transitions`, `filters`, `surface`, `statuses`, `priorities`, `projects`, `tags`, `employees?`, `searchPlaceholder`, `emptyTitle`, `emptyDescription` | The Board pages. A drop between lanes is `POST …/status` with `after_id`; inside one it is `POST …/reorder`. It mounts **one** headless `TaskStatusActions` re-bound per move rather than one per card — the dialogs are modal, and forty mounted focus traps is thirty-nine too many — and gives focus back by **card id**, because the optimistic move has already re-rendered the card that opened the dialog. Lanes are **`min-w-72 flex-1`** with lane gap **`gap-3`** (29 Sep 2026, brief 008): they share a wide screen and never drop below 18 rem, and the strip is the only thing that scrolls sideways; the page never does. |
 | `Tasks/TaskBoardCard.vue` | One card: title (with the hover grip top-right; **no ⋯ menu**, removed 29 Sep 2026, brief 007), two-line description, the leave banner, then one footer row — assignee **avatars only** (primary first, at most 3 overlapped, then `+N`; unassigned is a dashed circle), the countdown (`DueCountdown`), the checklist count, and the priority flag with its word (`TaskPriorityFlag`, §1.4b) on the right. **No project line and no tag chips** — the drawer, the List and the filters carry both. | props `card: BoardCard`, `surface`, `moves: TaskTransition[]`, `canMoveUp`, `canMoveDown` (these three only decide whether the card is draggable), `dragging`, `busy` · emits `drag-start(event)`, `drag-end`, `open` | Only from `TaskBoard`. It prints **no comment or attachment count** — a zero for a number the server never sent is a lie on every card. Names live in each avatar's tooltip and `aria-label`; the priority word is printed beside the flag. **The countdown** is `lib/dueCountdown.ts` (pure TS, cases in `tests/fixtures/due-countdown-cases.json`, shared with the Pest agreement test): one unit, floored, never `0` — a date-only due date ends at 00:00 of the next day in `page.props.app.timezone`, never the browser's zone. `DueCountdown.vue` is the **only** reader of `lib/minuteTicker.ts` (one module timer, minute-aligned, paused while the tab is hidden), so a tick never re-renders a card. **There is no keyboard move on the card**: without a mouse, status changes from the drawer's status control, and order inside a lane has no keyboard path; the title is a `Link` with `draggable="false"`, or the anchor drags its own href instead of the card. |
 | `Tasks/TaskCalendar.vue` | The month grid, drawn from the window the payload names, with one bar per `span`. | props `calendar: CalendarPayload`, `canPlan: boolean`, `surface`, `filters`, `statuses`, `priorities`, `projects`, `tags`, `employees?`, `searchPlaceholder`, `emptyTitle`, `emptyDescription` · exports `CalendarPayload`, `CalendarTask`, `CalendarSpan`, `CalendarWindow`, `toDay`, `fromDay`, `addDays`, `weekdayIndex` | The Calendar pages. It **never recomputes a span**: `visible_start`/`visible_end` arrive clipped and `continues_before`/`continues_after` say which edge it runs off, drawn as a squared edge plus a chevron — and a bar that merely carries into the next week row gets the same treatment, so the two read alike. Lanes are packed greedily in the order the payload already sorted for it. `unscheduled_count` is printed rather than dropped. Month arrows write `date_from`/`date_to` into the URL. **Date handles are live only when `can_plan`** — the same `TaskService::mayPlan()` answer that makes the fields `prohibited` in `UpdateTaskRequest` — and are drawn visibly disabled otherwise, with the reason under the grid. Nothing moves optimistically here: the bar dims until the server answers. **A bar prints its status word after the title** (`· In review`), sharing the title's truncation — `statusToneClass` gives it a `StatusBadge`'s fill and §4.2's rule for that class is that whatever takes it still says the word. The Phase 2 close-out found the bars tinted and wordless, which under §1.4's ΔE 0.16 deutan pair is a rectangle that says nothing; the `aria-label` already carried title, status and range and still does. On a one-day bar at 360 px the pair truncates, so the word is a wide-bar affordance and the `aria-label` is the guarantee. |
 

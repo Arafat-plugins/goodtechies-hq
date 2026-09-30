@@ -1423,9 +1423,13 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 <!--
                     Messaging polish: the composer is ONE pill (DESIGN.md §1.7b) — Attach, the
                     textarea, the mic and "@ Mentions" inside it, and Send joined to its right end
-                    as a `--primary` segment. The textarea has no border or ring of its own; the
-                    focus ring is painted on the pill, opaque as always. Below `sm` the words go
-                    and the icons stay, each keeping its accessible name.
+                    as a `--primary` segment. The textarea has no border or ring of its own; its
+                    focus indicator is painted on the pill. Since 2026-09-29 (decision 12-70)
+                    that indicator is the pill's 1 px border turning `--ring` (opaque, 3.54:1 on
+                    the canvas, 3.61:1 on a card) with NO `ring-3` spread — the client read the
+                    3 px halo as "a big border" on every click. The one exception to the ring rule;
+                    every other input keeps its ring. Below `sm` the words go and the icons stay,
+                    each keeping its accessible name.
 
                     `VoiceRecorder` has two roots: its strip (`order-first basis-full`) takes a
                     line of its own at the top of the pill while a clip is in hand, and the mic
@@ -1436,7 +1440,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     :class="
                         cn(
                             'flex min-w-0 items-stretch rounded-3xl border border-input bg-card shadow-flat transition-[color,box-shadow]',
-                            'has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-3 has-[textarea:focus-visible]:ring-ring',
+                            'has-[textarea:focus-visible]:border-ring',
                             fieldError && 'border-destructive',
                         )
                     "

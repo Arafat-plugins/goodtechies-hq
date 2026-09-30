@@ -463,7 +463,7 @@ const handleTitle = computed(() =>
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-4">
+    <div class="flex min-w-0 flex-col gap-3">
         <TaskFilterBar
             ref="filterBar"
             :filters="filters"
@@ -549,7 +549,7 @@ const handleTitle = computed(() =>
             than a second layout that would have to be kept in step with this one. The page
             itself does not scroll sideways.
         -->
-        <div class="-mx-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6" :aria-busy="busyId !== null || undefined">
+        <div class="-mx-4 overflow-x-auto px-4 pb-2" :aria-busy="busyId !== null || undefined">
             <div class="min-w-2xl overflow-hidden rounded-xl border bg-card shadow-raised">
                 <div class="grid grid-cols-7 border-b bg-muted">
                     <div

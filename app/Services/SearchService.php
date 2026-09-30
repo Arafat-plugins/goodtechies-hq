@@ -140,9 +140,15 @@ class SearchService
     /**
      * Everything this person can find for this term, grouped by type.
      *
+     * `$types` narrows the search to those types (the palette's per-section scope, brief 010);
+     * null searches every type. It only decides which of the per-type methods below RUN — each
+     * one that runs is scoped exactly as it always was, the caps are unchanged, and the groups
+     * still come back in `inDisplayOrder()`, never in the order they were asked for.
+     *
+     * @param  list<SearchableType>|null  $types
      * @return array{term: string, total: int, truncated: bool, groups: list<array{type: string, label: string, hits: list<SearchHit>}>}
      */
-    public function search(User $user, string $term): array
+    public function search(User $user, string $term, ?array $types = null): array
     {
         $term = trim($term);
         $empty = ['term' => $term, 'total' => 0, 'truncated' => false, 'groups' => []];
@@ -174,6 +180,10 @@ class SearchService
         $truncated = false;
 
         foreach (SearchableType::inDisplayOrder() as $type) {
+            if ($types !== null && ! in_array($type, $types, true)) {
+                continue;
+            }
+
             if ($total >= self::OVERALL) {
                 $truncated = true;
 

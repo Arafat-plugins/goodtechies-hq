@@ -2,7 +2,8 @@
 import { X } from '@lucide/vue';
 
 /**
- * One active filter: `Label: value ×`.
+ * One active filter: `Label: value ×` — or `Label ×` for a yes/no filter, whose `value` is
+ * empty (FilterBar's `toggle` kind): the label then reads as the value, in full weight.
  *
  * Two buttons side by side rather than a button inside a button — the body reopens the
  * value picker, the × removes the filter, and each has its own accessible name.
@@ -22,11 +23,16 @@ const emit = defineEmits<{ edit: []; remove: [] }>();
         <button
             type="button"
             class="flex min-w-0 items-center gap-1 rounded-l-full py-1 pr-1 pl-3 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
-            :aria-label="`Change the ${props.label} filter, currently ${props.value}`"
+            :aria-label="
+                props.value === '' ? `Change the ${props.label} filter` : `Change the ${props.label} filter, currently ${props.value}`
+            "
             @click="emit('edit')"
         >
-            <span class="shrink-0 text-muted-foreground">{{ label }}</span>
-            <span class="truncate font-medium">{{ value }}</span>
+            <span v-if="value === ''" class="truncate font-medium">{{ label }}</span>
+            <template v-else>
+                <span class="shrink-0 text-muted-foreground">{{ label }}</span>
+                <span class="truncate font-medium">{{ value }}</span>
+            </template>
         </button>
         <button
             type="button"

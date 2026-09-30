@@ -80,7 +80,7 @@ function openTask(taskId: number): void {
 <template>
     <Head title="Tasks — Board" />
 
-    <PageShell title="Tasks" title-hidden>
+    <PageShell title="Tasks" title-hidden bleed>
         <TaskBoard
             :board="board"
             :transitions="transitions"

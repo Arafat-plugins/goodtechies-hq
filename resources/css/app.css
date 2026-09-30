@@ -31,9 +31,14 @@
 
     /* ── Neutral ramp — hue 260.6 (the logo ink's hue), chroma 0.006 ────────
      * 0.985 / 0.97 / 0.922 / 0.70 / 0.52 / 0.30. No neutral sits at the old
-     * hues 223 / 237 / 250; the greys are family with the mark. */
-    --background: oklch(0.985 0.006 260.6);         /* #F8FAFE */
-    --foreground: oklch(0.30 0.006 260.6);          /* #2C2E31 — 13.06:1 on background */
+     * hues 223 / 237 / 250; the greys are family with the mark.
+     *
+     * The canvas was 0.985 / 0.006 (#F8FAFE, = --sidebar) until 2026-09-29, when the client asked
+     * for "more white". It sits just under --card's pure white (1.02:1), not on it: a card keeps
+     * its hairline and --elevation-raised, so it still reads as a panel above the canvas. Chroma
+     * 0.002 is what lands on #FCFDFE; the rest of the ramp keeps 0.006. */
+    --background: oklch(0.993 0.002 260.6);         /* #FCFDFE (was #F8FAFE) */
+    --foreground: oklch(0.30 0.006 260.6);          /* #2C2E31 — 13.37:1 on background */
     --card: oklch(1 0 0);                           /* #FFFFFF — one step above the canvas */
     --card-foreground: oklch(0.30 0.006 260.6);     /* #2C2E31 */
     --popover: oklch(1 0 0);                        /* #FFFFFF */
@@ -41,7 +46,7 @@
     --secondary: oklch(0.97 0.006 260.6);           /* #F3F5F9 */
     --secondary-foreground: oklch(0.30 0.006 260.6);/* #2C2E31 */
     --muted: oklch(0.97 0.006 260.6);               /* #F3F5F9 */
-    --muted-foreground: oklch(0.52 0.006 260.6);    /* #67696C — 5.28:1 on background */
+    --muted-foreground: oklch(0.52 0.006 260.6);    /* #67696C — 5.41:1 on background */
     --accent: oklch(0.97 0.006 260.6);              /* #F3F5F9 */
     --accent-foreground: oklch(0.30 0.006 260.6);   /* #2C2E31 */
     --border: oklch(0.922 0.006 260.6);             /* #E3E5E9 — hairline */
@@ -49,7 +54,7 @@
 
     /* ── Semantic ──────────────────────────────────────────────────────────*/
     --primary: oklch(0.56 0.205 34.4);              /* #D12D00 — 5.13:1 on card */
-    --primary-hover: oklch(0.50 0.205 34.4);        /* #BC0A00 — 6.34:1 on background */
+    --primary-hover: oklch(0.50 0.205 34.4);        /* #BC0A00 — 6.48:1 on background */
     --primary-foreground: oklch(0.99 0 0);          /* #FCFCFC — 4.99:1 on primary */
     --destructive: oklch(0.577 0.245 27.325);       /* #E7000B — shadcn default, unchanged */
     --ring: var(--brand);                           /* #F04E27 — focus ring is brand, painted opaque */
@@ -205,7 +210,11 @@
         0 1px 3px 0 oklch(0 0 0 / 0.06);            /* cards, panels */
     --elevation-overlay:
         0 10px 15px -3px oklch(0 0 0 / 0.10),
-        0 4px 6px -4px oklch(0 0 0 / 0.10);         /* dialog, popover, drawer, command */
+        0 4px 6px -4px oklch(0 0 0 / 0.10),
+        0 0 8px 0 oklch(0 0 0 / 0.06);              /* dialog, popover, drawer, command */
+    /* The third, all-round layer arrived 2026-09-29 with "overlay panels carry no border": the
+     * first two only fall below a panel, so a borderless white menu on a white card had no side
+     * edges at all. It is a blur, not a hairline — nothing is drawn at 0 px. */
 }
 
 .dark {
@@ -344,7 +353,8 @@
         0 1px 3px 0 oklch(0 0 0 / 0.36);
     --elevation-overlay:
         0 10px 15px -3px oklch(0 0 0 / 0.50),
-        0 4px 6px -4px oklch(0 0 0 / 0.50);
+        0 4px 6px -4px oklch(0 0 0 / 0.50),
+        0 0 12px 0 oklch(0 0 0 / 0.45);             /* all-round: --popover = --card in dark */
 }
 
 @theme inline {
@@ -461,7 +471,8 @@
  * behind it and measures 1.90:1 on the canvas, 1.93:1 on a card and 1.87:1 on --muted in light
  * mode (2.44 / 2.42 / 2.31 in dark). WCAG 2.2 §1.4.11 wants 3:1 for a focus indicator, so every
  * one of those was a failure, and DESIGN.md §2.2 recorded the ring measured opaque and marked it
- * ✅ for eleven phases. At full opacity the same token is 3.45 / 3.61 / 3.30 light and
+ * ✅ for eleven phases. At full opacity the same token is 3.45 / 3.61 / 3.30 light (3.54 on the
+ * canvas since it went to #FCFDFE on 2026-09-29) and
  * 6.75 / 6.15 / 5.39 dark. The arithmetic is in tests/Unit/FocusRingContrastTest.php, which
  * parses the oklch values out of THIS file and fails under 3:1 — a table nobody recomputes is
  * how this was wrong for so long.
@@ -529,4 +540,59 @@
     body {
         @apply bg-background text-foreground font-sans antialiased;
     }
+}
+
+/*
+ * Overlay panels carry no border; elevation only (2026-09-29, DESIGN.md §1.5).
+ *
+ * The client asked for the border to go from "every dropdown/hover". The panels are generated
+ * shadcn-vue files (`Components/ui/*`), which are not hand-edited, so the rule lives here and is
+ * keyed on each primitive's own `data-slot`. It is deliberately OUTSIDE `@layer`: unlayered CSS
+ * outranks every Tailwind utility, so the generated `border` class cannot win it back. Each panel
+ * keeps `shadow-overlay` (`--elevation-overlay`), which is what separates it now — in dark too,
+ * where it is 50 % black. Separators and header rules INSIDE a panel (`border-b`, `border-t`,
+ * `*Separator`) are on other elements and stay. A bespoke overlay that is not a generated file
+ * (`Messages/MentionPicker.vue`, `Shell/GlobalSearch.vue`) drops its border at the call site.
+ */
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="select-content"],
+[data-slot="popover-content"],
+[data-slot="hover-card-content"],
+[data-slot="tooltip-content"],
+[data-slot="combobox-list"] {
+    border-width: 0;
+}
+
+/*
+ * A menu item's inset ring is the KEYBOARD's indicator (DESIGN.md §2.2), but reka highlights an
+ * item for the pointer too, so every mouse hover painted a 2 px orange frame round the row, and a
+ * Select opened by a click framed its selected row the same way — the "border on hover" the
+ * client saw. Two cases drop the ring and leave `bg-accent` alone to mark the row:
+ *   - the row under the pointer (`:hover`), whatever the modality;
+ *   - any highlighted row while the last press was a pointer (`lib/inputModality.ts` writes
+ *     `data-input-modality` on <html>). Chromium reports the click-opened Select's row as
+ *     `:focus-visible` (script focus from <body>), so `:focus-visible` cannot tell these apart.
+ * The first key pressed flips the modality back, so arrowing through any menu still rings the
+ * row the keyboard is on (3.30:1 / 5.39:1). Before the helper runs the attribute is absent and
+ * the ring shows as before. Only `--tw-ring-shadow` is cleared; nothing else composed into
+ * `box-shadow` is touched.
+ */
+[data-slot="dropdown-menu-item"]:hover,
+[data-slot="dropdown-menu-checkbox-item"]:hover,
+[data-slot="dropdown-menu-radio-item"]:hover,
+[data-slot="dropdown-menu-sub-trigger"]:hover,
+[data-slot="select-item"]:hover,
+[data-slot="command-item"]:hover,
+[data-slot="combobox-item"]:hover,
+:root[data-input-modality="pointer"] :is(
+    [data-slot="dropdown-menu-item"],
+    [data-slot="dropdown-menu-checkbox-item"],
+    [data-slot="dropdown-menu-radio-item"],
+    [data-slot="dropdown-menu-sub-trigger"],
+    [data-slot="select-item"],
+    [data-slot="command-item"],
+    [data-slot="combobox-item"]
+) {
+    --tw-ring-shadow: 0 0 #0000;
 }

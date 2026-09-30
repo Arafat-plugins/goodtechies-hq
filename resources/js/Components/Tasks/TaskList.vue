@@ -377,7 +377,7 @@ useLiveTaskProps(['tasks']);
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-4">
+    <div class="flex min-w-0 flex-col gap-3">
         <TaskFilterBar
             ref="filterBar"
             :filters="filters"

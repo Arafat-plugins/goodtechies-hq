@@ -40,7 +40,7 @@ useFlashAsToast();
 <template>
     <Head title="My Tasks — Gantt" />
 
-    <PageShell title="Tasks" title-hidden>
+    <PageShell title="Tasks" title-hidden bleed>
         <TaskGantt
             :gantt="gantt"
             :can-plan="can_plan"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { router } from '@inertiajs/vue3';
+import { router, usePage } from '@inertiajs/vue3';
 import {
     ArrowDownLeft,
     ArrowUpRight,
@@ -19,6 +19,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Button } from '@/Components/ui/button';
 import { Command, CommandGroup, CommandItem, CommandList } from '@/Components/ui/command';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/Components/ui/dialog';
+import { searchScopeFor, searchUrl } from '@/lib/searchScope';
 import { cn } from '@/lib/utils';
 import type { NavGroup } from '@/navigation/types';
 import { liveGroups } from '@/navigation/types';
@@ -60,6 +61,17 @@ import { liveGroups } from '@/navigation/types';
  * What the entity rows DO add is an announcement: results arrive asynchronously, so a list
  * that changed silently under a typing screen-reader user would be unusable. See
  * `liveMessage`.
+ *
+ * ## Records are searched in the current section only (brief 010)
+ *
+ * The client's rule: the search looks only inside the tab the person is in, and across the
+ * whole app only on a Dashboard. `lib/searchScope.ts` maps the current page to the types to
+ * ask for (Tasks → `task`, Projects → `project`, …; a Dashboard, or a page with no searchable
+ * type of its own, → everything) and the request carries them as `type=`. The placeholder, the
+ * trigger and a scope label inside the palette all name the scope, so a search that finds no
+ * project on the Tasks board never reads as "there is no such project". There is deliberately
+ * no "search everything" switch here — the Dashboard is where that lives. The nav rows are
+ * unchanged: jumping to a page is navigation, not a record search.
  */
 
 const props = defineProps<{
@@ -80,6 +92,23 @@ interface PaletteGroup {
 
 const open = ref(false);
 const query = ref('');
+
+const page = usePage();
+
+/** Which records this page searches — see `lib/searchScope.ts`. */
+const scope = computed(() => searchScopeFor(page.url));
+
+/** `Search tasks…`, or `Search everything…` on a Dashboard. */
+const placeholder = computed(() => `Search ${scope.value.noun}…`);
+
+/** The trigger names a section scope; on a Dashboard it stays a plain `Search`. */
+const triggerText = computed(() => (scope.value.types === null ? 'Search' : `Search ${scope.value.noun}`));
+
+/** What the record half of the palette looks in: `tasks`, or `records` when it is everything. */
+const recordNoun = computed(() => (scope.value.types === null ? 'records' : scope.value.noun));
+
+/** The label inside the palette: `Tasks only`, or `Everything`. */
+const scopeLabel = computed(() => (scope.value.types === null ? scope.value.label : `${scope.value.label} only`));
 const trigger = ref<ComponentPublicInstance | null>(null);
 
 /** Every navigable row for this role, in nav order. */
@@ -271,7 +300,7 @@ async function fetchEntities(term: string): Promise<void> {
     failed.value = false;
 
     try {
-        const response = await fetch(`/search?q=${encodeURIComponent(term)}`, {
+        const response = await fetch(searchUrl(term, scope.value), {
             headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin',
             signal: controller.signal,
@@ -464,8 +493,8 @@ function focusTrigger(): void {
         @click="open = true"
     >
         <Search class="size-4 shrink-0" aria-hidden="true" />
-        <span class="hidden md:inline">Search</span>
-        <span class="sr-only md:hidden">Search</span>
+        <span class="hidden truncate md:inline">{{ triggerText }}</span>
+        <span class="sr-only md:hidden">{{ triggerText }}</span>
         <kbd
             class="ml-auto hidden select-none rounded border bg-muted px-1.5 py-0.5 font-mono text-xs font-medium md:inline-block"
         >
@@ -475,7 +504,7 @@ function focusTrigger(): void {
 
     <Dialog v-model:open="open">
         <DialogContent
-            class="overflow-hidden p-0 sm:max-w-xl"
+            class="overflow-hidden border-0 p-0 sm:max-w-xl"
             :show-close-button="false"
             @close-auto-focus="
                 (event: Event) => {
@@ -486,7 +515,9 @@ function focusTrigger(): void {
         >
             <DialogHeader class="sr-only">
                 <DialogTitle>Search</DialogTitle>
-                <DialogDescription>Jump to any page you can open.</DialogDescription>
+                <DialogDescription>
+                    Jump to any page you can open. Records searched: {{ scopeLabel }}.
+                </DialogDescription>
             </DialogHeader>
             <Command class="rounded-none">
                 <div class="flex h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -494,10 +525,22 @@ function focusTrigger(): void {
                     <ListboxFilter
                         v-model="query"
                         auto-focus
-                        aria-label="Search pages"
-                        placeholder="Search pages…"
-                        class="h-9 w-full rounded-md bg-transparent text-sm outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring"
+                        :aria-label="`Search pages and ${recordNoun}`"
+                        :placeholder="placeholder"
+                        class="h-9 min-w-0 flex-1 rounded-md bg-transparent text-sm outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring"
                     />
+                    <!--
+                        The scope, visibly: which records this palette is looking in. The
+                        dialog's description carries the same words for a screen reader, so
+                        this copy is `aria-hidden` rather than read twice.
+                    -->
+                    <span
+                        class="shrink-0 select-none rounded border bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground"
+                        data-search-scope
+                        aria-hidden="true"
+                    >
+                        {{ scopeLabel }}
+                    </span>
                 </div>
                 <CommandList class="max-h-80">
                     <!-- Phase 2: the viewer's recent pages. -->
@@ -614,7 +657,7 @@ function focusTrigger(): void {
                         v-else-if="resultCount === 0"
                         class="px-3 py-6 text-center text-sm text-muted-foreground"
                     >
-                        Type to search pages and records.
+                        Type to search pages and {{ recordNoun }}.
                     </p>
                 </CommandList>
                 <!--

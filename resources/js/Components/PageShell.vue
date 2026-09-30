@@ -9,6 +9,7 @@ import {
     BreadcrumbPage,
     BreadcrumbSeparator,
 } from '@/Components/ui/breadcrumb';
+import { cn } from '@/lib/utils';
 
 export interface Crumb {
     label: string;
@@ -30,6 +31,13 @@ const props = defineProps<{
      * no `actions` slot. For a screen whose own toolbar is its head (the Tasks views).
      */
     titleHidden?: boolean;
+    /**
+     * A working surface rather than a document: the shell's `<main>` drops its max width and
+     * narrows its gutters to 16 px with a 12 px top band (the layouts read `data-page-bleed`
+     * with `has-[…]`), and the page's own rhythm tightens to `gap-3`. Opt-in, so every other
+     * page keeps the standard padding. The four Tasks views use it (brief 008).
+     */
+    bleed?: boolean;
 }>();
 
 /* The greeting reads the browser clock; `today` comes from the server as 'YYYY-MM-DD'. */
@@ -59,7 +67,7 @@ const crumbs = computed<Crumb[]>(() => props.breadcrumb ?? []);
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-6">
+    <div :class="cn('flex min-w-0 flex-col', bleed ? 'gap-3' : 'gap-6')" :data-page-bleed="bleed || undefined">
         <!-- Absolutely positioned by `sr-only`, so it is not a flex item and adds no gap. -->
         <h1 v-if="titleHidden" class="sr-only">{{ heading }}</h1>
 
@@ -94,7 +102,7 @@ const crumbs = computed<Crumb[]>(() => props.breadcrumb ?? []);
             </div>
         </div>
 
-        <div class="flex min-w-0 flex-col gap-6">
+        <div :class="cn('flex min-w-0 flex-col', bleed ? 'gap-3' : 'gap-6')">
             <slot />
         </div>
     </div>

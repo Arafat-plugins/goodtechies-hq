@@ -52,7 +52,7 @@ class SearchController extends Controller
      */
     public function index(SearchRequest $request): JsonResponse
     {
-        $results = $this->search->search($request->user(), $request->term());
+        $results = $this->search->search($request->user(), $request->term(), $request->types());
 
         return response()->json([
             'term' => $results['term'],

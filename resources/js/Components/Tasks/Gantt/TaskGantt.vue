@@ -514,7 +514,7 @@ function projectLabel(row: GanttRow): string {
 </script>
 
 <template>
-    <div class="flex min-w-0 flex-col gap-4">
+    <div class="flex min-w-0 flex-col gap-3">
         <TaskFilterBar
             ref="filterBar"
             :filters="filters"
@@ -552,7 +552,7 @@ function projectLabel(row: GanttRow): string {
             </p>
         </div>
 
-        <div class="hidden min-w-0 flex-col gap-4 md:flex">
+        <div class="hidden min-w-0 flex-col gap-3 md:flex">
             <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
                     <Button

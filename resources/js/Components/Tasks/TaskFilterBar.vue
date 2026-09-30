@@ -3,8 +3,9 @@ import type { TaskFilters } from '@/Components/Tasks/TaskList.vue';
 
 /**
  * The toolbar every Tasks view wears — List, Board, Calendar and Gantt: `#leading` (the page's
- * view switcher) and the scope dropdown on the left; Overdue only, Show archived, Manage tags,
- * Add filter and `#trailing` (the page's New task) on the right. There is no search box: the
+ * view switcher) and the scope dropdown on the left; Manage tags, Add filter and `#trailing`
+ * (the page's New task) on the right. Overdue only and Show archived are yes/no entries in
+ * *Add filter* (FilterBar's `toggle` kind) and removable chips once set, like every other filter. There is no search box: the
  * top bar's Ctrl K is the search, and the server still reads `search` from a URL.
  *
  * It exists because there are now three screens reading one `TaskService::filters()`, and a
@@ -50,8 +51,6 @@ import FilterBar from '@/Components/FilterBar.vue';
 import TagManagerDialog from '@/Components/Tags/TagManagerDialog.vue';
 import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
 import { Button } from '@/Components/ui/button';
-import { Checkbox } from '@/Components/ui/checkbox';
-import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { pushQuery, resetQuery } from '@/lib/tableState';
 
@@ -139,6 +138,15 @@ const filterDefs = computed<FilterDef[]>(() => {
         defs.push({ key: 'bucket', label: 'Bucket', kind: 'select', options: props.buckets });
     }
 
+    /*
+     * The two yes/no filters close the list. Same parameters as the checkboxes they replace
+     * (`overdue=1`, `archived=1`), so the server and every existing link read them unchanged.
+     */
+    defs.push(
+        { key: 'overdue', label: 'Overdue only', kind: 'toggle' },
+        { key: 'archived', label: 'Show archived', kind: 'toggle' },
+    );
+
     return defs;
 });
 
@@ -163,6 +171,9 @@ const SCOPES: { value: string; label: string }[] = [
  */
 const appliedFilters = computed<Record<string, string | null>>(() => ({
     bucket: props.filters.scope === 'due-today' || props.filters.scope === 'overdue' ? null : props.filters.bucket,
+    // What the server applied, so a stray `?overdue=0` never draws a chip.
+    overdue: props.filters.overdue ? '1' : null,
+    archived: props.filters.archived ? '1' : null,
 }));
 
 const scopeValue = computed(() => SCOPES.find((option) => option.value === props.filters.scope)?.value ?? 'all');
@@ -213,7 +224,6 @@ const tagBase = computed(() => `/${page.props.auth.user?.surface ?? 'admin'}/tag
     <FilterBar
         :search="filters.search"
         :filters="filterDefs"
-        :extra-active="filters.overdue || filters.archived"
         :placeholder="placeholder"
         :input-id="`${idPrefix}-search`"
         :searchable="false"
@@ -236,23 +246,6 @@ const tagBase = computed(() => `/${page.props.auth.user?.surface ?? 'admin'}/tag
         </template>
 
         <template #extra>
-            <div class="flex h-9 items-center gap-2">
-                <Checkbox
-                    :id="`${idPrefix}-overdue`"
-                    :model-value="filters.overdue"
-                    @update:model-value="(checked) => pushQuery({ overdue: checked === true })"
-                />
-                <Label :for="`${idPrefix}-overdue`" class="font-normal whitespace-nowrap">Overdue only</Label>
-            </div>
-            <div class="flex h-9 items-center gap-2">
-                <Checkbox
-                    :id="`${idPrefix}-archived`"
-                    :model-value="filters.archived"
-                    @update:model-value="(checked) => pushQuery({ archived: checked === true })"
-                />
-                <Label :for="`${idPrefix}-archived`" class="font-normal whitespace-nowrap">Show archived</Label>
-            </div>
-
             <template v-if="canManageTags">
                 <Button
                     type="button"

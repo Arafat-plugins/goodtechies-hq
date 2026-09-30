@@ -37,7 +37,7 @@ useFlashAsToast();
 <template>
     <Head title="My Tasks — Calendar" />
 
-    <PageShell title="Tasks" title-hidden>
+    <PageShell title="Tasks" title-hidden bleed>
         <TaskCalendar
             :calendar="calendar"
             :can-plan="can_plan"

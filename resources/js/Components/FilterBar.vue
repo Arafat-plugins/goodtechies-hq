@@ -1,6 +1,12 @@
 <script lang="ts">
-/** How a filter's value is picked, and how it lands in the query string. */
-export type FilterKind = 'select' | 'multi-select' | 'date-range';
+/**
+ * How a filter's value is picked, and how it lands in the query string.
+ *
+ * `toggle` is a yes/no filter picked straight from the *Add filter* list (no second level):
+ * set, it writes `<key>=1` and shows a chip that carries only its label; removed, the key
+ * leaves the URL. Opt-in — no screen offered one before the Tasks toolbar (brief 008).
+ */
+export type FilterKind = 'select' | 'multi-select' | 'date-range' | 'toggle';
 
 export interface FilterOption {
     value: string;
@@ -186,6 +192,10 @@ function rawValue(def: FilterDef): string[] {
         return [];
     }
 
+    if (def.kind === 'toggle') {
+        return raw === '0' || raw === 'false' ? [] : ['1'];
+    }
+
     return def.kind === 'multi-select' ? raw.split(',').filter(Boolean) : [raw];
 }
 
@@ -208,6 +218,10 @@ function readableDate(value: string): string {
 /** What the chip shows after the label. */
 function chipValue(def: FilterDef): string {
     const values = rawValue(def);
+
+    if (def.kind === 'toggle') {
+        return '';
+    }
 
     if (def.kind === 'date-range') {
         const [from, to] = values;
@@ -250,6 +264,17 @@ function setValue(def: FilterDef, values: string[]): void {
 
 function remove(def: FilterDef): void {
     setValue(def, []);
+}
+
+/** A `toggle` flips from the filter list itself and closes it, like picking a single value. */
+function toggle(def: FilterDef): void {
+    setValue(def, isSet(def) ? [] : ['1']);
+    close();
+}
+
+/** A chip's body reopens its picker; a toggle has none, so it reopens the filter list. */
+function edit(def: FilterDef): void {
+    openPicker(def.kind === 'toggle' ? null : def.key);
 }
 
 function choose(def: FilterDef, value: string): void {
@@ -353,13 +378,24 @@ function isChosen(def: FilterDef, value: string): boolean {
                                     :key="def.key"
                                     :value="def.key"
                                     class="justify-between"
-                                    @select="openPicker(def.key)"
+                                    :aria-checked="def.kind === 'toggle' ? isSet(def) : undefined"
+                                    @select="def.kind === 'toggle' ? toggle(def) : openPicker(def.key)"
                                 >
                                     <span class="flex items-center gap-2">
                                         <Filter class="size-3.5 text-muted-foreground" aria-hidden="true" />
                                         {{ def.label }}
                                     </span>
-                                    <span v-if="isSet(def)" class="truncate text-xs text-muted-foreground">
+                                    <span
+                                        v-if="def.kind === 'toggle'"
+                                        :class="
+                                            cn(
+                                                'size-4 shrink-0 rounded-[4px] border',
+                                                isSet(def) ? 'border-primary bg-primary' : 'border-input',
+                                            )
+                                        "
+                                        aria-hidden="true"
+                                    />
+                                    <span v-else-if="isSet(def)" class="truncate text-xs text-muted-foreground">
                                         {{ chipValue(def) }}
                                     </span>
                                 </CommandItem>
@@ -481,7 +517,7 @@ function isChosen(def: FilterDef, value: string): boolean {
                 :key="def.key"
                 :label="def.label"
                 :value="chipValue(def)"
-                @edit="openPicker(def.key)"
+                @edit="edit(def)"
                 @remove="remove(def)"
             />
 

@@ -500,7 +500,7 @@ watch(isPanning, (panning) => {
 </script>
 
 <template>
-    <div ref="root" class="flex min-w-0 flex-col gap-4">
+    <div ref="root" class="flex min-w-0 flex-col gap-3">
         <TaskFilterBar
             ref="filterBar"
             :filters="filters"
@@ -553,21 +553,26 @@ watch(isPanning, (panning) => {
             The board scrolls sideways on purpose; the page does not. The negative margin lets
             a column reach the screen edge at 360 instead of stopping at the layout's gutter,
             and the padding puts the gutter back inside the scroller so the first and last
-            column are not flush against the glass.
+            column are not flush against the glass. The margin matches the 16 px gutter the
+            Tasks pages ask the shell for (`PageShell bleed`) at every width.
+
+            The row is `w-fit min-w-full` and each lane `min-w-72 flex-1`: lanes never drop
+            below 18 rem (the strip scrolls instead), and when the screen has room to spare they
+            share it rather than leaving a blank band at the right.
         -->
         <div
             v-else
             ref="strip"
             :class="
                 cn(
-                    '-mx-4 cursor-grab overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6',
+                    '-mx-4 cursor-grab overflow-x-auto px-4 pb-2',
                     isPanning && 'cursor-grabbing select-none **:cursor-grabbing',
                 )
             "
             :style="{ minHeight: stripMinHeight }"
             :aria-busy="busyId !== null || undefined"
         >
-            <div class="flex min-w-max snap-x snap-proximity items-start gap-4">
+            <div class="flex w-fit min-w-full snap-x snap-proximity items-start gap-3">
                 <section
                     v-for="column in local"
                     :key="column.key"
@@ -575,7 +580,7 @@ watch(isPanning, (panning) => {
                     :aria-labelledby="`${surface}-col-${column.key}`"
                     :class="
                         cn(
-                            'flex w-72 shrink-0 snap-start flex-col gap-3 rounded-xl bg-muted p-3 transition-opacity',
+                            'flex min-w-72 flex-1 snap-start flex-col gap-3 rounded-xl bg-muted p-3 transition-opacity',
                             // A column this role can never drop into says so while a card is
                             // held, rather than taking the drop and undoing it afterwards.
                             drag !== null && !acceptsDrag(column.key) && 'opacity-40',
