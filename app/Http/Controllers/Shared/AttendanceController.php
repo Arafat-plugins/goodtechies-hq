@@ -167,6 +167,15 @@ class AttendanceController extends Controller
 
         $out = $record->clock_out !== null;
 
+        // A clock-in on a closed day re-opens it (decision 12-74) and keeps the first clock-in,
+        // so "Clocked in at 09:00" at one o'clock would read as a mistake.
+        if (! $out && $record->wasChanged('clock_out')) {
+            return back()->with('success', sprintf(
+                'Day re-opened. You are clocked in again since %s.',
+                $record->clock_in?->format('H:i') ?? '—',
+            ));
+        }
+
         return back()->with('success', sprintf(
             '%s at %s. Today is %s.',
             $out ? 'Clocked out' : 'Clocked in',

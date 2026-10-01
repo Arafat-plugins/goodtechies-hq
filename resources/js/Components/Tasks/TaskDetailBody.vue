@@ -8,7 +8,6 @@ import { fileRoutes } from '@/Components/Files/files';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
 import TaskActivityPanel from '@/Components/Tasks/TaskActivityPanel.vue';
-import TaskChecklistPanel from '@/Components/Tasks/TaskChecklistPanel.vue';
 import TaskDependenciesPanel from '@/Components/Tasks/TaskDependenciesPanel.vue';
 import TaskDiscussionPanel from '@/Components/Tasks/TaskDiscussionPanel.vue';
 import TaskFieldsPanel from '@/Components/Tasks/TaskFieldsPanel.vue';
@@ -16,7 +15,6 @@ import TaskLinksPanel from '@/Components/Tasks/TaskLinksPanel.vue';
 import TaskPeoplePanel from '@/Components/Tasks/TaskPeoplePanel.vue';
 import TaskStatusActions from '@/Components/Tasks/TaskStatusActions.vue';
 import TaskSubtasksPanel from '@/Components/Tasks/TaskSubtasksPanel.vue';
-import TaskSummaryPanel from '@/Components/Tasks/TaskSummaryPanel.vue';
 import TimerWidget from '@/Components/Timer/TimerWidget.vue';
 import type {
     TaskActivityEntry,
@@ -182,8 +180,12 @@ function confirmDelete(): void {
         class="flex min-w-0 flex-col gap-6 [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:border-0 [&_[data-slot=card]]:bg-transparent [&_[data-slot=card]]:py-0 [&_[data-slot=card]]:shadow-flat [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-description]]:hidden [&_[data-slot=card-header]]:px-0 [&_[data-slot=card-title]]:font-semibold"
     >
         <!-- Where the task stands, and what it can do next. -->
-        <div class="flex min-w-0 flex-col gap-4">
-            <div class="flex min-w-0 flex-wrap items-center gap-2">
+        <!--
+            Brief 025: one line — the status, Archived, and the moves beside them. Overdue lives
+            beside the due date and the priority in its row, so neither is repeated up here.
+        -->
+        <div class="flex min-w-0 flex-col gap-2">
+            <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2" data-task-status-strip>
                 <StatusBadge :status="task.status_tone" :label="task.status_label" />
                 <span
                     v-if="task.is_archived"
@@ -191,13 +193,15 @@ function confirmDelete(): void {
                 >
                     Archived
                 </span>
-                <span
-                    v-if="task.is_overdue"
-                    class="rounded-full border px-2 py-0.5 text-xs font-medium text-destructive"
-                >
-                    Overdue
-                </span>
-                <span class="text-xs text-muted-foreground">{{ task.priority_label }} priority</span>
+                <div class="min-w-0">
+                    <TaskStatusActions
+                        :task="task"
+                        :surface="surface"
+                        :reviewers="reviewers"
+                        @settled="emit('settled')"
+                        @hand-off="handOff"
+                    />
+                </div>
             </div>
 
             <!--
@@ -247,149 +251,131 @@ function confirmDelete(): void {
                     {{ task.parent.title }}
                 </button>
             </p>
-
-            <TaskStatusActions
-                :task="task"
-                :surface="surface"
-                :reviewers="reviewers"
-                @settled="emit('settled')"
-                @hand-off="handOff"
-            />
         </div>
 
-        <div
-            :class="
-                cn(
-                    'grid min-w-0 gap-8',
-                    variant === 'page' && 'xl:grid-cols-3',
-                )
-            "
-        >
+        <!--
+            Brief 025: one column, on the page as in the drawer — the label | value rows and the
+            description, Links (compact, near the top), Subtasks, Attachments, Time, Activity
+            (collapsed), Manage, then Dependencies and the Discussion last, so the drawer's
+            pinned composer sits under the thread it writes to. The checklist and the work
+            summary are not drawn here; their data is untouched, and In review still asks for
+            the summary where `TaskStatusActions` asks for it.
+        -->
+        <div :class="cn('flex min-w-0 flex-col gap-6', variant === 'page' && 'max-w-4xl')">
+            <TaskFieldsPanel
+                :task="task"
+                :surface="surface"
+                :priorities="priorities"
+                :tags="tags"
+                :projects="projects"
+                @settled="emit('settled')"
+            >
+                <template #assignee>
+                    <TaskPeoplePanel
+                        ref="people"
+                        variant="row"
+                        :task="task"
+                        :surface="surface"
+                        :employees="employees"
+                        @settled="emit('settled')"
+                    />
+                </template>
+            </TaskFieldsPanel>
+
+            <TaskLinksPanel :task="task" :surface="surface" @settled="emit('settled')" />
+
+            <!-- A subtask has no subtasks (one level deep), so it has no panel either. -->
+            <TaskSubtasksPanel
+                v-if="(task.subtasks?.length ?? 0) > 0 || task.can_add_subtask"
+                :task="task"
+                :surface="surface"
+                :employees="employees"
+                @settled="emit('settled')"
+                @open="openTask"
+            />
+
             <!--
-                Brief 014: one column in the Asana order — the label | value rows and the
-                description, subtasks, checklist, attachments, then the conversation.
+                `canUpload` is the task's OWN server-resolved permission — the ability
+                `FileService::guardMayAttach()` asks for — never a role and never a surface.
+                `changed` is how the drawer learns to re-read. `compact` is the opt-in
+                heading-and-list look; the project and client Files tabs keep the card.
             -->
-            <div :class="cn('flex min-w-0 flex-col gap-8', variant === 'page' && 'xl:col-span-2')">
-                <TaskFieldsPanel
-                    :task="task"
-                    :surface="surface"
-                    :priorities="priorities"
-                    :tags="tags"
-                    :projects="projects"
-                    @settled="emit('settled')"
-                >
-                    <template #assignee>
-                        <TaskPeoplePanel
-                            ref="people"
-                            variant="row"
-                            :task="task"
-                            :surface="surface"
-                            :employees="employees"
-                            @settled="emit('settled')"
-                        />
-                    </template>
-                </TaskFieldsPanel>
+            <FilePanel
+                :routes="attachmentRoutes"
+                :can-upload="task.permissions.can_update"
+                title="Attachments"
+                compact
+                @changed="emit('settled')"
+            />
 
-                <!-- A subtask has no subtasks (one level deep), so it has no panel either. -->
-                <TaskSubtasksPanel
-                    v-if="(task.subtasks?.length ?? 0) > 0 || task.can_add_subtask"
-                    :task="task"
-                    :surface="surface"
-                    :employees="employees"
-                    @settled="emit('settled')"
-                    @open="openTask"
-                />
-                <TaskChecklistPanel :task="task" :surface="surface" @settled="emit('settled')" />
+            <!--
+                Phase 4. The tracked total and, for a remote employee, the full
+                `TimerControls`; watchers also see who is timing it. Brief 025: the task's
+                own ▶ / ⏸ / ⏹ (`TaskTimerButton`) is no longer here — it sits in the drawer
+                header and in the page's actions, for `permissions.can_track_time`.
+            -->
+            <TimerWidget
+                :task-id="task.id"
+                :tracked-seconds="task.tracked_seconds"
+                :my-timer="task.my_timer"
+                :can-track-task="task.permissions.can_track_time"
+                :running-timers="task.running_timers"
+                :task-button="false"
+                @settled="emit('settled')"
+            />
 
-                <!--
-                    `canUpload` is the task's OWN server-resolved permission — the ability
-                    `FileService::guardMayAttach()` asks for — never a role and never a surface.
-                    `changed` is how the drawer learns to re-read. `compact` is the opt-in
-                    heading-and-list look; the project and client Files tabs keep the card.
-                -->
-                <FilePanel
-                    :routes="attachmentRoutes"
-                    :can-upload="task.permissions.can_update"
-                    title="Attachments"
-                    compact
-                    @changed="emit('settled')"
-                />
+            <TaskActivityPanel :activity="activity" />
 
-                <TaskSummaryPanel :task="task" :surface="surface" @settled="emit('settled')" />
+            <p class="text-xs text-muted-foreground">
+                Created {{ formatDateTime(task.created_at) }}
+            </p>
 
-                <TaskDiscussionPanel
-                    :task="task"
-                    :surface="surface"
-                    :discussion="discussion"
-                    :composer-placement="variant === 'drawer' ? 'footer' : 'inline'"
-                    @settled="emit('settled')"
-                />
-            </div>
+            <Card v-if="task.permissions.can_archive || task.permissions.can_delete" class="min-w-0 gap-4">
+                <CardHeader>
+                    <CardTitle class="text-sm font-medium">Manage</CardTitle>
+                    <CardDescription>
+                        Archiving takes the task out of the active views and makes it read-only.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent class="flex flex-wrap items-center gap-2">
+                    <Button
+                        v-if="task.permissions.can_archive && (!task.is_archived || mayUnarchive)"
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        :disabled="archiving"
+                        @click="toggleArchive"
+                    >
+                        <component :is="task.is_archived ? ArchiveRestore : Archive" aria-hidden="true" />
+                        {{ task.is_archived ? 'Unarchive' : 'Archive' }}
+                    </Button>
+                    <Button
+                        v-if="task.permissions.can_delete"
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        @click="deleteOpen = true"
+                    >
+                        <Trash2 aria-hidden="true" />
+                        Delete
+                    </Button>
+                </CardContent>
+            </Card>
 
-            <div class="flex min-w-0 flex-col gap-8">
-                <TaskLinksPanel :task="task" :surface="surface" @settled="emit('settled')" />
-                <TaskDependenciesPanel
-                    :task="task"
-                    :surface="surface"
-                    :siblings="siblings"
-                    @settled="emit('settled')"
-                />
+            <TaskDependenciesPanel
+                :task="task"
+                :surface="surface"
+                :siblings="siblings"
+                @settled="emit('settled')"
+            />
 
-                <!--
-                    Phase 4. The timer, for whoever the SERVER says may run one — the widget
-                    asks `auth.user.canTrackTime` (`TimeEntryPolicy::track`) for the remote
-                    timer's full controls, and since flow F3 `permissions.can_track_time`
-                    (`TimeEntryPolicy::trackTask`) for everyone else's ▶ / ⏸ / ⏹. An Admin
-                    reading a task they are not on sees the total, who is timing it, and no
-                    buttons.
-                -->
-                <TimerWidget
-                    :task-id="task.id"
-                    :tracked-seconds="task.tracked_seconds"
-                    :my-timer="task.my_timer"
-                    :can-track-task="task.permissions.can_track_time"
-                    :running-timers="task.running_timers"
-                    @settled="emit('settled')"
-                />
-
-                <TaskActivityPanel :activity="activity" />
-
-                <p class="text-xs text-muted-foreground">
-                    Created {{ formatDateTime(task.created_at) }}
-                </p>
-
-                <Card v-if="task.permissions.can_archive || task.permissions.can_delete" class="min-w-0 gap-4">
-                    <CardHeader>
-                        <CardTitle class="text-sm font-medium">Manage</CardTitle>
-                        <CardDescription>
-                            Archiving takes the task out of the active views and makes it read-only.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent class="flex flex-wrap items-center gap-2">
-                        <Button
-                            v-if="task.permissions.can_archive && (!task.is_archived || mayUnarchive)"
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            :disabled="archiving"
-                            @click="toggleArchive"
-                        >
-                            <component :is="task.is_archived ? ArchiveRestore : Archive" aria-hidden="true" />
-                            {{ task.is_archived ? 'Unarchive' : 'Archive' }}
-                        </Button>
-                        <Button
-                            v-if="task.permissions.can_delete"
-                            type="button"
-                            size="sm"
-                            variant="destructive"
-                            @click="deleteOpen = true"
-                        >
-                            <Trash2 aria-hidden="true" />
-                            Delete
-                        </Button>
-                    </CardContent>
-                </Card>
-            </div>
+            <TaskDiscussionPanel
+                :task="task"
+                :surface="surface"
+                :discussion="discussion"
+                :composer-placement="variant === 'drawer' ? 'footer' : 'inline'"
+                @settled="emit('settled')"
+            />
         </div>
     </div>
 

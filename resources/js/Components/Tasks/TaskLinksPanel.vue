@@ -68,16 +68,16 @@ function remove(id: number): void {
 </script>
 
 <template>
-    <Card class="min-w-0 gap-4">
+    <Card class="min-w-0 gap-2" data-task-links>
         <CardHeader>
             <CardTitle class="text-sm font-medium">Links</CardTitle>
             <CardDescription>Where the work actually lives.</CardDescription>
         </CardHeader>
 
-        <CardContent class="flex min-w-0 flex-col gap-3">
+        <CardContent class="flex min-w-0 flex-col gap-2">
             <p v-if="task.links.length === 0" class="text-sm text-muted-foreground">No links yet.</p>
 
-            <ul v-else class="flex min-w-0 flex-col gap-2">
+            <ul v-else class="flex min-w-0 flex-col gap-1">
                 <li v-for="link in task.links" :key="link.id" class="flex min-w-0 items-start gap-2">
                     <ExternalLink class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                     <a
@@ -104,30 +104,30 @@ function remove(id: number): void {
                 </li>
             </ul>
 
-            <form v-if="editable" class="flex min-w-0 flex-col gap-2" novalidate @submit.prevent="add">
-                <div class="flex min-w-0 flex-col gap-2">
-                    <Label :for="`task-link-url-${task.id}`" class="text-xs text-muted-foreground">URL</Label>
-                    <Input
-                        :id="`task-link-url-${task.id}`"
-                        v-model="url"
-                        type="url"
-                        inputmode="url"
-                        placeholder="https://…"
-                        :disabled="adding"
-                    />
-                </div>
-                <div class="flex min-w-0 flex-col gap-2">
-                    <Label :for="`task-link-label-${task.id}`" class="text-xs text-muted-foreground">
-                        Label <span class="font-normal">(optional)</span>
-                    </Label>
-                    <Input :id="`task-link-label-${task.id}`" v-model="label" :disabled="adding" />
-                </div>
-                <div>
-                    <Button type="submit" size="sm" variant="outline" :disabled="adding || url.trim() === ''">
-                        <Plus aria-hidden="true" />
-                        Add link
-                    </Button>
-                </div>
+            <!-- Brief 025: one compact line — URL, optional label, Add — wrapping below `sm`. -->
+            <form v-if="editable" class="flex min-w-0 flex-wrap items-center gap-2" novalidate @submit.prevent="add">
+                <Label :for="`task-link-url-${task.id}`" class="sr-only">URL</Label>
+                <Input
+                    :id="`task-link-url-${task.id}`"
+                    v-model="url"
+                    type="url"
+                    inputmode="url"
+                    placeholder="https://…"
+                    class="h-8 min-w-0 flex-1 basis-40"
+                    :disabled="adding"
+                />
+                <Label :for="`task-link-label-${task.id}`" class="sr-only">Label (optional)</Label>
+                <Input
+                    :id="`task-link-label-${task.id}`"
+                    v-model="label"
+                    placeholder="Label (optional)"
+                    class="h-8 min-w-0 flex-1 basis-28 sm:max-w-40"
+                    :disabled="adding"
+                />
+                <Button type="submit" size="sm" variant="outline" :disabled="adding || url.trim() === ''">
+                    <Plus aria-hidden="true" />
+                    Add link
+                </Button>
             </form>
         </CardContent>
     </Card>

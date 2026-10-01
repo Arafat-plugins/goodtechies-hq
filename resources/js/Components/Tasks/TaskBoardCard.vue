@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { Clock, CornerDownRight, GripVertical, ListChecks, ListTree, MessageSquare, Paperclip } from '@lucide/vue';
+import { Clock, CornerDownRight, ListChecks, ListTree, MessageSquare, Paperclip } from '@lucide/vue';
 import { computed } from 'vue';
 import OnLeaveFlag from '@/Components/Leave/OnLeaveFlag.vue';
 import DueCountdown from '@/Components/Tasks/DueCountdown.vue';
@@ -57,10 +57,11 @@ const emit = defineEmits<{
 }>();
 
 /**
- * What a press on the card is NOT for: the grip and any other control inside the card keep their
- * own meaning. The title link is handled separately below.
+ * What a press on the card is NOT for: any control inside the card keeps its own meaning. The
+ * title link is handled separately below. There is no grip (removed, brief 026): the whole card
+ * is the drag handle, so a press anywhere else is a click or the start of a drag.
  */
-const OWN_CONTROLS = 'a, button, input, textarea, select, label, [data-card-grip]';
+const OWN_CONTROLS = 'a, button, input, textarea, select, label';
 
 /**
  * A plain left-click anywhere on the card opens the drawer — on the title too, whose `href` stays
@@ -188,16 +189,10 @@ function onDragStart(event: DragEvent): void {
             </Link>
 
             <!--
-                A grip that says the card is draggable. It is `aria-hidden` because it is not a
-                keyboard control, and a focus stop that only works with a mouse wastes a Tab.
-                `mt-0.5` centres it on the title's first line.
+                Brief 026: the priority flag sits in the top-right corner, where the drag grip was.
+                `mt-0.5` centres it on the title's first line. The card itself is the drag handle.
             -->
-            <GripVertical
-                v-if="canDrag"
-                data-card-grip
-                class="mt-0.5 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                aria-hidden="true"
-            />
+            <TaskPriorityFlag :priority="card.priority" class="mt-0.5" data-card-priority />
         </div>
 
         <!-- Flow F2: a subtask names its parent — only when the server sent the parent at all. -->
@@ -223,7 +218,14 @@ function onDragStart(event: DragEvent): void {
         <OnLeaveFlag :people="card.assignees_on_leave ?? []" variant="compact" />
 
         <TooltipProvider>
-            <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <!--
+                Brief 026: ONE row that never wraps and never overflows. Avatars and the timer
+                button are `shrink-0`. The counters' group gives way FIRST (`shrink-[100000]`, so
+                the countdown's share of any shortfall rounds to nothing): whole counters drop out
+                of sight (the drawer still carries them). Only once the group is empty does the
+                countdown truncate with `…` (`min-w-6`; its tooltip carries the full text).
+            -->
+            <div class="flex min-w-0 flex-nowrap items-center gap-2" data-card-footer>
                 <!-- Faces only: the name is in the tooltip and the accessible name, never beside it. -->
                 <div class="flex shrink-0 items-center -space-x-1" data-card-assignees>
                     <Tooltip v-for="person in shown" :key="person.id">
@@ -270,7 +272,24 @@ function onDragStart(event: DragEvent): void {
                 </div>
 
                 <!-- Overdue prints its word ("… overdue"); red is the emphasis, not the message. -->
-                <DueCountdown :due-date="card.due_date" :status="card.status" />
+                <DueCountdown :due-date="card.due_date" :status="card.status" truncate />
+
+                <span class="flex h-4 min-w-0 shrink-[100000] flex-wrap items-center gap-x-2 overflow-hidden" data-card-counts>
+                <!--
+                    Follow-up to brief 026: the counters give way BEFORE the countdown, and
+                    whole. The row is one `h-4` line that wraps into a clipped second line,
+                    so the LAST items drop first: tracked time, then comments (attachments
+                    with them), then subtasks and the checklist. `leading-3.5` keeps the
+                    Archived chip inside that 16 px line.
+
+                    The zero-width, full-height spacer holds line one, so even the first counter can wrap
+                    away whole when it no longer fits (a flex line always keeps its first item,
+                    which would otherwise be cut mid-glyph). `-mr-2` cancels the gap after it.
+                -->
+                <span class="-mr-2 h-4 w-0 shrink-0" aria-hidden="true" data-card-counts-spacer />
+                <span v-if="card.is_archived" class="shrink-0 rounded-full border px-2 text-xs leading-3.5 text-muted-foreground">
+                    Archived
+                </span>
 
                 <span
                     v-if="card.checklist_count > 0"
@@ -300,6 +319,17 @@ function onDragStart(event: DragEvent): void {
                     </span>
                 </span>
 
+                <span
+                    v-if="card.attachment_count > 0"
+                    role="img"
+                    data-card-attachments
+                    class="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+                    :aria-label="`${card.attachment_count} ${card.attachment_count === 1 ? 'attachment' : 'attachments'}`"
+                >
+                    <Paperclip class="size-3" aria-hidden="true" />
+                    <span class="tabular-nums" aria-hidden="true">{{ card.attachment_count }}</span>
+                </span>
+
                 <!--
                     Brief 012: the discussion's messages and the task's files. Numbers only; each
                     names itself in its accessible name, since a bubble and a clip are not words.
@@ -313,17 +343,6 @@ function onDragStart(event: DragEvent): void {
                 >
                     <MessageSquare class="size-3" aria-hidden="true" />
                     <span class="tabular-nums" aria-hidden="true">{{ card.comment_count }}</span>
-                </span>
-
-                <span
-                    v-if="card.attachment_count > 0"
-                    role="img"
-                    data-card-attachments
-                    class="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
-                    :aria-label="`${card.attachment_count} ${card.attachment_count === 1 ? 'attachment' : 'attachments'}`"
-                >
-                    <Paperclip class="size-3" aria-hidden="true" />
-                    <span class="tabular-nums" aria-hidden="true">{{ card.attachment_count }}</span>
                 </span>
 
                 <!--
@@ -342,26 +361,29 @@ function onDragStart(event: DragEvent): void {
                     <span class="tabular-nums" aria-hidden="true">{{ formatDuration(card.tracked_seconds) }}</span>
                 </span>
 
-                <span v-if="card.is_archived" class="shrink-0 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-                    Archived
                 </span>
 
-                <!--
-                    Flow F3, watchers only: who else is timing this card. The key is absent from
-                    everybody else's payload, so this never mounts for an employee.
-                -->
-                <RunningTimers v-if="card.running_timers && card.running_timers.length > 0" :timers="card.running_timers" />
-
-                <span class="ml-auto inline-flex shrink-0 items-center gap-2">
-                    <!-- Flow F3: ▶ / ⏸ / ⏹ — only where the server said this reader may time it. -->
+                <!-- Flow F3: ▶ / ⏸ 0:12:34 / ⏹ — only where the server said this reader may time it. -->
+                <span class="ml-auto inline-flex shrink-0 items-center">
                     <TaskTimerButton
                         v-if="card.permissions.can_track_time || card.my_timer"
                         :task-id="card.id"
                         :my-timer="card.my_timer"
                     />
-                    <TaskPriorityFlag :priority="card.priority" />
                 </span>
             </div>
+
+            <!--
+                Flow F3, watchers only: who else is timing this card, on its own row directly under
+                the footer (a 288 px lane has no room for it beside the button). `nowrap` keeps it
+                to one line; a crowded row truncates the durations with `…`. The key is absent from
+                everybody else's payload, so this never mounts for an employee.
+            -->
+            <RunningTimers
+                v-if="card.running_timers && card.running_timers.length > 0"
+                :timers="card.running_timers"
+                nowrap
+            />
         </TooltipProvider>
     </li>
 </template>

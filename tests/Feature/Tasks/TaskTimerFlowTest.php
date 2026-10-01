@@ -1,6 +1,7 @@
 <?php
 
 use App\Events\TaskChanged;
+use App\Models\ActivityLog;
 use App\Models\AttendanceRecord;
 use App\Models\PayrollPeriod;
 use App\Models\Task;
@@ -449,4 +450,106 @@ it('still has the watchdog stop an office entry whose heartbeat went quiet', fun
 
     $this->actingAs($this->yaseen)->postJson('/task-timer/heartbeat')->assertOk()
         ->assertJsonPath('running', null);
+});
+
+/* ------------------------- restart the same day (brief 027, the client's point 9) */
+
+// The client: "once a person stop the timer . then its cant turn on in the current day".
+
+dataset('TIMER_restarters', [
+    'office employee' => ['yaseen', true],
+    'admin' => ['admin', true],
+    'remote employee' => ['tapu', false],
+]);
+
+it('starts again after a stop the same day — the same task and another task', function (string $who, bool $office) {
+    $user = $this->{$who};
+    $a = TIMER_task($user);
+    $b = TIMER_task($user);
+
+    $this->actingAs($user)->post("/tasks/{$a->id}/timer", ['client_uuid' => (string) Str::uuid(), 'clock_in' => $office])
+        ->assertSessionHas('success');
+    Carbon::setTestNow(TIMER_DAY.' 10:00:00');
+    $this->actingAs($user)->post('/task-timer/stop')->assertSessionHas('success');
+
+    // The same task again, the same day.
+    Carbon::setTestNow(TIMER_DAY.' 10:30:00');
+    $this->actingAs($user)->post("/tasks/{$a->id}/timer", ['client_uuid' => (string) Str::uuid()])
+        ->assertSessionHasNoErrors()
+        ->assertSessionHas('success');
+
+    $again = TimeEntry::query()->open()->sole();
+    expect($again->task_id)->toBe($a->id)->and($again->isRunning())->toBeTrue();
+
+    // And another task after a second stop.
+    Carbon::setTestNow(TIMER_DAY.' 11:00:00');
+    $this->actingAs($user)->post('/task-timer/stop')->assertSessionHas('success');
+    $this->actingAs($user)->post("/tasks/{$b->id}/timer", ['client_uuid' => (string) Str::uuid()])
+        ->assertSessionHas('success');
+
+    $other = TimeEntry::query()->open()->sole();
+    expect($other->task_id)->toBe($b->id)
+        ->and($other->isRunning())->toBeTrue()
+        ->and(TimeEntry::query()->where('employee_id', $user->employee->id)->count())->toBe(3)
+        ->and($other->counts_toward_hours)->toBe(! $office);
+})->with('TIMER_restarters');
+
+it('re-opens the day when an office employee who clocked out presses "Clock in and start?"', function () {
+    $task = TIMER_task($this->yaseen);
+
+    $this->actingAs($this->yaseen)->post("/tasks/{$task->id}/timer", ['clock_in' => true])->assertSessionHas('success');
+    Carbon::setTestNow(TIMER_DAY.' 12:00:00');
+    $this->actingAs($this->yaseen)->post('/attendance/clock-out')->assertSessionHas('success');
+
+    Carbon::setTestNow(TIMER_DAY.' 13:00:00');
+    $this->actingAs($this->yaseen)
+        ->postJson("/tasks/{$task->id}/timer")
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('clock_in');
+
+    $this->actingAs($this->yaseen)
+        ->post("/tasks/{$task->id}/timer", ['client_uuid' => (string) Str::uuid(), 'clock_in' => true])
+        ->assertSessionHas('success', 'Timer started.');
+
+    $record = AttendanceRecord::query()->where('employee_id', $this->yaseen->employee->id)->sole();
+    $running = TimeEntry::query()->open()->sole();
+
+    expect($record->clock_in->equalTo(Carbon::parse(TIMER_DAY.' 09:00:00')))->toBeTrue()
+        ->and($record->clock_out)->toBeNull()
+        ->and($record->status->value)->toBe('present')
+        ->and($running->task_id)->toBe($task->id)
+        ->and($running->isRunning())->toBeTrue()
+        ->and(app(AttendanceService::class)->isClockedIn($this->yaseen->employee))->toBeTrue()
+        ->and(ActivityLog::query()
+            ->where('object_type', $record->getMorphClass())
+            ->where('object_id', $record->id)
+            ->where('description', 're-opened the day')
+            ->count())->toBe(1);
+
+    // The day then closes again at the second clock-out, stopping the timer with it.
+    Carbon::setTestNow(TIMER_DAY.' 17:00:00');
+    $this->actingAs($this->yaseen)->post('/attendance/clock-out')->assertSessionHas('success');
+
+    expect($record->fresh()->clock_out->equalTo(Carbon::parse(TIMER_DAY.' 17:00:00')))->toBeTrue()
+        ->and(TimeEntry::query()->open()->count())->toBe(0);
+});
+
+it('re-opens the day from the plain Clock-in button after a clock-out, the same way', function () {
+    $this->actingAs($this->yaseen)->post('/attendance/clock-in')->assertSessionHas('success');
+    Carbon::setTestNow(TIMER_DAY.' 12:00:00');
+    $this->actingAs($this->yaseen)->post('/attendance/clock-out')->assertSessionHas('success');
+
+    Carbon::setTestNow(TIMER_DAY.' 13:00:00');
+    $this->actingAs($this->yaseen)->post('/attendance/clock-in')
+        ->assertSessionMissing('error')
+        ->assertSessionHas('success');
+
+    $record = AttendanceRecord::query()->where('employee_id', $this->yaseen->employee->id)->sole();
+
+    expect($record->clock_in->equalTo(Carbon::parse(TIMER_DAY.' 09:00:00')))->toBeTrue()
+        ->and($record->clock_out)->toBeNull()
+        ->and(app(AttendanceService::class)->isClockedIn($this->yaseen->employee))->toBeTrue();
+
+    // Still open: a second press is the double tap the old refusal was for.
+    $this->actingAs($this->yaseen)->post('/attendance/clock-in')->assertSessionHas('error', 'You already clocked in at 09:00 today.');
 });

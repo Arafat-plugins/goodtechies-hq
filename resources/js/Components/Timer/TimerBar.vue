@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { usePage } from '@inertiajs/vue3';
 import { ChevronUp, Timer as TimerIcon, X } from '@lucide/vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import TimerControls from '@/Components/Timer/TimerControls.vue';
 import { timerRoutes, useTimer } from '@/Components/Timer/timer';
 import { Button } from '@/Components/ui/button';
@@ -64,6 +64,37 @@ onMounted(() => {
     }
 });
 
+/**
+ * The dock's real height, published as `--timer-dock-h` on `<html>`, so a page that sizes itself
+ * to the viewport (Messages, from `lg`) leaves exactly this much room at the bottom and nothing
+ * of its own sits under the dock. Measured, not guessed: the bar wraps to a second row on narrow
+ * columns, and the collapsed *Show timer* button is shorter. 0 when there is no bar at all.
+ */
+const dock = ref<HTMLElement | null>(null);
+let observer: ResizeObserver | null = null;
+
+function publishHeight(px: number): void {
+    document.documentElement.style.setProperty('--timer-dock-h', `${Math.ceil(px)}px`);
+}
+
+onMounted(() => {
+    if (dock.value === null || typeof ResizeObserver === 'undefined') {
+        return;
+    }
+    publishHeight(dock.value.getBoundingClientRect().height);
+    observer = new ResizeObserver(() => {
+        if (dock.value !== null) {
+            publishHeight(dock.value.getBoundingClientRect().height);
+        }
+    });
+    observer.observe(dock.value);
+});
+
+onBeforeUnmount(() => {
+    observer?.disconnect();
+    document.documentElement.style.removeProperty('--timer-dock-h');
+});
+
 function hide(): void {
     visible.value = false;
     writeBarVisible(false);
@@ -76,7 +107,7 @@ function show(): void {
 </script>
 
 <template>
-    <div v-if="canTrack" class="sticky bottom-0 z-20">
+    <div v-if="canTrack" ref="dock" class="sticky bottom-0 z-20 min-w-0">
         <section
             v-if="visible"
             aria-label="Timer"

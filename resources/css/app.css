@@ -633,3 +633,31 @@
 ):focus:not([aria-invalid="true"]) {
     border-color: var(--input);
 }
+
+/*
+ * Live-timer breathing (brief 024): a running timer's indicator fades gently brighter and a
+ * little darker, 2.8 s per cycle, so an Admin's eye catches that someone is working now.
+ * Opacity 1 → --live-breathe-dim (0.55 by default) and a soft `status-done` glow ring at low
+ * alpha that swells and fades; box-shadow and opacity only, so no scale jump and no layout
+ * shift. An element that carries text sets `[--live-breathe-dim:1]` so only the glow breathes
+ * and the text stays at full contrast. Paused timers never get the class. Reduced motion: none.
+ */
+@keyframes live-breathe {
+    0%,
+    100% {
+        opacity: 1;
+        box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-status-done) 0%, transparent);
+    }
+    50% {
+        opacity: var(--live-breathe-dim, 0.55);
+        box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-status-done) 30%, transparent);
+    }
+}
+
+@utility animate-live-breathe {
+    animation: live-breathe 2.8s ease-in-out infinite;
+
+    @media (prefers-reduced-motion: reduce) {
+        animation: none;
+    }
+}

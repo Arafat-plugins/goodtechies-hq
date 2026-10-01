@@ -6,6 +6,7 @@ import DetailDrawer from '@/Components/DetailDrawer.vue';
 import { TASKS_COALESCE_MS, TASKS_HIDDEN_RESYNC_MS, tasksChannel, useLiveRefresh } from '@/Components/Realtime/live';
 import SkeletonDetail from '@/Components/Skeletons/SkeletonDetail.vue';
 import TaskDetailBody from '@/Components/Tasks/TaskDetailBody.vue';
+import TaskTimerButton from '@/Components/Timer/TaskTimerButton.vue';
 import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
 import type {
     TaskActivityEntry,
@@ -225,13 +226,25 @@ function close(): void {
     <DetailDrawer
         :open="open"
         :title="detail?.task.title ?? 'Task'"
-        :subtitle="detail?.task.project?.name ?? undefined"
         width="xl"
         large-title
         :deep-link-id="current"
         @update:open="(value) => emit('update:open', value)"
     >
+        <!--
+            Brief 025: no project subline — the Project row in the body names it once, as a link,
+            with the Admin's move beside it. The task's own timer sits here, top right, beside
+            Open: drawn where the server said `permissions.can_track_time`, and also while the
+            reader's own timer is open on it, so a running timer can always be stopped.
+        -->
         <template #header-actions>
+            <TaskTimerButton
+                v-if="detail !== null && detail.task.id === current && (detail.task.permissions.can_track_time || detail.task.my_timer)"
+                :task-id="detail.task.id"
+                :my-timer="detail.task.my_timer ?? null"
+                variant="panel"
+                @settled="refresh"
+            />
             <Button v-if="current !== null" as-child variant="outline" size="sm">
                 <a :href="href">
                     <ExternalLink aria-hidden="true" />

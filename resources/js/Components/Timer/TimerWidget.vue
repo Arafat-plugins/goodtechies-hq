@@ -32,8 +32,13 @@ const props = withDefaults(
         canTrackTask?: boolean;
         /** Flow F3, watchers only: who else is timing it. Undefined for everyone else. */
         runningTimers?: RunningTaskTimer[];
+        /**
+         * Brief 025: draw the task's own ▶ / ⏸ / ⏹ here. The task detail passes `false`, because
+         * its `TaskTimerButton` sits in the drawer header (and the page's actions) instead.
+         */
+        taskButton?: boolean;
     }>(),
-    { myTimer: null, canTrackTask: false, runningTimers: undefined },
+    { myTimer: null, canTrackTask: false, runningTimers: undefined, taskButton: true },
 );
 
 const emit = defineEmits<{
@@ -51,7 +56,9 @@ const canTrack = computed(() => page.props.auth.user?.canTrackTime === true);
  * `TimerControls` above instead — that is the timer their day already runs on, and two sets of
  * buttons for one timer would be two ideas of what it is doing.
  */
-const showTaskTimer = computed(() => !canTrack.value && (props.canTrackTask || props.myTimer !== null));
+const showTaskTimer = computed(
+    () => props.taskButton && !canTrack.value && (props.canTrackTask || props.myTimer !== null),
+);
 
 /**
  * What this task has banked, plus the open session if it is on THIS task. The stored figure is

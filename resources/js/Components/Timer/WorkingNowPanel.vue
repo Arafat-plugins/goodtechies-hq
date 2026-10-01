@@ -105,9 +105,16 @@ const drawn = computed(() =>
                 </div>
 
                 <span
-                    class="shrink-0 text-sm tabular-nums"
+                    class="inline-flex shrink-0 items-center gap-2 text-sm tabular-nums"
                     :aria-label="row.paused ? `Paused at ${row.duration}` : `Timing for ${row.duration}`"
                 >
+                    <!-- Brief 024: the live dot breathes on a running row; a paused row has none. -->
+                    <span
+                        v-if="!row.paused"
+                        data-live-breathe
+                        class="size-2 shrink-0 rounded-full bg-status-done animate-live-breathe"
+                        aria-hidden="true"
+                    />
                     {{ row.duration }}
                 </span>
             </li>

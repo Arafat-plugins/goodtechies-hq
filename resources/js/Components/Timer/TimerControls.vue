@@ -189,7 +189,17 @@ function start(): void {
             {{ clock }}
         </p>
 
-        <div v-if="running?.task" :class="cn('min-w-0', variant === 'bar' && 'hidden sm:block')">
+        <!--
+            In the bar the title is the ONE flexible item: it takes what the clock and the buttons
+            leave and truncates on the right, so the row never grows past its container at any
+            width. The full name stays in the tooltip and in the text itself (the accessible name).
+        -->
+        <div
+            v-if="running?.task"
+            data-timer-title
+            :title="running.project ? `${running.task.name} — ${running.project.name}` : running.task.name"
+            :class="cn('min-w-0', variant === 'bar' && 'flex-1 basis-24')"
+        >
             <p class="truncate text-sm font-medium">{{ running.task.name }}</p>
             <p v-if="running.project" class="truncate text-xs text-muted-foreground">
                 {{ running.project.name }}

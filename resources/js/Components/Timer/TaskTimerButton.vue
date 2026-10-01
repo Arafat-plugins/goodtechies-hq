@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { usePage } from '@inertiajs/vue3';
-import { Pause, Play, Square } from '@lucide/vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { formatClock } from '@/Components/Timer/timer';
-import type { MyTaskTimer } from '@/Components/Timer/taskTimer';
-import { CLOCK_IN_CONFIRM_TEXT, ownElapsed, useTaskTimer } from '@/Components/Timer/taskTimer';
-import { Button } from '@/Components/ui/button';
+import { usePage } from "@inertiajs/vue3";
+import { Pause, Play, Square } from "@lucide/vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { formatClock } from "@/Components/Timer/timer";
+import type { MyTaskTimer } from "@/Components/Timer/taskTimer";
+import {
+    CLOCK_IN_CONFIRM_TEXT,
+    ownElapsed,
+    useTaskTimer,
+} from "@/Components/Timer/taskTimer";
+import { Button } from "@/Components/ui/button";
 import {
     Dialog,
     DialogContent,
@@ -13,8 +17,13 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
-} from '@/Components/ui/dialog';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
+} from "@/Components/ui/dialog";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/Components/ui/tooltip";
 
 /**
  * ▶ / ⏸ / ⏹ for ONE task — flow F3. Mounted on a board card (`variant="card"`) and in the
@@ -23,7 +32,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Comp
  * Drawn only where the server said `permissions.can_track_time` — the parent decides; this
  * component never asks a role. Its states are the reader's own `my_timer` from `TaskResource`:
  *
- *   none     ▶ Start (pill)           "Start timer"
+ *   none     ▶ Start                  "Start timer"   (all three: one light pill, no border)
  *   running  ⏸ 0:12:34  ⏹           "Pause timer", "Stop timer"
  *   paused   ▶ 0:12:34  ⏹           "Start timer" (resumes), "Stop timer"
  *
@@ -39,9 +48,9 @@ const props = withDefaults(
     defineProps<{
         taskId: number;
         myTimer: MyTaskTimer | null;
-        variant?: 'card' | 'panel';
+        variant?: "card" | "panel";
     }>(),
-    { variant: 'card' },
+    { variant: "card" },
 );
 
 const emit = defineEmits<{
@@ -50,16 +59,18 @@ const emit = defineEmits<{
 }>();
 
 const page = usePage();
-const canTrackTime = computed(() => page.props.auth.user?.canTrackTime === true);
+const canTrackTime = computed(
+    () => page.props.auth.user?.canTrackTime === true,
+);
 const actions = useTaskTimer(canTrackTime.value);
-const owner = Symbol('task-timer');
+const owner = Symbol("task-timer");
 
 const receivedAt = ref(Date.now());
 const now = ref(Date.now());
 let tick: ReturnType<typeof setInterval> | null = null;
 
 function syncTick(): void {
-    const running = props.myTimer?.state === 'running';
+    const running = props.myTimer?.state === "running";
 
     if (running && tick === null) {
         tick = setInterval(() => {
@@ -92,19 +103,23 @@ onBeforeUnmount(() => {
     }
 });
 
-const elapsed = computed(() => (props.myTimer === null ? 0 : ownElapsed(props.myTimer, receivedAt.value, now.value)));
+const elapsed = computed(() =>
+    props.myTimer === null
+        ? 0
+        : ownElapsed(props.myTimer, receivedAt.value, now.value),
+);
 const clock = computed(() => formatClock(elapsed.value));
 
 const asking = computed(() => actions.prompt.value?.owner === owner);
 
 function settled(): void {
-    emit('settled');
+    emit("settled");
 }
 
 function onPrimary(): void {
     if (props.myTimer === null) {
         actions.start(props.taskId, owner, { onSettled: settled });
-    } else if (props.myTimer.state === 'running') {
+    } else if (props.myTimer.state === "running") {
         actions.pause(settled);
     } else {
         actions.resume(settled);
@@ -125,18 +140,24 @@ function onDialogOpen(open: boolean): void {
     }
 }
 
-const primaryLabel = computed(() => (props.myTimer?.state === 'running' ? 'Pause timer' : 'Start timer'));
-const size = computed(() => (props.variant === 'card' ? 'xs' : 'sm'));
-const iconSize = computed(() => (props.variant === 'card' ? 'icon-xs' : 'icon-sm'));
+const primaryLabel = computed(() =>
+    props.myTimer?.state === "running" ? "Pause timer" : "Start timer",
+);
+const size = computed(() => (props.variant === "card" ? "xs" : "sm"));
+const iconSize = computed(() =>
+    props.variant === "card" ? "icon-xs" : "icon-sm",
+);
 
 /**
- * The idle ▶ is a soft-primary pill with a word on it (brief 021) — a faint grey icon was not
- * found. `--primary` on `--brand-tint` is 4.63:1 light / 5.93:1 dark; hover goes to the solid
- * `--primary` fill (5.01:1 / 7.31:1) rather than `--brand-tint-strong`, where `--primary` text
- * drops to 4.16:1. The border is `--brand`, a graphic, never a fill behind text (DESIGN.md).
+ * **One light pill for every state** (brief 026): idle `▶ Start`, running `⏸ 0:12:34` and paused
+ * `▶ 0:12:34` all wear the same soft `--brand-tint` fill with `--primary` text (4.63:1 light /
+ * 5.93:1 dark) and **no border** — `border-transparent`, so the computed border colour is never a
+ * red or orange ring. The running time is inside this one button; there is no separate time chip.
+ * Hover stays light: `--brand-tint-strong` with `--foreground` text (11.06:1 / 11.96:1), because
+ * `--primary` text drops to 4.16:1 on that fill.
  */
-const IDLE_PILL =
-    'rounded-full border border-brand bg-brand-tint font-medium text-primary hover:bg-primary hover:text-primary-foreground';
+const PILL =
+    "rounded-full border-transparent bg-brand-tint font-medium text-primary tabular-nums hover:bg-brand-tint-strong hover:text-foreground dark:hover:bg-brand-tint-strong";
 </script>
 
 <template>
@@ -146,20 +167,30 @@ const IDLE_PILL =
                 <TooltipTrigger as-child>
                     <Button
                         type="button"
-                        :variant="myTimer === null ? 'ghost' : 'secondary'"
+                        variant="ghost"
                         :size="size"
                         :aria-label="primaryLabel"
                         :aria-pressed="myTimer?.state === 'running'"
                         :disabled="actions.busy.value"
                         draggable="false"
                         data-task-timer-primary
-                        :class="myTimer === null ? IDLE_PILL : 'tabular-nums'"
+                        :class="PILL"
                         @click.stop="onPrimary"
                     >
-                        <Pause v-if="myTimer?.state === 'running'" aria-hidden="true" />
+                        <Pause
+                            v-if="myTimer?.state === 'running'"
+                            aria-hidden="true"
+                        />
                         <Play v-else aria-hidden="true" class="fill-current" />
-                        <span v-if="myTimer === null" aria-hidden="true" data-task-timer-start>Start</span>
-                        <span v-else aria-hidden="true" data-task-timer-clock>{{ clock }}</span>
+                        <span
+                            v-if="myTimer === null"
+                            aria-hidden="true"
+                            data-task-timer-start
+                            >Start</span
+                        >
+                        <span v-else aria-hidden="true" data-task-timer-clock>{{
+                            clock
+                        }}</span>
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent>{{ primaryLabel }}</TooltipContent>
@@ -175,6 +206,7 @@ const IDLE_PILL =
                         :disabled="actions.busy.value"
                         draggable="false"
                         data-task-timer-stop
+                        class="rounded-full border-transparent"
                         @click.stop="onStop"
                     >
                         <Square aria-hidden="true" />
@@ -185,7 +217,13 @@ const IDLE_PILL =
 
             <!-- Said to a screen reader once, not every second: the state, not the count. -->
             <span class="sr-only" aria-live="polite">
-                {{ myTimer === null ? '' : myTimer.state === 'running' ? 'Timer running' : 'Timer paused' }}
+                {{
+                    myTimer === null
+                        ? ""
+                        : myTimer.state === "running"
+                          ? "Timer running"
+                          : "Timer paused"
+                }}
             </span>
         </span>
 
@@ -194,12 +232,23 @@ const IDLE_PILL =
                 <DialogHeader>
                     <DialogTitle>{{ CLOCK_IN_CONFIRM_TEXT }}</DialogTitle>
                     <DialogDescription>
-                        You are not clocked in. This clocks you in now and starts the timer on this task.
+                        You are not clocked in. This clocks you in now and
+                        starts the timer on this task.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>
-                    <Button type="button" variant="outline" @click="actions.dismissPrompt()">Cancel</Button>
-                    <Button type="button" :disabled="actions.busy.value" data-task-timer-confirm @click="confirmClockIn">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        @click="actions.dismissPrompt()"
+                        >Cancel</Button
+                    >
+                    <Button
+                        type="button"
+                        :disabled="actions.busy.value"
+                        data-task-timer-confirm
+                        @click="confirmClockIn"
+                    >
                         Clock in and start
                     </Button>
                 </DialogFooter>

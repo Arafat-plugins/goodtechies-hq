@@ -29,6 +29,7 @@ import {
     SelectValue,
 } from '@/Components/ui/select';
 import { Textarea } from '@/Components/ui/textarea';
+import { linkify } from '@/lib/linkify';
 import { useUnsavedGuard } from '@/lib/unsavedGuard';
 import { cn } from '@/lib/utils';
 
@@ -161,8 +162,8 @@ function save(): void {
 }
 
 /** The rows' label column and their borderless-until-hover controls. */
-const rowLabel = 'self-start py-1.5 text-xs font-medium text-muted-foreground';
-const rowControl = 'h-8 border-transparent px-2 shadow-flat hover:border-input dark:bg-transparent';
+const rowLabel = 'self-start py-1 text-xs font-medium text-muted-foreground';
+const rowControl = 'h-7 border-transparent px-2 shadow-flat hover:border-input dark:bg-transparent';
 
 const formErrors = computed(() => (page.props.errors ?? {}) as Record<string, string>);
 
@@ -231,8 +232,32 @@ watch(
 
 useUnsavedGuard(() => descriptionDirty.value);
 
+/** Brief 025: the description reads as linked text until it is clicked or tabbed onto. */
+const descriptionEditing = ref(false);
+const descriptionField = ref<{ $el?: unknown } | null>(null);
+const descriptionSegments = computed(() => linkify(editable.value ? description.value : (props.task.description ?? '')));
+
+function editDescription(): void {
+    if (savingField.value === 'description') {
+        return;
+    }
+
+    descriptionEditing.value = true;
+    void nextTick(() => focusField(descriptionField.value));
+}
+
+/** A click on one of the links follows it; anywhere else on the text starts the edit. */
+function onDescriptionClick(event: MouseEvent): void {
+    if (event.target instanceof Element && event.target.closest('a') !== null) {
+        return;
+    }
+
+    editDescription();
+}
+
 function blurDescription(): void {
     descriptionFocused.value = false;
+    descriptionEditing.value = false;
 
     if (descriptionDirty.value) {
         saveField('description', blank(description.value));
@@ -392,7 +417,7 @@ function move(): void {
         the panel. Due date, priority and the description are edited in place (one field per
         `PUT`); the title, start date and estimate stay behind "Edit details".
     -->
-    <section class="flex min-w-0 flex-col gap-5" data-task-fields>
+    <section class="flex min-w-0 flex-col gap-3" data-task-fields>
         <form v-if="editing" class="flex min-w-0 flex-col gap-4" novalidate @submit.prevent="save">
             <div v-if="mayPlan" class="flex min-w-0 flex-col gap-2">
                 <Label for="task-title">Name</Label>
@@ -469,7 +494,7 @@ function move(): void {
         </form>
 
         <template v-else>
-            <dl class="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1 text-sm">
+            <dl class="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] items-center gap-x-3 gap-y-0.5 text-sm">
                 <template v-if="$slots.assignee">
                     <dt :class="rowLabel">Assignee</dt>
                     <dd class="min-w-0"><slot name="assignee" /></dd>
@@ -487,7 +512,7 @@ function move(): void {
                         data-row-due
                         @change="changeDue"
                     />
-                    <span v-else :class="cn('py-1 tabular-nums', task.is_overdue && 'text-destructive')">
+                    <span v-else :class="cn('py-0.5 tabular-nums', task.is_overdue && 'text-destructive')">
                         {{ formatDate(task.due_date) }}
                     </span>
                     <!-- Late prints its word; red alone says nothing in greyscale (§5.6). -->
@@ -511,7 +536,7 @@ function move(): void {
                             </SelectItem>
                         </SelectContent>
                     </Select>
-                    <span v-else class="py-1">{{ task.priority_label ?? '—' }}</span>
+                    <span v-else class="py-0.5">{{ task.priority_label ?? '—' }}</span>
                 </dd>
 
                 <dt :class="rowLabel">Project</dt>
@@ -524,11 +549,11 @@ function move(): void {
                     <Link
                         v-if="task.project"
                         :href="`/${surface}/projects/${task.project.id}`"
-                        class="py-1 font-medium hover:underline"
+                        class="py-0.5 font-medium hover:underline"
                     >
                         {{ task.project.name }}
                     </Link>
-                    <span v-else class="py-1">—</span>
+                    <span v-else class="py-0.5">—</span>
                     <Button
                         v-if="mayMove"
                         ref="moveOpener"
@@ -544,10 +569,10 @@ function move(): void {
                 </dd>
 
                 <dt :class="rowLabel">Start date</dt>
-                <dd class="min-w-0 py-1 tabular-nums">{{ formatDate(task.start_date) }}</dd>
+                <dd class="min-w-0 py-0.5 tabular-nums">{{ formatDate(task.start_date) }}</dd>
 
                 <dt :class="rowLabel">Estimate</dt>
-                <dd class="min-w-0 py-1 tabular-nums">{{ formatMinutes(task.estimated_minutes) }}</dd>
+                <dd class="min-w-0 py-0.5 tabular-nums">{{ formatMinutes(task.estimated_minutes) }}</dd>
 
                 <!--
                     Assigning a tag is an edit, not tag CRUD: the options are the ones the
@@ -555,7 +580,7 @@ function move(): void {
                     creates, renames or deletes one.
                 -->
                 <dt id="task-tags-label" :class="rowLabel">Tags</dt>
-                <dd class="flex min-w-0 flex-col gap-2 py-1">
+                <dd class="flex min-w-0 flex-col gap-1.5 py-0.5">
 
                     <p v-if="task.tags.length === 0 && !mayTag" class="text-sm text-muted-foreground">—</p>
                     <ul v-else class="flex min-w-0 flex-wrap items-center gap-1" aria-labelledby="task-tags-label">
@@ -639,10 +664,10 @@ function move(): void {
                 </dd>
 
                 <dt :class="rowLabel">Created by</dt>
-                <dd class="min-w-0 py-1 break-words">{{ task.created_by?.name ?? '—' }}</dd>
+                <dd class="min-w-0 py-0.5 break-words">{{ task.created_by?.name ?? '—' }}</dd>
             </dl>
 
-            <div v-if="editable" class="-mt-3">
+            <div v-if="editable" class="-mt-2">
                 <Button ref="opener" type="button" size="sm" variant="ghost" class="text-muted-foreground" @click="edit">
                     <Pencil aria-hidden="true" />
                     Edit details
@@ -651,19 +676,63 @@ function move(): void {
 
             <div class="flex min-w-0 flex-col gap-1">
                 <h3 class="text-sm font-semibold"><label for="task-row-description">Description</label></h3>
+                <!--
+                    Brief 025: read as text whose URLs are links (`lib/linkify.ts` splits it; each
+                    piece is a text node or an `<a>` built here, never `v-html`), and edited as
+                    the same plain text: a click on the text — not on a link — or Tab onto it
+                    turns it into the field, which saves on blur exactly as before.
+                -->
                 <Textarea
-                    v-if="editable"
+                    v-if="editable && descriptionEditing"
                     id="task-row-description"
+                    ref="descriptionField"
                     v-model="description"
                     rows="3"
                     placeholder="What is this task about?"
                     :disabled="savingField === 'description'"
-                    class="field-sizing-content min-h-16 resize-none border-transparent px-2 shadow-flat hover:border-input"
+                    class="field-sizing-content min-h-16 resize-none px-2 shadow-flat"
                     data-row-description
                     @focus="descriptionFocused = true"
                     @blur="blurDescription"
                 />
-                <p v-else-if="task.description" class="min-w-0 text-sm whitespace-pre-line">{{ task.description }}</p>
+                <div
+                    v-else-if="editable"
+                    id="task-row-description"
+                    role="textbox"
+                    aria-multiline="true"
+                    aria-label="Description"
+                    tabindex="0"
+                    class="min-h-16 min-w-0 cursor-text rounded-md border border-transparent px-2 py-2 text-sm break-words whitespace-pre-line shadow-flat outline-none hover:border-input focus-visible:ring-3 focus-visible:ring-ring"
+                    data-row-description-view
+                    @click="onDescriptionClick"
+                    @focus="editDescription"
+                >
+                    <template v-if="description.trim() !== ''">
+                        <template v-for="(segment, index) in descriptionSegments" :key="index">
+                            <a
+                                v-if="segment.kind === 'link'"
+                                :href="segment.href"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="font-medium break-all underline underline-offset-4"
+                                >{{ segment.text }}</a
+                            ><template v-else>{{ segment.text }}</template>
+                        </template>
+                    </template>
+                    <span v-else class="text-muted-foreground">What is this task about?</span>
+                </div>
+                <p v-else-if="task.description" class="min-w-0 text-sm break-words whitespace-pre-line">
+                    <template v-for="(segment, index) in descriptionSegments" :key="index">
+                        <a
+                            v-if="segment.kind === 'link'"
+                            :href="segment.href"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="font-medium break-all underline underline-offset-4"
+                            >{{ segment.text }}</a
+                        ><template v-else>{{ segment.text }}</template>
+                    </template>
+                </p>
                 <p v-else class="text-sm text-muted-foreground">No description.</p>
                 <p v-if="formErrors.description" class="text-xs text-destructive">{{ formErrors.description }}</p>
             </div>

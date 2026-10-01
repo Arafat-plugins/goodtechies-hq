@@ -77,6 +77,7 @@ class AttendanceService
         private readonly AuditLogger $audit,
         private readonly HolidayService $holidays,
         private readonly TimerService $timer,
+        private readonly ActivityLogger $activity,
     ) {}
 
     /**
@@ -327,6 +328,13 @@ class AttendanceService
      * because the first tap did not obviously land. The second tap must read the first tap's
      * row, and then be refused with a sentence that names the time, not with a duplicate-key
      * error and not with a second row.
+     *
+     * A day that is already CLOSED (clocked in and out) is **re-opened** instead of refused —
+     * decision 12-74, the client's "once a person stop the timer … its cant turn on in the
+     * current day". The first `clock_in` stays, `clock_out` is cleared, and the next clock-out
+     * closes the day again; the gap between the two counts inside `worked_minutes` (there is no
+     * break concept to put it in). Both the Clock-in button and ▶'s "Clock in and start?" come
+     * through here, so the two paths cannot disagree.
      */
     public function clockIn(Employee $employee, ?CarbonInterface $at = null): AttendanceRecord
     {
@@ -346,6 +354,10 @@ class AttendanceService
 
         return DB::transaction(function () use ($employee, $schedule, $at, $date): AttendanceRecord {
             $existing = AttendanceRecord::lockForDay((int) $employee->getKey(), $date);
+
+            if ($existing?->clock_in !== null && $existing->clock_out !== null) {
+                return $this->reopen($existing, $employee, $schedule);
+            }
 
             if ($existing?->clock_in !== null) {
                 throw AttendanceStateException::alreadyClockedIn($existing->clock_in->format('H:i'));
@@ -368,6 +380,31 @@ class AttendanceService
 
             return $record;
         });
+    }
+
+    /**
+     * Re-open a closed day (decision 12-74): keep the first `clock_in`, clear `clock_out`.
+     *
+     * A Half Day that `half_day_auto` wrote at the clock-out being undone is undone with it —
+     * the status goes back to what the first clock-in earned, and the next clock-out judges the
+     * whole day again. A Half Day an Admin set (`edited_by`) is theirs and stays. Called inside
+     * `clockIn()`'s transaction, on the row it has locked.
+     */
+    private function reopen(AttendanceRecord $record, Employee $employee, Schedule $schedule): AttendanceRecord
+    {
+        $record->clock_out = null;
+
+        if ($record->status === AttendanceStatus::HalfDay && $record->edited_by === null) {
+            $record->status = $this->isLate($schedule, Carbon::parse($record->clock_in))
+                ? AttendanceStatus::Late
+                : AttendanceStatus::Present;
+        }
+
+        $record->save();
+
+        $this->activity->record($record, 're-opened the day', $employee->user);
+
+        return $record;
     }
 
     /**

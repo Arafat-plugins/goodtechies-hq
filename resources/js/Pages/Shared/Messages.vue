@@ -111,16 +111,12 @@ const viewerId = computed(() => page.props.auth.user?.id ?? null);
 /**
  * How much of the viewport the shell has already spent, before the workspace gets the rest.
  *
- * Top bar, page padding, the page header and the gap under it — plus, on the one surface that
- * carries it, the sticky timer bar. `canTrackTime` is the same server-answered fact the layout
- * mounts `TimerBar` from, so the two cannot disagree; deriving it from the role here would be
- * the second copy of a policy decision that this repo has already been bitten by twice.
+ * Top bar, page padding, the page header and the gap under it — plus the sticky timer bar's
+ * MEASURED height, `--timer-dock-h`, which `TimerBar` keeps on `<html>` (0 when there is no
+ * bar). A fixed 4rem guess was right only while the bar fitted on one row; when it wraps, the
+ * workspace shrinks with it, so the composer and its Send button are never under the dock.
  */
-const workspaceHeight = computed(() =>
-    page.props.auth.user?.canTrackTime === true
-        ? 'lg:h-[calc(100svh-19.5rem)]'
-        : 'lg:h-[calc(100svh-15.5rem)]',
-);
+const workspaceHeight = computed(() => 'lg:h-[calc(100svh-15.5rem-var(--timer-dock-h,0px))]');
 
 const activeId = computed(() => props.active?.conversation_id ?? null);
 

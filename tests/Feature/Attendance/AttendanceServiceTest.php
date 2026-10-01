@@ -5,6 +5,7 @@ use App\Models\AttendanceRecord;
 use App\Models\Employee;
 use App\Models\Schedule;
 use App\Models\Setting;
+use App\Models\User;
 use App\Services\AttendanceService;
 use App\Support\AttendanceStatus;
 use App\Support\RoleName;
@@ -326,3 +327,34 @@ it('leaves clock_in_at null on a day nobody clocked', function () {
         ->and($day['clock_in_at'])->toBeNull()
         ->and($day['worked_minutes'])->toBeNull();
 })->group('phase4');
+
+it('re-opens a closed day on a second clock-in, undoing an automatic Half day but never an Admin\'s (decision 12-74)', function () {
+    $monday = Carbon::parse(ATTENDANCE_MONDAY);
+
+    Setting::query()->updateOrCreate(['key' => 'half_day_auto'], ['value' => true]);
+    app()->forgetInstance(AttendanceService::class);
+    app()->forgetScopedInstances();
+
+    $employee = officeEmployee(['working_hours_per_day' => '8.00']);
+    attendance()->clockIn($employee, $monday->copy()->setTime(9, 0));
+    expect(attendance()->clockOut($employee, $monday->copy()->setTime(11, 0))->status)->toBe(AttendanceStatus::HalfDay);
+
+    $reopened = attendance()->clockIn($employee, $monday->copy()->setTime(13, 0));
+
+    expect($reopened->clock_in->format('H:i'))->toBe('09:00')
+        ->and($reopened->clock_out)->toBeNull()
+        ->and($reopened->isOpen())->toBeTrue()
+        ->and($reopened->status)->toBe(AttendanceStatus::Present)
+        ->and(AttendanceRecord::query()->where('employee_id', $employee->id)->count())->toBe(1);
+
+    // The whole day is judged again at the next clock-out.
+    expect(attendance()->clockOut($employee, $monday->copy()->setTime(17, 0))->status)->toBe(AttendanceStatus::Present);
+
+    // An Admin's Half day is the Admin's: re-opening leaves it.
+    $marked = officeEmployee(['working_hours_per_day' => '8.00']);
+    attendance()->clockIn($marked, $monday->copy()->setTime(9, 0));
+    $record = attendance()->clockOut($marked, $monday->copy()->setTime(17, 0));
+    $record->forceFill(['status' => AttendanceStatus::HalfDay, 'edited_by' => User::query()->value('id')])->save();
+
+    expect(attendance()->clockIn($marked, $monday->copy()->setTime(18, 0))->status)->toBe(AttendanceStatus::HalfDay);
+});

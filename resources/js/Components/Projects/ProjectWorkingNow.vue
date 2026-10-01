@@ -48,6 +48,9 @@ const longest = computed(() => {
     );
 });
 
+// Brief 024: the dot breathes only while at least one timer is running; all paused holds still.
+const anyRunning = computed(() => props.rows.some((row) => !row.paused));
+
 const label = computed(() => {
     const names = props.rows.map((row) => (row.paused ? `${row.employee.name} (paused)` : row.employee.name));
 
@@ -65,7 +68,10 @@ const label = computed(() => {
         class="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs"
     >
         <span class="inline-flex shrink-0 items-center gap-1.5 font-medium" aria-hidden="true">
-            <span class="size-2 shrink-0 rounded-full bg-status-done" />
+            <span
+                data-live-breathe
+                :class="cn('size-2 shrink-0 rounded-full bg-status-done', anyRunning && 'animate-live-breathe')"
+            />
             Working now
         </span>
         <span class="inline-flex shrink-0 items-center -space-x-1.5" aria-hidden="true">
