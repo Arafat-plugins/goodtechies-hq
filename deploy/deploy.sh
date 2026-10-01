@@ -177,9 +177,13 @@ npm run build
 step "migrate (pgsql_migrator)"
 artisan migrate --force --database=pgsql_migrator
 
+step "push notification keys (first release only)"
+artisan push:vapid --write
+
 step "cache config, routes and views"
 artisan config:cache
 artisan route:cache
+artisan event:cache
 artisan view:cache
 
 step "fix ownership of storage and bootstrap/cache"

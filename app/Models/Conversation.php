@@ -26,7 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * The one-store decision still holds: the spec's `task_comments` table does not exist and must
  * not be added.
  */
-#[Fillable(['type', 'linked_project_id', 'linked_task_id', 'dm_one_id', 'dm_two_id', 'title'])]
+#[Fillable(['type', 'linked_project_id', 'linked_task_id', 'dm_one_id', 'dm_two_id', 'title', 'avatar_path', 'created_by'])]
 class Conversation extends Model
 {
     /** @use HasFactory<ConversationFactory> */
@@ -106,6 +106,37 @@ class Conversation extends Model
         return $this->belongsToMany(User::class, 'conversation_members')
             ->withPivot('last_read_at')
             ->withTimestamps();
+    }
+
+    /**
+     * A group's people (decision 12-81), by name. Unlike `members()` this IS an access list —
+     * for `group` rows only, read by `ConversationPolicy::view` through `isGroupMember()`, and
+     * written only by `GroupService`.
+     *
+     * @return BelongsToMany<User, $this>
+     */
+    public function groupMembers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'conversation_group_members')
+            ->withPivot('added_by')
+            ->withTimestamps()
+            ->orderBy('users.name');
+    }
+
+    /**
+     * Is this person one of a group's members? False for every other type.
+     */
+    public function isGroupMember(User $user): bool
+    {
+        if ($this->type !== ConversationType::Group) {
+            return false;
+        }
+
+        if ($this->relationLoaded('groupMembers')) {
+            return $this->groupMembers->contains(fn (User $member): bool => (int) $member->getKey() === (int) $user->getKey());
+        }
+
+        return $this->groupMembers()->where('users.id', $user->getKey())->exists();
     }
 
     /**
@@ -235,7 +266,8 @@ class Conversation extends Model
 
     /**
      * The cheap, list-shaped half of "which conversations could this person's inbox hold":
-     * the three company-or-project channels, OR a DM they are named on.
+     * the three company-or-project channels, OR a DM they are named on, OR a group they are a
+     * member of (12-81).
      *
      * **The whole OR is one group, and that is the point of this scope existing**
      * (decision M-16). Written inline in the service, the `whereIn('type', …)->orWhere(fn …)`
@@ -266,6 +298,13 @@ class Conversation extends Model
                 ConversationType::Announcement->value,
                 ConversationType::Project->value,
             ])
-            ->orWhere(fn (Builder $dms) => $dms->dmsFor($user)));
+            ->orWhere(fn (Builder $dms) => $dms->dmsFor($user))
+            ->orWhere(fn (Builder $g) => $g
+                ->where('type', ConversationType::Group->value)
+                ->whereExists(fn ($member) => $member
+                    ->selectRaw('1')
+                    ->from('conversation_group_members')
+                    ->whereColumn('conversation_group_members.conversation_id', 'conversations.id')
+                    ->where('conversation_group_members.user_id', $user->getKey()))));
     }
 }

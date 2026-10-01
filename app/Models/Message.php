@@ -14,8 +14,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * One message in a conversation — one "comment" on a task.
  *
- * There is no edit and no delete, by design: a message is what somebody said at a time, and the
- * next message is answering it. That is the same rule that stops a message ATTACHMENT being
+ * Since 12-79 the author may edit or delete-for-everyone their own message at any time
+ * (MessageService::edit / delete). A deleted message keeps its row with a null body; the
+ * original text survives only in the `message.deleted` audit row. An attachment is still never
  * replaced with a new version (FilePolicy::replace).
  *
  * A message owns its attachments twice over, and the two cannot disagree — `files.message_id`
@@ -48,6 +49,29 @@ class Message extends Model
      * @var string
      */
     protected $dateFormat = UnreadLine::SQL_FORMAT;
+
+    protected function casts(): array
+    {
+        return [
+            'edited_at' => 'datetime',
+            'deleted_at' => 'datetime',
+        ];
+    }
+
+    public function isDeleted(): bool
+    {
+        return $this->deleted_at !== null;
+    }
+
+    /**
+     * Emoji reactions, oldest first (12-79).
+     *
+     * @return HasMany<MessageReaction, $this>
+     */
+    public function reactions(): HasMany
+    {
+        return $this->hasMany(MessageReaction::class)->orderBy('created_at')->orderBy('id');
+    }
 
     /**
      * @return BelongsTo<Conversation, $this>

@@ -211,7 +211,7 @@ fi
 
 if [[ " $INSTALL_ENV " == *" LOW_MEMORY=1 "* ]]; then
     step "low-memory profile"
-    check "PHP-FPM pool is ondemand" "pm = ondemand" \
+    check "PHP-FPM pool is dynamic (warm)" "pm = dynamic" \
         "$(in_container "grep -m1 '^pm = ' /etc/php/8.3/fpm/pool.d/goodtechies-hq.conf")"
     check "PostgreSQL shared_buffers" 128MB "$(in_container "sudo -u postgres psql -tAc 'show shared_buffers'")"
     check "PostgreSQL max_connections" 40 "$(in_container "sudo -u postgres psql -tAc 'show max_connections'")"

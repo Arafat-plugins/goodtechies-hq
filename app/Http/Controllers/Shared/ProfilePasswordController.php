@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Shared;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Profile\UpdatePasswordRequest;
+use App\Services\PushService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -13,7 +14,7 @@ class ProfilePasswordController extends Controller
     /**
      * Change the password and sign out every other device.
      */
-    public function __invoke(UpdatePasswordRequest $request): RedirectResponse
+    public function __invoke(UpdatePasswordRequest $request, PushService $push): RedirectResponse
     {
         $user = $request->user();
 
@@ -22,6 +23,9 @@ class ProfilePasswordController extends Controller
             'password' => $request->validated('password'),
             'remember_token' => Str::random(60),
         ])->save();
+
+        // A lost or shared device stops showing this person's notifications.
+        $push->forgetAllDevices($user);
 
         if (config('session.driver') === 'database') {
             DB::connection(config('session.connection'))

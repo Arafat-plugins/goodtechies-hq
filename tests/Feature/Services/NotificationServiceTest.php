@@ -261,11 +261,17 @@ it('marks all read in one pass and leaves nobody else\'s alone', function () {
 |--------------------------------------------------------------------------
 */
 
-it('delivers on the in-app channel and on no other', function () {
-    // The channels list exists so Phase 12 can switch a channel on. If this test fails, that
-    // is the change happening — deliberately or by accident — and it should be noticed.
+it('delivers in-app and as a browser push, except the two kinds a chat push already covers', function () {
+    // Web Push was switched on after launch (Profile → Notifications on this device). A DM and an
+    // announcement reach the phone as the message itself (MessagePusher), so their bell rows do
+    // not push a second time. Mail is still not built. If this test fails, a channel list
+    // changed — deliberately or by accident — and it should be noticed.
     foreach (NotificationType::cases() as $type) {
-        expect($type->channels())->toBe([NotificationChannel::InApp], $type->value.' must be in-app only in the MVP');
+        $expected = in_array($type, [NotificationType::MessageReceived, NotificationType::AnnouncementPosted], true)
+            ? [NotificationChannel::InApp]
+            : [NotificationChannel::InApp, NotificationChannel::WebPush];
+
+        expect($type->channels())->toBe($expected, $type->value.' has an unexpected channel list');
     }
 })->group('phase2');
 

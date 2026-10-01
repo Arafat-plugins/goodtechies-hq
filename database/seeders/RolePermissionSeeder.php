@@ -37,6 +37,7 @@ class RolePermissionSeeder extends Seeder
             PermissionKey::FinanceView->value,
             PermissionKey::FinanceManage->value,
             PermissionKey::MessagesUse->value,
+            PermissionKey::MessagesManage->value,
             PermissionKey::MeetingsUse->value,
             PermissionKey::AnnouncementsSend->value,
             PermissionKey::RolesManage->value,

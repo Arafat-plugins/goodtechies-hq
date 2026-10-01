@@ -2,7 +2,7 @@ import { router, usePage } from '@inertiajs/vue3';
 import { ChevronDown, ChevronUp, Minus } from '@lucide/vue';
 import type { Component, Ref } from 'vue';
 import { computed, onScopeDispose, ref, watch } from 'vue';
-import { pingInbox } from '@/Components/Realtime/shell';
+import { isViewingConversation, pingInbox } from '@/Components/Realtime/shell';
 import { listenPrivate, realtimeConnection, realtimeMode, realtimeReconnects } from '@/echo';
 import { backoff, fetchWithTimeout, onReconnect } from '@/lib/net';
 import { isSessionLive, reportResponse, sessionState } from '@/lib/session';
@@ -370,7 +370,35 @@ function apply(payload: NotificationRecent): void {
 
     announce(payload.unread_count);
     // Reliability slice 5: a rise since the last successful read may chime (`lib/sound.ts`).
-    noteUnread('bell', payload.unread_count);
+    // Brief 009: not for what belongs to the conversation on screen — those rows are left out of
+    // the count the chime compares, so a reply in the thread you are reading stays quiet.
+    noteUnread('bell', Math.max(0, payload.unread_count - onScreenUnread(payload.notifications)));
+}
+
+/** The conversation a row deep-links to (`/messages?conversation=<id>`), or `null`. */
+export function conversationOfLink(link: string | null): number | null {
+    if (link === null) {
+        return null;
+    }
+
+    try {
+        const url = new URL(link, 'http://localhost');
+        const id = Number(url.searchParams.get('conversation'));
+
+        return url.pathname.replace(/\/+$/, '') === '/messages' && Number.isInteger(id) && id > 0 ? id : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Unread rows about the conversation that is on screen while the tab is visible. */
+function onScreenUnread(rows: readonly NotificationRow[]): number {
+    if (!pageVisible()) {
+        return 0;
+    }
+
+    // `unread_count` counts rows (`NotificationService::unreadCount()`), so one per row.
+    return rows.filter((row) => !row.is_read && isViewingConversation(conversationOfLink(row.link))).length;
 }
 
 /**

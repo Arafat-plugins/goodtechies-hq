@@ -55,6 +55,7 @@ class ConversationService
         'author',
         'attachments.uploader',
         'mentions',
+        'reactions.user',
     ];
 
     /**
@@ -244,8 +245,12 @@ class ConversationService
         // restates its own type — and which would have quietly stopped being correct the first
         // time anybody appended a constraint to this builder. The scope closes the group before
         // a caller can reach it.
+        // `groupMembers` is loaded once for every group in the list, so the policy's group arm
+        // (`isGroupMember()`) reads the loaded relation instead of a query per row; the count
+        // is the inbox row's `member_count` (12-81).
         $candidates = Conversation::query()
-            ->with(['project', 'dmOne', 'dmTwo'])
+            ->with(['project', 'dmOne', 'dmTwo', 'groupMembers'])
+            ->withCount('groupMembers')
             ->inboxCandidatesFor($user)
             ->get();
 
@@ -626,6 +631,16 @@ class ConversationService
      */
     public function mentionableIn(Conversation $conversation): Collection
     {
+        // A group's mentionable set is its members (12-81) — still each asked through the
+        // policy, so a member who has since lost `messages.use` or been deactivated is not offered.
+        if ($conversation->type === ConversationType::Group) {
+            $conversation->loadMissing('groupMembers');
+
+            return $conversation->groupMembers
+                ->filter(fn (User $user): bool => Gate::forUser($user)->allows('view', $conversation))
+                ->values();
+        }
+
         /** @var Collection<int, User> $active */
         $active = User::query()
             ->where('status', UserStatus::Active->value)

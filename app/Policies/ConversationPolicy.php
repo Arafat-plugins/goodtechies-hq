@@ -100,6 +100,9 @@ class ConversationPolicy extends Policy
             // A DM is its two columns and nothing else.
             ConversationType::Dm => $conversation->isDmParticipant($user),
 
+            // A group is its member list (12-81) and nothing else.
+            ConversationType::Group => $conversation->isGroupMember($user),
+
             // Company-wide: the permission above was the whole question.
             ConversationType::Team, ConversationType::Announcement => true,
 

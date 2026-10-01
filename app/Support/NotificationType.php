@@ -242,7 +242,12 @@ enum NotificationType: string
      */
     public function channels(): array
     {
-        return [NotificationChannel::InApp];
+        return match ($this) {
+            // A DM and an announcement reach the phone as the message itself (MessagePusher,
+            // the person's "Messages" switch), so the bell row carries no second push.
+            self::MessageReceived, self::AnnouncementPosted => [NotificationChannel::InApp],
+            default => [NotificationChannel::InApp, NotificationChannel::WebPush],
+        };
     }
 
     /**

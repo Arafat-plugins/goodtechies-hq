@@ -5,18 +5,22 @@ use App\Http\Controllers\Shared\ExpenseController;
 use App\Http\Controllers\Shared\FileDownloadController;
 use App\Http\Controllers\Shared\FinanceCategoryController;
 use App\Http\Controllers\Shared\FinanceReportController;
+use App\Http\Controllers\Shared\GroupController;
 use App\Http\Controllers\Shared\IncomeController;
 use App\Http\Controllers\Shared\LeaveController;
 use App\Http\Controllers\Shared\MeetingController;
 use App\Http\Controllers\Shared\MeetingDetailController;
 use App\Http\Controllers\Shared\MessageController;
+use App\Http\Controllers\Shared\MessageEditController;
 use App\Http\Controllers\Shared\NotificationController;
 use App\Http\Controllers\Shared\PayrollController;
 use App\Http\Controllers\Shared\PayslipController;
+use App\Http\Controllers\Shared\PresenceController;
 use App\Http\Controllers\Shared\ProfileController;
 use App\Http\Controllers\Shared\ProfilePasswordController;
 use App\Http\Controllers\Shared\ProfileSessionController;
 use App\Http\Controllers\Shared\ProfileTwoFactorController;
+use App\Http\Controllers\Shared\PushSubscriptionController;
 use App\Http\Controllers\Shared\SalaryController;
 use App\Http\Controllers\Shared\SearchController;
 use App\Http\Controllers\Shared\TaskTimerController;
@@ -59,6 +63,11 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
         ->middleware('throttle:search')
         ->name('search.index');
 
+    // Presence heartbeat (12-79): moves `users.last_seen_at`, at most every 30 seconds. Every
+    // signed-in person has a last-seen time; who may SEE it is the messaging payloads' business.
+    Route::post('/presence/heartbeat', [PresenceController::class, 'heartbeat'])
+        ->name('presence.heartbeat');
+
     Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::put('/profile/password', ProfilePasswordController::class)->name('profile.password.update');
@@ -71,6 +80,17 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
     // {session} is the raw session id, not a bound model.
     Route::delete('/profile/sessions/{session}', [ProfileSessionController::class, 'destroy'])
         ->name('profile.sessions.destroy');
+
+    // Push notifications on this device (Profile). JSON for the two subscription calls, because
+    // the browser's PushManager — not a form — produces what is posted.
+    Route::post('/push/subscriptions', [PushSubscriptionController::class, 'store'])
+        ->middleware('throttle:30,1')
+        ->name('push.subscriptions.store');
+    Route::delete('/push/subscriptions', [PushSubscriptionController::class, 'destroy'])
+        ->middleware('throttle:30,1')
+        ->name('push.subscriptions.destroy');
+    Route::put('/profile/push', [PushSubscriptionController::class, 'preferences'])
+        ->name('profile.push.update');
 
     // The bell and the Notification Center. Shared rather than one set per surface, for the
     // same reason the file download is: a person's own mail is a fact about the person, not
@@ -164,6 +184,42 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
             Route::post('/{conversation}/read', [MessageController::class, 'read'])
                 ->whereNumber('conversation')
                 ->name('read');
+
+            // Edit, delete-for-everyone and react (12-79). The message must belong to the
+            // conversation in the URL (404 otherwise); MessagePolicy decides the rest.
+            Route::patch('/{conversation}/messages/{message}', [MessageEditController::class, 'update'])
+                ->middleware('throttle:posting')
+                ->whereNumber(['conversation', 'message'])
+                ->name('update');
+            Route::delete('/{conversation}/messages/{message}', [MessageEditController::class, 'destroy'])
+                ->middleware('throttle:posting')
+                ->whereNumber(['conversation', 'message'])
+                ->name('destroy');
+            Route::post('/{conversation}/messages/{message}/reactions', [MessageEditController::class, 'react'])
+                ->middleware('throttle:posting')
+                ->whereNumber(['conversation', 'message'])
+                ->name('react');
+
+            // Message groups (12-81). Writes need `messages.manage` (403, the Form Requests);
+            // a `{conversation}` that is not a group the actor may view is 404 (GroupController).
+            Route::post('/groups', [GroupController::class, 'store'])
+                ->middleware('throttle:posting')
+                ->name('groups.store');
+            Route::post('/groups/{conversation}', [GroupController::class, 'update'])
+                ->middleware('throttle:posting')
+                ->whereNumber('conversation')
+                ->name('groups.update');
+            Route::post('/groups/{conversation}/members', [GroupController::class, 'addMembers'])
+                ->middleware('throttle:posting')
+                ->whereNumber('conversation')
+                ->name('groups.members.add');
+            Route::delete('/groups/{conversation}/members/{user}', [GroupController::class, 'removeMember'])
+                ->middleware('throttle:posting')
+                ->whereNumber(['conversation', 'user'])
+                ->name('groups.members.remove');
+            Route::get('/groups/{conversation}/avatar', [GroupController::class, 'avatar'])
+                ->whereNumber('conversation')
+                ->name('groups.avatar');
         });
 
     // The Team directory (Part D §2: Admin WORK → Team, Employee Messages → Team, Phase 6).
@@ -216,6 +272,8 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
     Route::post('/task-timer/resume', [TaskTimerController::class, 'resume'])->name('task-timer.resume');
     Route::post('/task-timer/stop', [TaskTimerController::class, 'stop'])->name('task-timer.stop');
     Route::post('/task-timer/heartbeat', [TaskTimerController::class, 'heartbeat'])->name('task-timer.heartbeat');
+    // The last tab's `pagehide` beacon (`_token` as a form field): a mark the sweep acts on.
+    Route::post('/task-timer/leaving', [TaskTimerController::class, 'leaving'])->name('task-timer.leaving');
 
     // My Leave, and applying for it (master prompt Part D §9, Phase 5). Shared rather than one
     // set per surface for the reason the clock above is, and Part C §1 states it outright:

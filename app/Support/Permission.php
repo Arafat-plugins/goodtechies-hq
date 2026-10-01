@@ -50,6 +50,9 @@ enum Permission: string
      */
     case MessagesUse = 'messages.use';
 
+    /** Create and manage groups; delete others' messages outside DMs — 12-79. */
+    case MessagesManage = 'messages.manage';
+
     /**
      * May this person have meetings at all (Phase 7).
      *

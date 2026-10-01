@@ -133,10 +133,13 @@ it('sends exactly the documented thread keys', function () {
     expect(array_keys($payload))->toEqualCanonicalizing([
         'conversation_id', 'type', 'label', 'messages', 'has_more', 'can_post',
         'mentionable', 'last_read_at', 'unread_count',
+        // 12-79 / 12-81: the DM peer and the group (null for a team channel).
+        'peer', 'group',
     ])
         ->and(array_keys($payload['messages'][0]))->toEqualCanonicalizing([
             'id', 'body', 'author', 'is_mine', 'created_at', 'attachments',
             'mentions', 'mentions_me',
+            'edited_at', 'is_deleted', 'can_edit', 'can_delete', 'reactions', 'seen',
         ])
         // The picker's options never include the reader themselves, and never the Accountant.
         ->and(array_column($payload['mentionable'], 'id'))

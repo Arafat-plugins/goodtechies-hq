@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\ResetPasswordRequest;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\PushService;
 use App\Support\AuditEvent;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\RedirectResponse;
@@ -59,6 +60,9 @@ class NewPasswordController extends Controller
                 $user->forceFill(['password' => $password]);
                 $user->setRememberToken(Str::random(60));
                 $user->save();
+
+                // A lost or shared device stops showing this person's notifications.
+                app(PushService::class)->forgetAllDevices($user);
 
                 DB::table('sessions')->where('user_id', $user->id)->delete();
 

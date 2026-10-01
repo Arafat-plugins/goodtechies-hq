@@ -382,6 +382,8 @@ class AttendanceService
 
             $record->sessions()->create(['clock_in' => $at]);
 
+            $this->auditClock(AuditEvent::AttendanceClockedIn, $record, $employee, $at, open: true);
+
             return $record;
         });
     }
@@ -422,7 +424,26 @@ class AttendanceService
 
         $record->sessions()->create(['clock_in' => $at]);
 
+        $this->auditClock(AuditEvent::AttendanceClockedIn, $record, $employee, $at, open: true);
+
         return $record;
+    }
+
+    /**
+     * One Audit Log row per clock-in and clock-out (the client, item 12): the day, the time, which
+     * session of the day it is, and the worked minutes once the session is closed. Written inside
+     * the clock's own transaction, after the save, so a refused clock leaves no row.
+     */
+    private function auditClock(AuditEvent $event, AttendanceRecord $record, Employee $employee, CarbonInterface $at, bool $open): void
+    {
+        $record->unsetRelation('sessions');
+
+        $this->audit->record($event, $record, null, [
+            'date' => Carbon::parse($record->date)->format('Y-m-d'),
+            'at' => Carbon::parse($at)->format('H:i'),
+            'session' => $record->sessions()->count(),
+            'worked_minutes' => $open ? null : $record->workedMinutes(),
+        ], $employee->user);
     }
 
     /**
@@ -468,6 +489,8 @@ class AttendanceService
             }
 
             $record->save();
+
+            $this->auditClock(AuditEvent::AttendanceClockedOut, $record, $employee, $at, open: false);
 
             // Flow F3: a task timer on the office clock runs INSIDE the clock-in and cannot
             // outlive it. Stopped at the clock-out's own moment, in the same transaction, so a

@@ -14,6 +14,7 @@ use App\Services\TimerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -108,6 +109,19 @@ class TimerController extends Controller
         }
 
         return response()->json($this->timerState($request, $employee));
+    }
+
+    /**
+     * The remote widget's `pagehide` beacon — the same mark as `/task-timer/leaving`, for the
+     * remote timer's own route family. The sweep stops the entry at the closing moment.
+     */
+    public function leaving(Request $request): Response
+    {
+        Gate::authorize('track', TimeEntry::class);
+
+        $this->timer->markLeaving($this->employee($request));
+
+        return response()->noContent();
     }
 
     /**

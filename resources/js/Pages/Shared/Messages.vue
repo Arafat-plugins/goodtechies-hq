@@ -10,11 +10,14 @@ import {
     PanelRightClose,
     RefreshCw,
     Users,
+    UsersRound,
 } from '@lucide/vue';
 import { useMediaQuery } from '@vueuse/core';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
+import ConversationAvatar from '@/Components/Messages/ConversationAvatar.vue';
 import ConversationContextPanel from '@/Components/Messages/ConversationContextPanel.vue';
+import GroupDialog from '@/Components/Messages/GroupDialog.vue';
 import MessagesRail from '@/Components/Messages/MessagesRail.vue';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
 import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
@@ -31,9 +34,17 @@ import type {
     ConversationSummary,
     ConversationTypeKey,
     MessagePerson,
+    ThreadGroup,
     ThreadPayload,
 } from '@/Components/Messages/messages';
-import { conversationRoutes, formatMessageTime, messagesHref } from '@/Components/Messages/messages';
+import {
+    conversationContextState,
+    conversationRoutes,
+    formatMessageTime,
+    loadConversationContext,
+    messagesHref,
+} from '@/Components/Messages/messages';
+import { isOnline, presenceText, usePresence } from '@/Components/Messages/presence';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
@@ -102,6 +113,8 @@ const props = defineProps<{
     active: ThreadPayload | null;
     announcement: AnnouncementBanner | null;
     people: MessagePerson[];
+    /** Brief 010: `messages.manage` — may this person create groups (12-81)? */
+    can_manage_groups?: boolean;
 }>();
 
 const page = usePage();
@@ -175,6 +188,60 @@ watch(activeId, () => {
     panelOpen.value = false;
 });
 
+/* ------------------------------------------------------------------ people and groups (brief 010) */
+
+/** The `online` presence membership, for the dots in the rail and the header. */
+usePresence();
+
+/** The open conversation's rail row — refreshed by every rail reload, so fresher than `active`. */
+const activeRow = computed(() => props.conversations.find((row) => row.id === activeId.value) ?? null);
+
+/** What *Manage group* last saved, until the next navigation brings a fresh `active`. */
+const savedGroup = ref<ThreadGroup | null>(null);
+
+watch(activeId, () => {
+    savedGroup.value = null;
+});
+
+const activeGroup = computed<ThreadGroup | null>(() => savedGroup.value ?? props.active?.group ?? null);
+
+const headerLabel = computed(
+    () => savedGroup.value?.name ?? activeRow.value?.label ?? props.active?.label ?? '',
+);
+
+const groupPicture = computed(() =>
+    savedGroup.value !== null
+        ? savedGroup.value.avatar_url
+        : (activeRow.value?.avatar_url ?? props.active?.group?.avatar_url ?? null),
+);
+
+const memberCount = computed(
+    () => savedGroup.value?.members.length ?? activeRow.value?.member_count ?? props.active?.group?.members.length ?? 0,
+);
+
+/** The later of the two last-seen times on hand: the rail row's (reloaded) or the thread's. */
+const peerLastSeen = computed(() => {
+    const times = [activeRow.value?.peer_last_seen_at, props.active?.peer?.last_seen_at].filter(
+        (value): value is string => typeof value === 'string' && value !== '',
+    );
+
+    return times.sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null;
+});
+
+const peerOnline = computed(() => isOnline(props.active?.peer?.id, peerLastSeen.value));
+
+function onGroupSaved(group: ThreadGroup): void {
+    savedGroup.value = group;
+    reloadRail();
+
+    // The details panel lists the members; a panel already fetched is fetched again.
+    const id = activeId.value;
+
+    if (id !== null && conversationContextState(viewerId.value, id).value.status !== 'idle') {
+        void loadConversationContext(viewerId.value, id, true);
+    }
+}
+
 /* ------------------------------------------------------------------ the thread's seam */
 
 const threadEl = ref<InstanceType<typeof MessageThread> | null>(null);
@@ -206,12 +273,22 @@ function refresh(): void {
  */
 const railReloading = ref(false);
 
+/**
+ * Brief 009: the inbox doorbell and the open thread's own ping usually ring for the SAME
+ * message, a moment apart. Rings inside this window of the last reload are that one reload.
+ */
+const RAIL_COALESCE_MS = 300;
+let railReloadedAt = 0;
+
 function reloadRail(): void {
-    if (railReloading.value) {
+    const now = Date.now();
+
+    if (railReloading.value || now - railReloadedAt < RAIL_COALESCE_MS) {
         return;
     }
 
     railReloading.value = true;
+    railReloadedAt = now;
 
     // `preserveState` and `preserveScroll` are not passed because `router.reload()` forces both
     // to true itself (`doReload`), and Inertia's own types refuse them here to say so. They are
@@ -270,6 +347,7 @@ const ICONS: Record<ConversationTypeKey, typeof Hash> = {
     project: Hash,
     dm: MessageSquare,
     task: MessageSquare,
+    group: UsersRound,
 };
 
 /**
@@ -284,6 +362,7 @@ const LINES: Record<ConversationTypeKey, string> = {
     project: 'Everybody who can see this project can read and post here.',
     task: 'Everybody who can see this task can read and post here.',
     dm: 'Just the two of you.',
+    group: 'Only the people in this group can read it.',
 };
 
 const activeIcon = computed(() =>
@@ -365,6 +444,7 @@ const activeLine = computed(() =>
                             :conversations="conversations"
                             :active-id="activeId"
                             :people="people"
+                            :can-manage-groups="can_manage_groups === true"
                         />
                     </div>
                 </Card>
@@ -393,20 +473,57 @@ const activeLine = computed(() =>
                                 </Link>
                             </Button>
 
+                            <!-- Brief 010: a person or a group has a face; a channel its icon. -->
+                            <ConversationAvatar
+                                v-if="active.type === 'dm' && active.peer"
+                                :label="headerLabel"
+                                :online="peerOnline"
+                            />
+                            <ConversationAvatar
+                                v-else-if="active.type === 'group'"
+                                :label="headerLabel"
+                                :avatar-url="groupPicture"
+                            />
                             <component
                                 :is="activeIcon"
+                                v-else
                                 class="hidden size-4 shrink-0 text-muted-foreground lg:block"
                                 aria-hidden="true"
                             />
 
                             <div class="min-w-0 flex-1">
                                 <h2 class="min-w-0 truncate text-sm font-medium">
-                                    {{ active.label }}
+                                    {{ headerLabel }}
                                 </h2>
-                                <p v-if="activeLine" class="min-w-0 truncate text-xs text-muted-foreground">
+                                <!-- A DM: "online", or when they were last seen. -->
+                                <p
+                                    v-if="active.type === 'dm' && active.peer"
+                                    class="min-w-0 truncate text-xs text-muted-foreground"
+                                >
+                                    {{ presenceText(active.peer.id, peerLastSeen) }}
+                                </p>
+                                <!-- A group: the head count, which opens the member list. -->
+                                <button
+                                    v-else-if="active.type === 'group'"
+                                    type="button"
+                                    class="block max-w-full min-w-0 truncate rounded-sm text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                                    :aria-label="`${memberCount === 1 ? '1 member' : `${memberCount} members`} — show the member list`"
+                                    @click="panelOpen = true"
+                                >
+                                    {{ memberCount === 1 ? '1 member' : `${memberCount} members` }}
+                                </button>
+                                <p v-else-if="activeLine" class="min-w-0 truncate text-xs text-muted-foreground">
                                     {{ activeLine }}
                                 </p>
                             </div>
+
+                            <GroupDialog
+                                v-if="active.type === 'group' && activeGroup?.can_manage"
+                                mode="edit"
+                                :group="activeGroup"
+                                :people="people"
+                                @saved="onGroupSaved"
+                            />
 
                             <!--
                                 How this thread is keeping itself current. A word and a mark,

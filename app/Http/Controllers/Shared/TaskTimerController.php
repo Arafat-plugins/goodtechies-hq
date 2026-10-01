@@ -14,6 +14,7 @@ use App\Services\TimerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 
@@ -97,6 +98,21 @@ class TaskTimerController extends Controller
             'heartbeat_seconds' => 60,
             'heartbeat_timeout_minutes' => (int) $this->settings->get('heartbeat_timeout_minutes'),
         ]);
+    }
+
+    /**
+     * The `pagehide` beacon from the last goodERP tab while a timer runs. It only marks the
+     * moment; `TimerService::sweep()` stops the entry AT it once the 30-second grace has passed
+     * with no heartbeat (a reload beats at once and cancels it). The beacon carries the CSRF
+     * token as the `_token` form field — `sendBeacon` cannot set headers.
+     */
+    public function leaving(Request $request): Response
+    {
+        Gate::authorize('trackTasks', TimeEntry::class);
+
+        $this->timer->markLeaving($this->employee($request));
+
+        return response()->noContent();
     }
 
     private function onOpenEntry(Request $request, callable $action, string $success): RedirectResponse

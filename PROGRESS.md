@@ -1499,6 +1499,25 @@ and the UPDATE would have been refused.
   eight project screens still on the client-side tone map (12-55), and a withdrawal that does not
   quieten the approver's unread row (12-59).
 
+## Post-launch — Android app and push notifications (1 Oct 2026) ✅
+
+Asked for by the client after the VPS launch: *"need an android app for this … i will give improvement in my laravel app and it will get perfectly all thinks"* and *"have to add some setting that will notify the user for messages and notifications"*.
+
+- **Android app = a Trusted Web Activity** over https://erp.goodtechies.com (`android/`, see `android/README.md`). It contains no copy of the app, so every deploy reaches it with no new APK. Current APK: **1.0.3** (versionCode 4). If Chrome can't take over within 8 s, the app opens the site in its own WebView instead (6 Robolectric tests). The signing key is in `android/keystore/`: gitignored, **back it up privately**.
+- **The site is installable:** `public/manifest.json`, `public/sw.js`, `public/offline.html`, `public/.well-known/assetlinks.json` (`tests/Unit/PwaShellTest.php`).
+- **Push notifications (Web Push, VAPID).** This overrides Part H §1's "no push in MVP" because the client asked for it after launch.
+  - Profile has a **Notifications on this device** card: *Turn on* per device, plus two per-person switches: **Messages** (every message in a chat you can read, except task discussions) and **Alerts** (every bell notification).
+  - `NotificationType::channels()` now lists `WebPush` for every kind except `message.received` and `announcement.posted`, which reach the phone as the message itself. So Admin → Notifications can switch push off per kind.
+  - Pieces: `PushService`, `SendWebPush` (queued, after commit), `MessagePusher`, `PushSubscriptionController`, migration `2026_10_31_0001_web_push`.
+  - Security review fixes:
+    - Push hosts are allow-listed and redirects are never followed.
+    - Links are sent as a path only, and the service worker opens goodERP only.
+    - At most 10 devices per person.
+    - A device moves to another person only with its auth secret.
+    - Signing out turns that device off, and a password change, password reset or ended session forgets all devices.
+  - Tests: `tests/Feature/Push` (19).
+- **Deploy:** `deploy/deploy.sh` now runs `php artisan push:vapid --write`, which creates the VAPID keys once and never replaces them. The release adds a migration.
+
 ## Deferred polish
 
 **`POLISH-BACKLOG.md`** (root) is the debt column, opened 24 Sep 2026 at the client's

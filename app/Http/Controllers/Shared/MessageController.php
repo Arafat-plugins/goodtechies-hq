@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\BuildsDiscussionPayload;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Conversation\StoreMessageRequest;
 use App\Http\Resources\FileResource;
+use App\Http\Resources\MessageResource;
 use App\Models\Conversation;
 use App\Models\File;
 use App\Models\Message;
@@ -16,6 +17,7 @@ use App\Models\User;
 use App\Services\ConversationService;
 use App\Services\MessageService;
 use App\Support\ConversationType;
+use App\Support\Permission;
 use App\Support\Surface;
 use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Collection;
@@ -23,6 +25,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -105,9 +108,10 @@ class MessageController extends Controller
             // Which thread is open was decided above and outside this closure (so `?unread=1`
             // picks it from the same counts either way): the inbox is the policy-checked list,
             // so nothing here can reach a conversation that list did not already allow.
-            'active' => fn (): ?array => $active === null ? null : $this->threadPayload($request, $active),
+            'active' => fn (): ?array => $active === null ? null : $this->threadWithPeer($request, $active),
             'announcement' => $this->banner($user),
             'people' => $this->messageablePeople($user),
+            'can_manage_groups' => $user->hasPermission(Permission::MessagesManage),
         ]);
     }
 
@@ -199,7 +203,43 @@ class MessageController extends Controller
             $this->conversations->markRead($user, $conversation);
         }
 
-        return response()->json($this->threadPayload($request, $conversation, $before > 0 ? $before : null));
+        return response()->json($this->threadWithPeer($request, $conversation, $before > 0 ? $before : null));
+    }
+
+    /**
+     * The thread payload plus `peer` (12-79): for a DM, the other person and their last-seen
+     * time, else null. Their `last_read_at` is put on the request first so MessageResource can
+     * answer `seen` for every message without a query per message.
+     *
+     * @return array<string, mixed>
+     */
+    private function threadWithPeer(Request $request, Conversation $conversation, ?int $before = null): array
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $peer = $conversation->dmCounterpartFor($user);
+
+        if ($conversation->type === ConversationType::Dm) {
+            $raw = $peer === null
+                ? null
+                : $conversation->members()->whereKey($peer->getKey())->first()?->pivot?->last_read_at;
+
+            $request->attributes->set('peer_last_read_at', $raw === null ? null : Carbon::parse($raw));
+        }
+
+        return $this->threadPayload($request, $conversation, $before) + [
+            'peer' => $peer === null ? null : [
+                'id' => (int) $peer->getKey(),
+                'name' => (string) $peer->name,
+                'last_seen_at' => $peer->last_seen_at?->toIso8601String(),
+            ],
+            // 12-81: a group's name, picture, members (loaded once) and whether this reader
+            // may manage it; null for every other type.
+            'group' => $conversation->type === ConversationType::Group
+                ? GroupController::present($conversation, $user)
+                : null,
+        ];
     }
 
     /**
@@ -313,12 +353,12 @@ class MessageController extends Controller
      * `voice` plus a length in seconds for a recording. The request validates both and this
      * hands them over unread — see StoreMessageRequest.
      */
-    public function store(StoreMessageRequest $request, Conversation $conversation): RedirectResponse
+    public function store(StoreMessageRequest $request, Conversation $conversation): RedirectResponse|JsonResponse
     {
         $conversation = $this->visibleConversation($request, $conversation);
 
         try {
-            $this->messages->post(
+            $message = $this->messages->post(
                 $request->user(),
                 $conversation,
                 $request->body(),
@@ -328,7 +368,16 @@ class MessageController extends Controller
                 $request->duration(),
             );
         } catch (ConversationStateException|FileStateException $exception) {
-            return back()->with('error', $exception->getMessage());
+            return $request->expectsJson()
+                ? response()->json(['message' => $exception->getMessage()], 422)
+                : back()->with('error', $exception->getMessage());
+        }
+
+        // 12-79: a JSON caller (the optimistic composer) gets the message itself.
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => (new MessageResource($message->load(ConversationService::MESSAGE_RELATIONS)))->resolve($request),
+            ], 201);
         }
 
         return back()->with('success', 'Message sent.');
@@ -404,12 +453,23 @@ class MessageController extends Controller
      */
     private function summary(Conversation $conversation, User $user, ?Message $latest, int $unread): array
     {
+        // `dmOne` / `dmTwo` are eager-loaded by inboxFor(), so the peer costs no query per row.
+        $peer = $conversation->dmCounterpartFor($user);
+
         return [
+            'peer_id' => $peer === null ? null : (int) $peer->getKey(),
+            'peer_last_seen_at' => $peer?->last_seen_at?->toIso8601String(),
             'id' => (int) $conversation->getKey(),
             'type' => $conversation->type?->value,
             'group' => $conversation->type?->group(),
             'label' => $conversation->labelFor($user),
             'unread_count' => $unread,
+            // 12-81: a group's picture and head count. `group_members_count` comes from the
+            // inbox query's `withCount`, so neither costs a query per row.
+            'avatar_url' => GroupController::avatarUrl($conversation),
+            'member_count' => $conversation->type === ConversationType::Group
+                ? (int) ($conversation->group_members_count ?? $conversation->groupMembers()->count())
+                : null,
             'last_message' => $latest === null ? null : [
                 'author' => $latest->author?->name,
                 'is_mine' => (int) $latest->author_id === (int) $user->getKey(),

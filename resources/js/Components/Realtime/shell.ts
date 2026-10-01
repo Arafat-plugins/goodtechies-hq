@@ -4,6 +4,7 @@ import { computed, readonly, ref, watch } from 'vue';
 import { SHELL_POLL_MS, conversationChannel, useLiveRefresh } from '@/Components/Realtime/live';
 import { liveReload } from '@/Components/Realtime/reload';
 import type { AnnouncementBanner, ConversationSummary } from '@/Components/Messages/messages';
+import { xsrfToken } from '@/Components/Messages/messages';
 import { bindChimeUser, noteUnread, rebaseUnread } from '@/lib/sound';
 
 /**
@@ -250,6 +251,65 @@ export function pingInbox(): void {
     }
 }
 
+/* ------------------------------------------------------------------ the presence heartbeat */
+
+/** Brief 010: how often a visible tab says "still here" (`POST /presence/heartbeat`, 12-79). */
+const HEARTBEAT_MS = 60_000;
+
+let heartbeatStarted = false;
+
+/**
+ * Keep `users.last_seen_at` moving while a tab of this person's is visible: once on start, every
+ * 60 s while visible, and once on becoming visible again. It is the polling build's whole idea of
+ * "online" and the socket build's "last seen". Once per page load (module state), from the shell,
+ * because every screen — not just Messages — means the person is here. A 403 stops it for good;
+ * any other failure is simply the next beat's problem.
+ */
+function startPresenceHeartbeat(): void {
+    if (heartbeatStarted || typeof document === 'undefined') {
+        return;
+    }
+
+    heartbeatStarted = true;
+
+    let refused = false;
+
+    const beat = (): void => {
+        if (refused || document.visibilityState !== 'visible') {
+            return;
+        }
+
+        void fetch('/presence/heartbeat', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': xsrfToken(),
+            },
+        })
+            .then((response) => {
+                if (response.status === 403) {
+                    refused = true;
+                    clearInterval(timer);
+                }
+            })
+            .catch(() => {
+                // Offline: the connectivity strip says so; the next beat tries again.
+            });
+    };
+
+    const timer = setInterval(beat, HEARTBEAT_MS);
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            beat();
+        }
+    });
+
+    beat();
+}
+
 /* ------------------------------------------------------------------ the composable */
 
 /**
@@ -295,6 +355,10 @@ export function useShellLive(): {
     // `loaded` is module state, so a navigation that remounts the layout does not ask again.
     if (!loaded.value) {
         refresh();
+    }
+
+    if (page.props.auth.user) {
+        startPresenceHeartbeat();
     }
 
     useLiveRefresh(null, refresh, { intervalMs: SHELL_POLL_MS });

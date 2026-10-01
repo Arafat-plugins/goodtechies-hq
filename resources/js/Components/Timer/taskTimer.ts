@@ -82,6 +82,8 @@ export const taskTimerRoutes = {
     resume: '/task-timer/resume',
     stop: '/task-timer/stop',
     heartbeat: '/task-timer/heartbeat',
+    /** The last tab's `pagehide` beacon (`TaskTimerPulse`). */
+    leaving: '/task-timer/leaving',
 } as const;
 
 /** The confirm's words, verbatim from the brief. */

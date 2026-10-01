@@ -42,7 +42,8 @@ const navigating = useShellNavigationPending();
                 :aria-busy="navigating ? 'true' : undefined"
                 :class="
                     cn(
-                        'mx-auto w-full max-w-screen-2xl flex-1 p-4 outline-none md:p-6',
+                        // Full width on every page, like the Tasks views — 12-80
+                        'w-full max-w-none flex-1 p-4 pt-3 outline-none md:px-4',
                         '*:transition-opacity *:duration-200 motion-reduce:*:transition-none',
                         navigating && '*:opacity-70',
                     )

@@ -4,6 +4,8 @@ namespace App\Policies;
 
 use App\Models\Message;
 use App\Models\User;
+use App\Support\ConversationType;
+use App\Support\Permission;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -15,8 +17,9 @@ use Illuminate\Support\Facades\Gate;
  * That is what makes "an employee sees the discussion only of tasks they are assigned to" true
  * of the attachments as well, without the word "assigned" appearing anywhere in this file.
  *
- * There is no `update` in the editing sense and no `delete`: a message cannot be changed or
- * removed, by anybody, and there is no endpoint for either.
+ * Since 12-79 `update` is also the edit ability (the author, while they may still post), and
+ * `delete` / `react` exist. A deleted message can be neither edited, deleted again, nor reacted
+ * to.
  */
 class MessagePolicy extends Policy
 {
@@ -54,6 +57,10 @@ class MessagePolicy extends Policy
             return false;
         }
 
+        if ($message->isDeleted()) {
+            return false;
+        }
+
         if ($message->author_id === null || (int) $message->author_id !== (int) $user->getKey()) {
             return false;
         }
@@ -61,5 +68,31 @@ class MessagePolicy extends Policy
         $conversation = $message->conversation;
 
         return $conversation !== null && Gate::forUser($user)->allows('post', $conversation);
+    }
+
+    /**
+     * Delete for everyone (12-79): the author, or — outside a DM — a holder of
+     * `messages.manage`. Never a message already deleted.
+     */
+    public function delete(User $user, Message $message): bool
+    {
+        if ($message->isDeleted() || ! $this->view($user, $message)) {
+            return false;
+        }
+
+        if ($message->author_id !== null && (int) $message->author_id === (int) $user->getKey()) {
+            return true;
+        }
+
+        return $this->allows($user, Permission::MessagesManage)
+            && $message->conversation->type !== ConversationType::Dm;
+    }
+
+    /**
+     * Anyone who can see a live message may react to it (12-79).
+     */
+    public function react(User $user, Message $message): bool
+    {
+        return ! $message->isDeleted() && $this->view($user, $message);
     }
 }

@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
@@ -351,7 +352,91 @@ class TimerService
             'last_heartbeat_at' => $this->latest($entry->last_heartbeat_at, $at),
         ])->save();
 
+        // A beat after a "tab closed" mark means a page is still alive — a reload, or another
+        // tab — so the mark is void and the sweep must not stop this entry for it.
+        $mark = $this->leavingMark((int) $entry->employee_id);
+
+        if ($mark !== null && $at->greaterThanOrEqualTo($mark)) {
+            Cache::forget(self::leavingKey((int) $entry->employee_id));
+        }
+
         return $entry;
+    }
+
+    /* ============================================================== the tab-close beacon */
+
+    /** Seconds a "tab closed" mark waits before the sweep acts on it — a reload's grace. */
+    public const LEAVING_GRACE_SECONDS = 30;
+
+    public static function leavingKey(int $employeeId): string
+    {
+        return "timer-leaving:{$employeeId}";
+    }
+
+    /**
+     * The browser said its last goodERP tab is going (`pagehide` beacon). Only a mark: the sweep
+     * stops the open entry AT this moment once the mark is `LEAVING_GRACE_SECONDS` old and no
+     * heartbeat has arrived since — a reloaded page beats straight away and cancels it.
+     */
+    public function markLeaving(Employee $employee, ?Carbon $at = null): void
+    {
+        Cache::put(self::leavingKey((int) $employee->getKey()), ($at ?? Carbon::now())->toIso8601String(), 600);
+    }
+
+    private function leavingMark(int $employeeId): ?Carbon
+    {
+        $raw = Cache::get(self::leavingKey($employeeId));
+
+        return is_string($raw) ? Carbon::parse($raw)->setTimezone(config('app.timezone')) : null;
+    }
+
+    /**
+     * Stop every open entry (task timer and remote timer alike) whose employee closed the last
+     * tab at least `LEAVING_GRACE_SECONDS` ago with no sign of life since, at the closing time.
+     *
+     * @return list<int> the ids stopped
+     */
+    public function stopLeft(?Carbon $now = null): array
+    {
+        $now = $now ?? Carbon::now();
+
+        $employeeIds = TimeEntry::query()->open()->distinct()->pluck('employee_id')
+            ->map(fn ($id): int => (int) $id)->all();
+
+        if ($employeeIds === []) {
+            return [];
+        }
+
+        $marks = Cache::many(array_map(fn (int $id): string => self::leavingKey($id), $employeeIds));
+        $stopped = [];
+
+        foreach ($employeeIds as $employeeId) {
+            $raw = $marks[self::leavingKey($employeeId)] ?? null;
+
+            if (! is_string($raw)) {
+                continue;
+            }
+
+            $mark = Carbon::parse($raw)->setTimezone(config('app.timezone'));
+
+            if ($mark->copy()->addSeconds(self::LEAVING_GRACE_SECONDS)->greaterThan($now)) {
+                continue;
+            }
+
+            $entry = TimeEntry::query()->open()->where('employee_id', $employeeId)->first();
+
+            // Started, or beaten, after the tab closed: another page is alive. The mark is spent.
+            if ($entry !== null
+                && $entry->started_at->lessThanOrEqualTo($mark)
+                && ($entry->last_heartbeat_at === null || $entry->last_heartbeat_at->lessThanOrEqualTo($mark))) {
+                $this->stop($entry, $mark, TimerFlag::tabClosed($mark->format('H:i')));
+                $stopped[] = (int) $entry->getKey();
+            }
+
+            Cache::forget(self::leavingKey($employeeId));
+        }
+
+        return $stopped;
     }
 
     /* ================================================================= offline replay */
@@ -1004,6 +1089,11 @@ class TimerService
     public function sweep(?Carbon $now = null): array
     {
         $now = $now ?? Carbon::now();
+
+        // A closed last tab first: it ends the entry at the closing moment,
+        // which is earlier than anything the two rules below would write.
+        $left = $this->stopLeft($now);
+
         $staleBefore = $now->copy()->subMinutes($this->heartbeatTimeoutMinutes());
         $maxHours = (float) $this->settings->get('timer_max_session_hours');
 
@@ -1022,11 +1112,11 @@ class TimerService
             ->exists();
 
         if (! $due) {
-            return ['stopped' => [], 'paused' => []];
+            return ['stopped' => $left, 'paused' => []];
         }
 
         return [
-            'stopped' => $this->stopAbandoned($now),
+            'stopped' => [...$left, ...$this->stopAbandoned($now)],
             'paused' => $this->pauseOverlongSessions($now),
         ];
     }

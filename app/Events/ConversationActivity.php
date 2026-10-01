@@ -67,6 +67,9 @@ class ConversationActivity implements ShouldBroadcast, ShouldDispatchAfterCommit
     public function __construct(
         public readonly int $conversationId,
         public readonly int $messageId,
+        // 12-79: what happened — `posted`, `edited`, `deleted` or `reaction`. Still a doorbell:
+        // the screen re-reads the thread whatever the kind says.
+        public readonly string $kind = 'posted',
     ) {}
 
     /**
@@ -91,16 +94,18 @@ class ConversationActivity implements ShouldBroadcast, ShouldDispatchAfterCommit
     }
 
     /**
-     * Exactly two keys. `ConversationBroadcastTest` asserts the KEY SET, not just the values,
-     * so adding a third is a failing test rather than a quiet privacy decision.
+     * Exactly three keys. `ConversationBroadcastTest` asserts the KEY SET, not just the values,
+     * so adding a fourth is a failing test rather than a quiet privacy decision. `kind` (12-79)
+     * says which of posted / edited / deleted / reaction rang it, and carries no content.
      *
-     * @return array{conversation_id: int, message_id: int}
+     * @return array{conversation_id: int, message_id: int, kind: string}
      */
     public function broadcastWith(): array
     {
         return [
             'conversation_id' => $this->conversationId,
             'message_id' => $this->messageId,
+            'kind' => $this->kind,
         ];
     }
 }

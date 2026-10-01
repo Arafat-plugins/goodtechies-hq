@@ -143,6 +143,8 @@ it('sends exactly the documented discussion keys', function () {
         ->and(array_keys($payload['messages'][0]))->toEqualCanonicalizing([
             'id', 'body', 'author', 'is_mine', 'created_at', 'attachments',
             'mentions', 'mentions_me',
+            // 12-79: edit, delete, reactions, read receipts.
+            'edited_at', 'is_deleted', 'can_edit', 'can_delete', 'reactions', 'seen',
         ])
         // Resolved on the server, so the panel does not compare ids to decide which side of
         // the thread a bubble sits on.

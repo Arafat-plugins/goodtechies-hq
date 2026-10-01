@@ -4,6 +4,8 @@ use App\Broadcasting\ConversationChannel;
 use App\Broadcasting\NotificationChannel;
 use App\Broadcasting\TaskChannel;
 use App\Broadcasting\UserTasksChannel;
+use App\Models\User;
+use App\Support\Permission;
 use Illuminate\Support\Facades\Broadcast;
 
 /*
@@ -46,3 +48,10 @@ Broadcast::channel('conversation.{conversation}', ConversationChannel::class);
 Broadcast::channel('notifications.{user}', NotificationChannel::class);
 Broadcast::channel('task.{task}', TaskChannel::class);
 Broadcast::channel('tasks.{user}', UserTasksChannel::class);
+
+// `presence-online` (12-79): who has the app open right now, for the online dot. Anybody who
+// may message; the member info is an id and a name and nothing else. The Accountant, holding no
+// `messages.use`, is refused — the same key that keeps them off every messaging route.
+Broadcast::channel('online', fn (User $user) => $user->isActive() && $user->hasPermission(Permission::MessagesUse)
+    ? ['id' => $user->id, 'name' => $user->name]
+    : false);

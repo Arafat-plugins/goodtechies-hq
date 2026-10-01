@@ -78,25 +78,26 @@ it('lists every notification type in its own tab, and no tab that cannot hold on
         ->and(array_column($props['groups'], 'key'))->not->toContain(NotificationTab::Payroll->value);
 });
 
-it('shows web push and email, off, and not switchable', function () {
+it('shows web push on and switchable for the kinds that push, and email off', function () {
     $props = $this->actingAs($this->admin)->get('/admin/notifications')->inertiaProps();
 
     $channels = collect($props['channels'])->keyBy('value');
 
     expect($channels->keys()->all())->toBe(['in_app', 'web_push', 'mail'])
         ->and($channels['in_app']['available'])->toBeTrue()
-        ->and($channels['web_push']['available'])->toBeFalse()
+        ->and($channels['web_push']['available'])->toBeTrue()
         ->and($channels['mail']['available'])->toBeFalse()
-        ->and($channels['web_push']['note'])->toContain('Nothing sends on this channel yet');
+        ->and($channels['mail']['note'])->toContain('Nothing sends on this channel yet');
 
     foreach ($props['groups'] as $group) {
         foreach ($group['types'] as $type) {
             $cells = collect($type['channels'])->keyBy('channel');
+            $pushes = ! in_array($type['value'], ['message.received', 'announcement.posted'], true);
 
             expect($cells['in_app']['switchable'])->toBeTrue()
                 ->and($cells['in_app']['enabled'])->toBeTrue()
-                ->and($cells['web_push']['switchable'])->toBeFalse()
-                ->and($cells['web_push']['enabled'])->toBeFalse()
+                ->and($cells['web_push']['switchable'])->toBe($pushes)
+                ->and($cells['web_push']['enabled'])->toBe($pushes)
                 ->and($cells['mail']['switchable'])->toBeFalse()
                 ->and($cells['mail']['enabled'])->toBeFalse();
         }
@@ -281,7 +282,6 @@ it('refuses a channel nothing sends on', function (string $channel) {
     expect(session('errors')->first('channel'))->toContain('Nothing sends on that channel yet')
         ->and(NotificationPreference::query()->count())->toBe(0);
 })->with([
-    'browser push' => [NotificationChannel::WebPush->value],
     'email' => [NotificationChannel::Mail->value],
 ]);
 
@@ -291,14 +291,14 @@ it('cannot be talked into delivering on a channel even with a row forced into th
     // for a channel it does not name cannot switch one on.
     NotificationPreference::query()->create([
         'type' => NotificationType::TaskCommented->value,
-        'channel' => NotificationChannel::WebPush->value,
+        'channel' => NotificationChannel::Mail->value,
         'enabled' => true,
     ]);
 
     expect(NotificationPreference::enabledIn(
         NotificationPreference::overrides(),
         NotificationType::TaskCommented,
-        NotificationChannel::WebPush,
+        NotificationChannel::Mail,
     ))->toBeFalse()
         // And the in-app row is still written, because that row said nothing about in-app.
         ->and(deliverTaskComment($this->task, $this->tapu, $this->admin))->toBe(1);

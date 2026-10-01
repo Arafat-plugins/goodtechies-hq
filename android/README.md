@@ -56,6 +56,22 @@ private (a password manager or an encrypted drive). If it is lost, a new APK can
 installed app: every phone has to uninstall and install fresh, and `assetlinks.json` must get the
 new fingerprint.
 
+## A tap always ends with the site on screen
+
+`app/src/main/java/com/goodtechies/erp/LauncherActivity.java` wraps the library's launcher:
+
+- Chrome (or another browser that can run it full screen) available → the site opens in it.
+- No such browser, or Chrome refuses the session → the site opens in the app's own WebView.
+- The launch throws, or Chrome has not covered the screen within 8 s → the app's own WebView.
+
+`app/src/test/java/com/goodtechies/erp/LauncherTest.java` proves each case by starting the real
+launcher in a simulated Android (Robolectric). Run it before shipping an APK:
+
+```
+cd android
+gradlew.bat testDebugUnitTest
+```
+
 ## Installing on a phone
 
 Copy the APK to the phone and open it. Android asks once to allow installs from that source

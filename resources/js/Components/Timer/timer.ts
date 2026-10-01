@@ -146,6 +146,8 @@ export const timerRoutes = {
     stop: '/employee/time/stop',
     heartbeat: '/employee/time/heartbeat',
     replay: '/employee/time/replay',
+    /** The last tab's `pagehide` beacon (`TaskTimerPulse`). */
+    leaving: '/employee/time/leaving',
     entries: '/employee/time/entries',
     entry: (id: number): string => `/employee/time/entries/${id}`,
 } as const;
@@ -235,6 +237,12 @@ const tick = ref(0);
  * deliver it. While this is true the counter is stopped here and Start waits.
  */
 const stopPending = ref(false);
+
+/**
+ * Whether the remote timer is running in this tab — read by the tab-close guard in
+ * `TaskTimerPulse` without calling `useTimer()`, which would start this store's loops.
+ */
+export const remoteTimerRunning = computed<boolean>(() => state.value?.running?.state === 'running' && !stopPending.value);
 
 /** The server's clock minus this browser's, so a skewed laptop cannot invent minutes. */
 let clockOffsetMs = 0;

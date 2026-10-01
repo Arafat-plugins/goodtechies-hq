@@ -226,3 +226,49 @@ export function listenPrivate(channel: string, handlers: RealtimeHandlers): () =
         leave = null;
     };
 }
+
+/** What a presence channel says about the people in it: `{ id, name }` (routes/channels.php). */
+export interface PresenceMember {
+    id: number;
+    name: string;
+}
+
+export interface PresenceHandlers {
+    /** Everybody already in the channel, once on joining — and again after a reconnect. */
+    here: (members: PresenceMember[]) => void;
+    joining: (member: PresenceMember) => void;
+    leaving: (member: PresenceMember) => void;
+}
+
+/**
+ * Join a presence channel (brief 010: `online`, decision 12-79). Returns the function that leaves.
+ *
+ * The same shape as `listenPrivate()` above — synchronous in and out, a `left` flag for a caller
+ * torn down before the client was imported, and a no-op on a polling build — with Echo's
+ * `join()` instead of `private()`. The channel name is given without the `presence-` prefix.
+ * Only `Messages/presence.ts` calls it: it holds the one module-scoped membership.
+ */
+export function joinPresence(channel: string, handlers: PresenceHandlers): () => void {
+    let left = false;
+    let leave: (() => void) | null = null;
+
+    void echo().then((connection) => {
+        if (connection === null || left) {
+            return;
+        }
+
+        connection
+            .join(channel)
+            .here((members: PresenceMember[]) => handlers.here(members))
+            .joining((member: PresenceMember) => handlers.joining(member))
+            .leaving((member: PresenceMember) => handlers.leaving(member));
+
+        leave = () => connection.leave(channel);
+    });
+
+    return () => {
+        left = true;
+        leave?.();
+        leave = null;
+    };
+}

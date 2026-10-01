@@ -1,9 +1,6 @@
-import { router } from '@inertiajs/vue3';
-import type { Errors, FormDataConvertible } from '@inertiajs/core';
 import { ref, type Ref } from 'vue';
 import type { FileSummary } from '@/Components/Files/files';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
-import { inlineUploadFailure, type UploadFailure } from '@/lib/net';
 
 /**
  * The messaging client: the one shape of a thread, the endpoints that read and write one, and
@@ -32,8 +29,9 @@ export interface ThreadAttachment extends FileSummary {
  *
  * `is_mine` and `mentions_me` are both resolved by `MessageResource`, so the screen never
  * compares ids to work out whose bubble it is drawing or whether a line is addressed to it.
- * There is deliberately no `can_edit` and no `can_delete`: nobody may change or remove a
- * message, so there is no permission to report and no control to wire.
+ * `can_edit` / `can_delete` / `reactions` / `seen` arrive from `MessageResource` (brief 006);
+ * the controls that use them come in a later brief. `pending` / `failed` are local-only: they
+ * mark an optimistic message this composer has sent and the server has not answered yet.
  */
 export interface ThreadMessage {
     id: number;
@@ -49,6 +47,24 @@ export interface ThreadMessage {
      */
     mentions: MessagePerson[];
     mentions_me: boolean;
+    edited_at: string | null;
+    is_deleted: boolean;
+    can_edit: boolean;
+    can_delete: boolean;
+    reactions: MessageReaction[];
+    /** A DM's tick: did the other person read it? `null` where it does not apply. */
+    seen: boolean | null;
+    /** Local only: an optimistic send still waiting for its answer. */
+    pending?: boolean;
+    /** Local only: an optimistic send that got no answer — tap to retry. */
+    failed?: boolean;
+}
+
+export interface MessageReaction {
+    emoji: string;
+    count: number;
+    mine: boolean;
+    names: string[];
 }
 
 /**
@@ -86,9 +102,22 @@ export interface ThreadPayload {
      * the write then drops.
      */
     mentionable: MessagePerson[];
+    /** A DM's other person; `null` on every channel. */
+    peer: { id: number; name: string; last_seen_at: string | null } | null;
+    /** A group's name, picture, members and whether this reader may manage it (12-81). */
+    group?: ThreadGroup | null;
 }
 
-export type ConversationTypeKey = 'team' | 'project' | 'task' | 'dm' | 'announcement';
+/** `GroupController::present()` — a group as its thread and its manage endpoints send it. */
+export interface ThreadGroup {
+    id: number;
+    name: string;
+    avatar_url: string | null;
+    members: { id: number; name: string }[];
+    can_manage: boolean;
+}
+
+export type ConversationTypeKey = 'team' | 'project' | 'task' | 'dm' | 'announcement' | 'group';
 
 /**
  * Which of the two chat treatments a conversation gets.
@@ -117,6 +146,13 @@ export interface ConversationSummary {
     group: string | null;
     label: string;
     unread_count: number;
+    /** A group's picture (12-81); `null` everywhere else, and for a group without one. */
+    avatar_url?: string | null;
+    /** A group's head count; `null` for every other type. */
+    member_count?: number | null;
+    /** A DM's other person, for the online dot and "last seen". `null` on channels. */
+    peer_id?: number | null;
+    peer_last_seen_at?: string | null;
     last_message: {
         author: string | null;
         is_mine: boolean;
@@ -143,8 +179,8 @@ export interface AnnouncementBanner {
  */
 export const MESSAGE_MAX_BODY = 4000;
 
-/** The order the plan draws the rail in: Team, Announcements, Projects, Direct. */
-export const CONVERSATION_GROUPS = ['Team', 'Announcements', 'Projects', 'Direct'] as const;
+/** The order the plan draws the rail in: Team, Announcements, Projects, Groups, Direct. */
+export const CONVERSATION_GROUPS = ['Team', 'Announcements', 'Projects', 'Groups', 'Direct'] as const;
 
 /**
  * Every endpoint a thread needs, for whichever screen it is mounted on.
@@ -199,6 +235,7 @@ export function emptyThread(conversationId: number, label = ''): ThreadPayload {
         messages: [],
         has_more: false,
         mentionable: [],
+        peer: null,
     };
 }
 
@@ -282,45 +319,234 @@ export function useMentions(body: Ref<string>) {
 
 /* -------------------------------------------------------------------- writing */
 
-export interface MessageMutationOptions {
-    forceFormData?: boolean;
-    onAccepted?: () => void;
-    onInvalid?: (errors: Errors) => void;
-    onFinish?: () => void;
-    /** 0-100 as the bytes go (reliability slice 2b). Only a FormData send reports any. */
-    onProgress?: (percent: number) => void;
-    /**
-     * The caller shows no answer / a 5xx / a 413 inline, so the global toast stays quiet for
-     * this one visit (`inlineUploadFailure`). Left out, the global handler speaks as before.
-     */
-    onSendFailed?: (kind: UploadFailure) => void;
+/** What `sendMessage()` resolves with: the status, and the JSON body when there was one. */
+export interface MessageSendResult {
+    status: number;
+    json: unknown;
 }
 
 /**
- * Send something to a messaging endpoint.
- *
- * `preserveState` and `preserveScroll`, because a thread you are reading must not jump when you
- * post into it — and because the left rail's scroll position is part of where you were.
+ * Post a message as JSON (brief 009) — no Inertia visit, so no "Message sent." flash and no
+ * full-page props reload. `XMLHttpRequest` rather than `fetch` because an attachment reports
+ * upload progress and `fetch` cannot. Resolves with ANY status (the caller reads 201 / 422 / …);
+ * rejects only when no answer came back (offline, a dropped connection, a timeout).
  */
-export function mutateMessage(
+export function sendMessage(
     url: string,
-    data: Record<string, FormDataConvertible>,
-    options: MessageMutationOptions = {},
-): void {
-    router.post(url, data, {
-        forceFormData: options.forceFormData,
-        preserveScroll: true,
-        preserveState: true,
-        onProgress: (event) => {
-            if (event) {
-                options.onProgress?.(event.percentage ?? Math.round((event.progress ?? 0) * 100));
+    data: FormData,
+    csrf: string,
+    onProgress?: (percent: number) => void,
+    timeoutMs = 0,
+): Promise<MessageSendResult> {
+    return messageRequest('POST', url, data, csrf, onProgress, timeoutMs);
+}
+
+/**
+ * The same request `sendMessage()` makes, for any verb (brief 010: edit, delete, react, groups).
+ * A plain object is sent as JSON; a `FormData` as multipart; `null` as no body. Same headers,
+ * same resolve-on-any-status / reject-on-no-answer contract.
+ */
+export function messageRequest(
+    method: 'POST' | 'PATCH' | 'DELETE',
+    url: string,
+    data: FormData | Record<string, unknown> | null,
+    csrf: string = xsrfToken(),
+    onProgress?: (percent: number) => void,
+    timeoutMs = 0,
+): Promise<MessageSendResult> {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+
+        xhr.open(method, url);
+        xhr.withCredentials = true;
+        xhr.timeout = timeoutMs;
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        xhr.setRequestHeader('X-XSRF-TOKEN', csrf);
+
+        const isForm = typeof FormData !== 'undefined' && data instanceof FormData;
+
+        if (data !== null && !isForm) {
+            xhr.setRequestHeader('Content-Type', 'application/json');
+        }
+
+        if (onProgress !== undefined) {
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable && event.total > 0) {
+                    onProgress(Math.round((event.loaded / event.total) * 100));
+                }
+            };
+        }
+
+        xhr.onload = () => {
+            let json: unknown = null;
+
+            try {
+                json = xhr.responseText === '' ? null : JSON.parse(xhr.responseText);
+            } catch {
+                json = null;
             }
-        },
-        ...(options.onSendFailed ? inlineUploadFailure(options.onSendFailed) : {}),
-        onSuccess: () => options.onAccepted?.(),
-        onError: (errors) => options.onInvalid?.(errors),
-        onFinish: () => options.onFinish?.(),
+
+            resolve({ status: xhr.status, json });
+        };
+        xhr.onerror = () => reject(new Error('network'));
+        xhr.ontimeout = () => reject(new Error('timeout'));
+        xhr.onabort = () => reject(new Error('abort'));
+
+        xhr.send(data === null ? null : isForm ? (data as FormData) : JSON.stringify(data));
     });
+}
+
+/** The `XSRF-TOKEN` cookie Laravel sets, decoded — what `X-XSRF-TOKEN` carries. */
+export function xsrfToken(): string {
+    if (typeof document === 'undefined') {
+        return '';
+    }
+
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+/** `PATCH` / `DELETE` one message; `+ '/reactions'` to toggle a reaction (brief 010). */
+export function messageUrl(conversationId: number, messageId: number): string {
+    return `/messages/${conversationId}/messages/${messageId}`;
+}
+
+/** The `{ message }` every edit / delete / reaction answers with, or `null` for anything else. */
+export function messageFrom(json: unknown): ThreadMessage | null {
+    const message = (json as { message?: unknown } | null)?.message;
+
+    return message !== null && typeof message === 'object' ? (message as ThreadMessage) : null;
+}
+
+/**
+ * Toggle `emoji` for the viewer, locally — the optimistic half of a reaction (brief 010). The
+ * server's `message` replaces this as soon as it answers.
+ */
+export function toggleReaction(message: ThreadMessage, emoji: string, viewerName = 'You'): ThreadMessage {
+    const reactions = message.reactions ?? [];
+    const held = reactions.find((reaction) => reaction.emoji === emoji);
+    let next: MessageReaction[];
+
+    if (held === undefined) {
+        next = [...reactions, { emoji, count: 1, mine: true, names: [viewerName] }];
+    } else if (held.mine) {
+        next = reactions
+            .map((reaction) =>
+                reaction.emoji === emoji
+                    ? {
+                          ...reaction,
+                          count: reaction.count - 1,
+                          mine: false,
+                          names: reaction.names.filter((name) => name !== viewerName),
+                      }
+                    : reaction,
+            )
+            .filter((reaction) => reaction.count > 0);
+    } else {
+        next = reactions.map((reaction) =>
+            reaction.emoji === emoji
+                ? { ...reaction, count: reaction.count + 1, mine: true, names: [...reaction.names, viewerName] }
+                : reaction,
+        );
+    }
+
+    return { ...message, reactions: next };
+}
+
+/** The first sentence of a 422, the way the composer has always shown it. */
+export function refusalText(json: unknown): string {
+    const answer = (json ?? {}) as { message?: unknown; errors?: Record<string, unknown> };
+    const errors = answer.errors ?? {};
+
+    for (const key of ['body', 'file', 'mentions']) {
+        const value = errors[key];
+        const text = Array.isArray(value) ? value[0] : value;
+
+        if (typeof text === 'string' && text !== '') {
+            return text;
+        }
+    }
+
+    return typeof answer.message === 'string' && answer.message !== '' ? answer.message : 'That message was refused.';
+}
+
+/* -------------------------------------------------------------------- merging a re-read */
+
+/** Same attachment for drawing purposes: same file, and its link not about to lapse. */
+function attachmentKeep(held: ThreadAttachment, refreshLinksBefore: number): boolean {
+    const expires = Date.parse(held.url_expires_at);
+
+    return Number.isNaN(expires) || expires > refreshLinksBefore;
+}
+
+function sameMessage(held: ThreadMessage, fresh: ThreadMessage): boolean {
+    return (
+        held.body === fresh.body &&
+        (held.edited_at ?? null) === (fresh.edited_at ?? null) &&
+        (held.is_deleted ?? false) === (fresh.is_deleted ?? false) &&
+        (held.seen ?? null) === (fresh.seen ?? null) &&
+        JSON.stringify(held.reactions ?? []) === JSON.stringify(fresh.reactions ?? []) &&
+        held.attachments.length === fresh.attachments.length &&
+        held.attachments.every((file, index) => file.id === fresh.attachments[index]?.id)
+    );
+}
+
+/**
+ * Brief 009, no flashing: fold a re-read into what is on screen.
+ *
+ * Every incoming message that is already drawn and has not changed (body, edit, deletion, seen,
+ * reactions, the same attachment ids) comes back as the SAME object, so Vue re-renders nothing
+ * for it. A changed message is the fresh one, but an attachment it still carries keeps the
+ * object — and so the signed `url` — it was first drawn with, so an image or a voice note does
+ * not reload because the server minted a new signature. The one exception is a link that
+ * lapses before `refreshLinksBefore` (epoch ms): that one takes the fresh url, which is what
+ * the thread re-reads for. The result is in `incoming`'s order; when nothing at all changed it
+ * is `current` itself.
+ */
+export function mergeThreadMessages(
+    current: ThreadMessage[],
+    incoming: ThreadMessage[],
+    refreshLinksBefore = 0,
+): ThreadMessage[] {
+    const held = new Map(current.map((message) => [message.id, message]));
+    let changed = current.length !== incoming.length;
+
+    const merged = incoming.map((fresh, index) => {
+        const before = held.get(fresh.id);
+
+        if (before === undefined) {
+            changed = true;
+
+            return fresh;
+        }
+
+        const linksFine = before.attachments.every((file) => attachmentKeep(file, refreshLinksBefore));
+
+        if (linksFine && sameMessage(before, fresh) && !before.pending && !before.failed) {
+            if (current[index] !== before) {
+                changed = true;
+            }
+
+            return before;
+        }
+
+        changed = true;
+
+        const files = new Map(before.attachments.map((file) => [file.id, file]));
+
+        return {
+            ...fresh,
+            attachments: fresh.attachments.map((file) => {
+                const kept = files.get(file.id);
+
+                return kept !== undefined && attachmentKeep(kept, refreshLinksBefore) ? kept : file;
+            }),
+        };
+    });
+
+    return changed ? merged : current;
 }
 
 /* -------------------------------------------------------------------- reading */

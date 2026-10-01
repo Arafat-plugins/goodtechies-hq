@@ -49,10 +49,8 @@ const navigating = useShellNavigationPending();
                 :aria-busy="navigating ? 'true' : undefined"
                 :class="
                     cn(
-                        'mx-auto w-full max-w-screen-2xl flex-1 p-4 outline-none md:p-6',
-                        // Opt-in for working surfaces (`PageShell bleed`, the Tasks views): full
-                        // width, 16 px gutters, a 12 px top band. Inert on every other page.
-                        'has-[[data-page-bleed]]:max-w-none has-[[data-page-bleed]]:pt-3 md:has-[[data-page-bleed]]:px-4',
+                        // Full width on every page, like the Tasks views — 12-80
+                        'w-full max-w-none flex-1 p-4 pt-3 outline-none md:px-4',
                         '*:transition-opacity *:duration-200 motion-reduce:*:transition-none',
                         navigating && '*:opacity-70',
                     )

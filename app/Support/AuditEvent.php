@@ -132,6 +132,17 @@ enum AuditEvent: string
     case FinanceRecordDeleted = 'finance.record_deleted';
     case RestrictedAccessAttempt = 'access.restricted_attempt';
     case TwoFactorDisabled = 'user.two_factor_disabled';
+    // 12-79: an author edits or deletes-for-everyone their own message. The old body (and, on
+    // delete, the attachment file ids) live in the old value — the only copy left of it.
+    case MessageEdited = 'message.edited';
+    case MessageDeleted = 'message.deleted';
+    case AttendanceClockedIn = 'attendance.clocked_in';
+    case AttendanceClockedOut = 'attendance.clocked_out';
+    // 12-81: a holder of `messages.manage` creates a chat group, renames it or changes its
+    // picture, or adds / removes members.
+    case GroupCreated = 'message_group.created';
+    case GroupUpdated = 'message_group.updated';
+    case GroupMembersChanged = 'message_group.members_changed';
 
     /*
     |--------------------------------------------------------------------------
@@ -247,6 +258,11 @@ enum AuditEvent: string
             self::TaskStatusChanged => 'Task status changed',
             self::FileDeleted => 'File deleted',
             self::TagDeleted => 'Tag deleted',
+            self::MessageEdited => 'Message edited',
+            self::MessageDeleted => 'Message deleted',
+            self::GroupCreated => 'Message group created',
+            self::GroupUpdated => 'Message group updated',
+            self::GroupMembersChanged => 'Message group members changed',
 
             self::TimeEntryEdited => 'Time entry edited',
             self::TimeEntryApproved => 'Time entry approved',
@@ -268,6 +284,9 @@ enum AuditEvent: string
             self::FinanceRecordDeleted => 'Finance record deleted',
 
             self::ConfigurationChanged => 'Configuration changed',
+
+            self::AttendanceClockedIn => 'Clocked in',
+            self::AttendanceClockedOut => 'Clocked out',
         };
     }
 
@@ -306,7 +325,12 @@ enum AuditEvent: string
             self::TaskDeleted,
             self::TaskStatusChanged,
             self::FileDeleted,
-            self::TagDeleted => self::GROUP_TASKS,
+            self::TagDeleted,
+            self::MessageEdited,
+            self::MessageDeleted,
+            self::GroupCreated,
+            self::GroupUpdated,
+            self::GroupMembersChanged => self::GROUP_TASKS,
 
             self::TimeEntryEdited,
             self::TimeEntryApproved,
@@ -328,6 +352,9 @@ enum AuditEvent: string
             self::FinanceRecordDeleted => self::GROUP_MONEY,
 
             self::ConfigurationChanged => self::GROUP_CONFIGURATION,
+
+            self::AttendanceClockedIn,
+            self::AttendanceClockedOut => self::GROUP_TIME,
         };
     }
 

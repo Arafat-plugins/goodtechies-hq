@@ -33,6 +33,15 @@ final class TimerFlag
     }
 
     /**
+     * The last goodERP tab was closed while the timer ran: the entry ends at
+     * the moment the tab went, not when the sweep noticed.
+     */
+    public static function tabClosed(string $closedAt): string
+    {
+        return sprintf('Stopped: the last goodERP tab was closed at %s.', $closedAt);
+    }
+
+    /**
      * Rule 2 — a single session ran past the maximum, so it was paused for review.
      */
     public static function maxSession(float $maxHours): string

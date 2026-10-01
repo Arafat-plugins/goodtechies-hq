@@ -2,20 +2,25 @@
 
 namespace App\Services;
 
+use App\Events\ConversationActivity;
 use App\Events\MessagePosted;
 use App\Events\TaskCommented;
 use App\Exceptions\ConversationStateException;
 use App\Exceptions\FileStateException;
 use App\Models\Conversation;
+use App\Models\File;
 use App\Models\Message;
+use App\Models\MessageReaction;
 use App\Models\Task;
 use App\Models\User;
 use App\Support\AttachmentKind;
+use App\Support\AuditEvent;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Writing a message: the one door, for every conversation type (master prompt Part D §10).
@@ -75,10 +80,134 @@ class MessageService
      */
     public const MAX_VOICE_SECONDS = 300;
 
+    /**
+     * The most distinct emoji one person may put on one message (12-79).
+     */
+    public const MAX_REACTIONS_PER_USER = 8;
+
     public function __construct(
         private readonly FileService $files,
         private readonly ConversationService $conversations,
+        private readonly AuditLogger $audit,
     ) {}
+
+    /**
+     * Rewrite a message's text (12-79). Authorization is MessagePolicy::update, asked by the
+     * caller; this method keeps the record: the old body goes to the audit log, the mentions are
+     * re-derived from the new text the way `post()` filters them, and nobody is notified.
+     */
+    public function edit(User $actor, Message $message, string $body): Message
+    {
+        // Trimmed; UpdateMessageRequest holds it to StoreMessageRequest::MAX_BODY.
+        $body = trim($body);
+
+        return DB::transaction(function () use ($actor, $message, $body): Message {
+            $old = $message->body;
+            $conversation = $message->conversation;
+
+            $message->forceFill([
+                'body' => $body,
+                'edited_at' => now(),
+            ])->save();
+
+            // Same filters as post(): readable by the conversation, named in the body, not the
+            // actor. The edit carries no picker ids, so every reader of the room is a candidate
+            // and the text decides. No notification is written for a mention an edit adds.
+            $candidates = array_map('intval', $this->conversations->mentionableIn($conversation)->modelKeys());
+            $mentioned = $this->resolveMentions($conversation, $actor, $body, $candidates);
+            $message->mentions()->sync($mentioned->modelKeys());
+
+            $this->audit->record(
+                AuditEvent::MessageEdited,
+                $message,
+                ['body' => $old],
+                ['body' => $body],
+                $actor,
+            );
+
+            ConversationActivity::dispatch((int) $conversation->getKey(), (int) $message->getKey(), 'edited');
+
+            return $message;
+        });
+    }
+
+    /**
+     * Delete a message for everyone (12-79). The row stays — the thread keeps its shape — but
+     * its body, files, mentions and reactions go; the original lives only in the audit row.
+     * Authorization is MessagePolicy::delete, asked by the caller.
+     */
+    public function delete(User $actor, Message $message): Message
+    {
+        return DB::transaction(function () use ($actor, $message): Message {
+            $files = $message->files()->get();
+
+            $this->audit->record(
+                AuditEvent::MessageDeleted,
+                $message,
+                [
+                    'body' => $message->body,
+                    'attachments' => array_map('intval', $files->modelKeys()),
+                ],
+                ['deleted_by' => (int) $actor->getKey()],
+                $actor,
+            );
+
+            // FileService::delete audits each file and frees its bytes.
+            $files->each(fn (File $file) => $this->files->delete($actor, $file));
+
+            $message->mentions()->detach();
+            $message->reactions()->delete();
+
+            $message->forceFill([
+                'body' => null,
+                'deleted_at' => now(),
+                'deleted_by' => $actor->getKey(),
+            ])->save();
+
+            ConversationActivity::dispatch((int) $message->conversation_id, (int) $message->getKey(), 'deleted');
+
+            return $message;
+        });
+    }
+
+    /**
+     * Add the actor's emoji to the message, or take it off if it is already there (12-79).
+     * Authorization is MessagePolicy::react, asked by the caller. No notification, no audit.
+     *
+     * @throws ValidationException
+     */
+    public function toggleReaction(User $actor, Message $message, string $emoji): Message
+    {
+        DB::transaction(function () use ($actor, $message, $emoji): void {
+            $mine = MessageReaction::query()
+                ->where('message_id', $message->getKey())
+                ->where('user_id', $actor->getKey())
+                ->lockForUpdate()
+                ->get();
+
+            $existing = $mine->firstWhere('emoji', $emoji);
+
+            if ($existing !== null) {
+                $existing->delete();
+            } else {
+                if ($mine->pluck('emoji')->unique()->count() >= self::MAX_REACTIONS_PER_USER) {
+                    throw ValidationException::withMessages([
+                        'emoji' => 'You can put at most '.self::MAX_REACTIONS_PER_USER.' reactions on one message.',
+                    ]);
+                }
+
+                MessageReaction::create([
+                    'message_id' => $message->getKey(),
+                    'user_id' => $actor->getKey(),
+                    'emoji' => $emoji,
+                ]);
+            }
+
+            ConversationActivity::dispatch((int) $message->conversation_id, (int) $message->getKey(), 'reaction');
+        });
+
+        return $message;
+    }
 
     /**
      * Post a message, optionally with a file on it and optionally naming people.

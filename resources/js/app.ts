@@ -14,6 +14,7 @@ import {
     TOO_LARGE_TEXT,
     type UserVisit,
 } from '@/lib/net';
+import { forgetThisDevice, refreshSubscription } from '@/lib/push';
 import { noteRefusedVisit, reportStatus, trackVisitFinish, trackVisitStart } from '@/lib/session';
 import { trackInputModality } from '@/lib/inputModality';
 import {
@@ -52,11 +53,23 @@ let appName = 'goodERP';
 /**
  * Reliability slice 3: signing out clears every composer draft this tab holds (`lib/drafts.ts`),
  * from whichever control sends it — the user menu or the enrolment screen's escape hatch.
+ * It also turns this device's push notifications off first (one cancelled visit, then the real one).
  */
+let pushForgottenForSignOut = false;
+
 router.on('before', (event) => {
     const { visit } = event.detail;
 
     if (visit.method === 'post' && visit.url.pathname === '/logout') {
+        if (!pushForgottenForSignOut) {
+            // Turn this device's push off first (lib/push.ts → forgetThisDevice), then sign out.
+            event.preventDefault();
+            pushForgottenForSignOut = true;
+            void forgetThisDevice().finally(() => router.post('/logout'));
+
+            return;
+        }
+
         clearAllDrafts();
         disarmUnsavedGuard();
     }
@@ -331,6 +344,11 @@ createInertiaApp({
         }
 
         rememberTaskFilters(props.initialPage);
+
+        // A device follows whoever is signed in on it (lib/push.ts → refreshSubscription).
+        if (userId !== null) {
+            void refreshSubscription();
+        }
 
         createApp({ render: () => h(App, props) })
             .use(plugin)

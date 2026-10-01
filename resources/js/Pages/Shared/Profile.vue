@@ -4,6 +4,7 @@ import PageShell from '@/Components/PageShell.vue';
 import LoginHistoryCard, { type LoginAttempt } from '@/Components/Profile/LoginHistoryCard.vue';
 import PasswordForm from '@/Components/Profile/PasswordForm.vue';
 import ProfileDetailsForm, { type ProfileDetails } from '@/Components/Profile/ProfileDetailsForm.vue';
+import PushNotificationsCard, { type PushSettings } from '@/Components/Profile/PushNotificationsCard.vue';
 import SessionsCard, { type ActiveSession } from '@/Components/Profile/SessionsCard.vue';
 import SoundCard from '@/Components/Profile/SoundCard.vue';
 import TwoFactorCard, { type TwoFactorStatus } from '@/Components/Profile/TwoFactorCard.vue';
@@ -31,6 +32,7 @@ defineProps<{
     twoFactor: TwoFactorStatus;
     sessions: ActiveSession[];
     loginHistory: LoginAttempt[];
+    push: PushSettings;
 }>();
 </script>
 
@@ -49,6 +51,7 @@ defineProps<{
             <div class="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
                 <TwoFactorCard class="order-2" :two-factor="twoFactor" />
                 <SoundCard class="order-6" />
+                <PushNotificationsCard class="order-7" :push="push" />
             </div>
         </div>
     </PageShell>

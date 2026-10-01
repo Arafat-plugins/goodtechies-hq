@@ -5,7 +5,7 @@ namespace App\Support;
 /**
  * The ways a notification could be delivered.
  *
- * **Only `InApp` is built.** The master prompt's §11 is explicit: "Channels in MVP: in-app
+ * **`InApp` and `WebPush` are built; `Mail` is not.** The master prompt's §11 is explicit: "Channels in MVP: in-app
  * only … the engine keeps a `channels` list per notification type so they can be switched on
  * later without a rewrite, but no Web Push or mail sending is built." The other two cases exist
  * so that Phase 12 turns one on by editing NotificationType::channels() and writing the sender —
@@ -19,7 +19,7 @@ enum NotificationChannel: string
     /** A row in `notifications`, read by the bell and the Notification Center. */
     case InApp = 'in_app';
 
-    /** Browser push (spec post-MVP §44) — Phase 12. Never in a channels() list today. */
+    /** Browser and Android push (VAPID) — built: PushService, sent from NotificationService. */
     case WebPush = 'web_push';
 
     /** The email digest (spec post-MVP §44) — Phase 12. Never in a channels() list today. */

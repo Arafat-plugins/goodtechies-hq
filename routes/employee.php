@@ -114,6 +114,8 @@ Route::prefix('employee')
             // stopped its session; `replay` is the buffered batch after an offline spell.
             Route::post('/heartbeat', [TimerController::class, 'heartbeat'])->name('heartbeat');
             Route::post('/replay', [TimerController::class, 'replay'])->name('replay');
+            // The last tab's `pagehide` beacon — the remote timer's twin of `task-timer.leaving`.
+            Route::post('/leaving', [TimerController::class, 'leaving'])->name('leaving');
 
             // Added by hand, and corrected by hand. Both need a reason; an edit is audit-logged.
             Route::post('/entries', [TimeEntryController::class, 'store'])->name('entries.store');

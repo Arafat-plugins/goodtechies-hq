@@ -4,6 +4,7 @@ import { CircleAlert, MessagesSquare, RefreshCw, Search, SearchX, X } from '@luc
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import ConversationList from '@/Components/Messages/ConversationList.vue';
+import GroupDialog from '@/Components/Messages/GroupDialog.vue';
 import NewMessageDialog from '@/Components/Messages/NewMessageDialog.vue';
 import type {
     ConversationSummary,
@@ -47,6 +48,8 @@ const props = defineProps<{
     activeId: number | null;
     /** Exactly the people `MessageController@index` said this person may write to. */
     people: MessagePerson[];
+    /** Brief 010: `messages.manage`, resolved by the server — draws *New group*. */
+    canManageGroups?: boolean;
 }>();
 
 const uid = useId();
@@ -191,6 +194,7 @@ function retry(): void {
             </div>
 
             <NewMessageDialog :people="people" />
+            <GroupDialog v-if="canManageGroups" mode="create" :people="people" />
         </div>
 
         <p :id="statusId" class="sr-only" aria-live="polite">{{ status }}</p>

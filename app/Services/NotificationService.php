@@ -4,13 +4,16 @@ namespace App\Services;
 
 use App\Events\NotificationFeedChanged;
 use App\Http\Resources\NotificationResource;
+use App\Jobs\SendWebPush;
 use App\Models\Conversation;
 use App\Models\Notification;
 use App\Models\NotificationPreference;
 use App\Models\User;
+use App\Support\ConversationType;
 use App\Support\NotificationChannel;
 use App\Support\NotificationTab;
 use App\Support\NotificationType;
+use App\Support\PushCategory;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
@@ -164,6 +167,7 @@ class NotificationService
                 // now reads "12 new comments in …", which is a different sentence on the same
                 // bell.
                 $this->announce($user);
+                $this->push($type, $user, $notification);
 
                 return $notification;
             })
@@ -667,6 +671,55 @@ class NotificationService
      * with no cache to clear and no constant to change. A window of zero or less turns grouping
      * off rather than grouping everything, which is what an admin who types 0 means.
      */
+    /**
+     * The phone half of a bell row: one queued push, when the type pushes (Admin →
+     * Notifications can switch it off per kind) — the person's own Alerts switch is checked
+     * when it is sent. A mention made in a chat is skipped: the message itself was already
+     * pushed to everyone who can read that chat (MessagePusher).
+     */
+    private function push(NotificationType $type, User $user, Notification $notification): void
+    {
+        $this->preferences ??= NotificationPreference::overrides();
+
+        if (! NotificationPreference::enabledIn($this->preferences, $type, NotificationChannel::WebPush)) {
+            return;
+        }
+
+        $conversationType = $notification->payload['context']['conversation_type'] ?? null;
+
+        if ($conversationType !== null && $conversationType !== ConversationType::Task->value) {
+            return;
+        }
+
+        $request = Request::create('/');
+        $request->setUserResolver(fn (): User => $user);
+        $row = (new NotificationResource($notification))->toArray($request);
+
+        SendWebPush::dispatch((int) $user->getKey(), PushCategory::Alerts, [
+            'title' => $row['title'] !== '' ? $row['title'] : (string) config('app.name', 'goodERP'),
+            'body' => (string) $row['summary'],
+            'url' => $this->pathOnly($row['link'] ?? null),
+            'tag' => 'notification-'.$notification->getKey(),
+        ]);
+    }
+
+    /**
+     * The link's path and query only. An absolute link is built from the ACTOR's request host,
+     * and a push is read on somebody else's phone, so the host is dropped and the service worker
+     * opens it on goodERP's own origin.
+     */
+    private function pathOnly(?string $link): string
+    {
+        if ($link === null || $link === '') {
+            return '/';
+        }
+
+        $path = (string) (parse_url($link, PHP_URL_PATH) ?: '/');
+        $query = parse_url($link, PHP_URL_QUERY);
+
+        return str_starts_with($path, '/') ? $path.($query ? '?'.$query : '') : '/';
+    }
+
     /**
      * Tell this person's bell that their feed changed.
      *

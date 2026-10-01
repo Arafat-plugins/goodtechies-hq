@@ -11,6 +11,7 @@ use App\Models\Income;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\Meeting;
+use App\Models\Message;
 use App\Models\Notification;
 use App\Models\PayrollItem;
 use App\Models\PayrollPeriod;
@@ -24,10 +25,15 @@ use App\Models\TaskLink;
 use App\Models\TimeEntry;
 use App\Models\User;
 use App\Models\UserProjectPermission;
+use App\Services\ConversationService;
+use App\Services\GroupService;
+use App\Services\MessageService;
 use App\Support\RoleName;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Route as RoutingRoute;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /*
@@ -306,6 +312,61 @@ function matrixFileId(string $key): string
  * the memo honest across a rolled-back database, exactly as matrixFileId's does.
  */
 /**
+ * A message for the edit / delete / react rows (12-79), created once per key and remembered.
+ *
+ * `team`: Tapu's message in the team channel. `dm`: Tapu's message in his DM with Yaseen — the
+ * DELETE row points at it, so Tapu (the author, the last role with the key) is the cell that
+ * consumes it, and the ADMIN cell meets a DM they are not in (404).
+ */
+function matrixMessageId(string $key): string
+{
+    static $messages = [];
+
+    if (! isset($messages[$key]) || ! Message::query()->whereKey($messages[$key])->exists()) {
+        $tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
+        $conversations = app(ConversationService::class);
+
+        $conversation = $key === 'dm'
+            ? $conversations->dmBetween($tapu, User::where('email', 'yaseen@goodtechies.test')->firstOrFail())
+            : Conversation::query()->where('type', 'team')->firstOrFail();
+
+        $messages[$key] = (string) app(MessageService::class)
+            ->post($tapu, $conversation, 'Matrix message ('.$key.')')->id;
+    }
+
+    return $messages[$key];
+}
+
+/**
+ * A message group (12-81) for the group rows: Shahadat's, with Yaseen and Tapu, and a picture.
+ *
+ * The default disk is faked here, the first time a group row resolves, so the picture is never
+ * written into the real storage directory. The MANAGER is not a member: their `avatar` cell is
+ * the 404 a non-member gets, while their write cells are the 403 of not holding
+ * `messages.manage`.
+ */
+function matrixGroupId(): string
+{
+    static $group = null;
+
+    if ($group === null || ! Conversation::query()->whereKey($group)->exists()) {
+        Storage::fake(config('filesystems.default'));
+
+        $group = (string) app(GroupService::class)->create(
+            User::where('email', 'shahadat@goodtechies.test')->firstOrFail(),
+            'Matrix group',
+            [
+                User::where('email', 'yaseen@goodtechies.test')->firstOrFail()->id,
+                User::where('email', 'tapu@goodtechies.test')->firstOrFail()->id,
+            ],
+            UploadedFile::fake()->image('matrix.png', 40, 40),
+        )->id;
+    }
+
+    return $group;
+}
+
+/**
  * The team channel, created by the Phase 6 backfill migration and therefore always there.
  */
 function matrixTeamConversationId(): string
@@ -466,6 +527,11 @@ function matrixResolve(string $token): string
         // The throwaway employee the deactivate/reactivate pair acts on, rather than anybody
         // the rest of the table depends on. See the substitution map.
         'employee' => matrixSpareEmployeeId(),
+        // A message and the conversation it is in. See matrixMessageId().
+        'message' => matrixMessageId($value),
+        'message-conversation' => (string) Message::query()->findOrFail(matrixMessageId($value))->conversation_id,
+        // A message group (12-81). See matrixGroupId().
+        'group' => matrixGroupId(),
         default => $value,
     };
 }
@@ -500,6 +566,8 @@ function permissionMatrix(): array
     // matrix seed gives it to the other four roles. A future role that should have team chat
     // gets these cells by holding the key, with no edit here.
     $messaging = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => $status, 'EMPLOYEE' => $status, 'REMOTE_EMPLOYEE' => $status, 'ACCOUNTANT' => 403];
+    // Message-group writes (12-81): `messages.manage`, the ADMIN's alone.
+    $groupWrite = fn (int $status): array => ['guest' => '302 /login', 'ADMIN' => $status, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403];
 
     // Meetings (Phase 7). `meetings.use` goes to the same four roles and the Accountant holds
     // none — Part D §12's *"the Accountant has no meetings"*, said as a capability.
@@ -1006,6 +1074,7 @@ function permissionMatrix(): array
         // out the watchdog stopped it. 200 with `running: null`.
         ['POST', 'employee/time/heartbeat', $timer],
         ['POST', 'employee/time/replay', $timerAction],
+        ['POST', 'employee/time/leaving', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 204, 'ACCOUNTANT' => 403]],
         ['POST', 'employee/time/entries', $timerAction],
         // Tapu's own entry. Every field is required, so his cell is the validation redirect and
         // the other cells are the gate.
@@ -1174,6 +1243,8 @@ function permissionMatrix(): array
         // cell; it is asserted in tests/Feature/Search/SearchScopingTest.php, including that a
         // term matching only a restricted record answers `total: 0` rather than a refusal.
         ['GET', 'search', $everyone(200)],
+        // The presence heartbeat (12-79): every signed-in person has a last-seen time.
+        ['POST', 'presence/heartbeat', $everyone(204)],
 
         // Shared profile
         ['GET', 'profile', $everyone(200)],
@@ -1182,6 +1253,10 @@ function permissionMatrix(): array
         ['DELETE', 'profile/two-factor', $everyone(302)],
         ['POST', 'profile/two-factor/recovery-codes', $everyone(302)],
         ['DELETE', 'profile/sessions/{session}', $everyone(404)],
+        // Push notifications on this device: everyone signed in; an empty request fails validation.
+        ['POST', 'push/subscriptions', $everyone(302)],
+        ['DELETE', 'push/subscriptions', $everyone(302)],
+        ['PUT', 'profile/push', $everyone(302)],
 
         // Shared — somebody's attendance, and the clock (Phase 4). No surface, like the bell
         // and the file download below: clocking in is a fact about the person and not about
@@ -1225,6 +1300,8 @@ function permissionMatrix(): array
         ['POST', 'task-timer/resume', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
         ['POST', 'task-timer/stop', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403]],
         ['POST', 'task-timer/heartbeat', ['guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 200, 'EMPLOYEE' => 200, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
+        // The last tab's `pagehide` beacon: a mark only, answered 204.
+        ['POST', 'task-timer/leaving', ['guest' => '302 /login', 'ADMIN' => 204, 'MANAGER' => 204, 'EMPLOYEE' => 204, 'REMOTE_EMPLOYEE' => 204, 'ACCOUNTANT' => 403]],
 
         // Shared — My Leave, and applying for it (Phase 5). No surface, like the clock above
         // and the bell below: applying for leave is a fact about the person and not about the
@@ -1296,6 +1373,17 @@ function permissionMatrix(): array
         // question, not a route one, and MessageEndpointsTest asserts it directly.
         ['POST', 'messages/{conversation}', $messaging(302)],
         ['POST', 'messages/{conversation}/read', $messaging(302)],
+        // Edit, delete-for-everyone and react (12-79). Body-less PATCH and reaction POST stop at
+        // the validation redirect — proof they got past the gate. The DELETE points at Tapu's
+        // message in his DM with Yaseen: the ADMIN and MANAGER are not in it (404), Yaseen is in
+        // it but did not write it and a DM is never `messages.manage` ground (403), and Tapu,
+        // the author, deletes it (200).
+        ['PATCH', 'messages/{conversation}/messages/{message}', $messaging(302), ['{message}' => 'message:team']],
+        ['DELETE', 'messages/{conversation}/messages/{message}', [
+            'guest' => '302 /login', 'ADMIN' => 404, 'MANAGER' => 404, 'EMPLOYEE' => 403,
+            'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403,
+        ], ['{conversation}' => 'message-conversation:dm', '{message}' => 'message:dm']],
+        ['POST', 'messages/{conversation}/messages/{message}/reactions', $messaging(302), ['{message}' => 'message:team']],
         // Opening a DM with Tapu. Everybody who may use messaging gets one — and Tapu gets
         // **404**, because a DM with yourself is not a conversation and the endpoint says so
         // the way this application says no to a record: by failing to find it.
@@ -1303,6 +1391,20 @@ function permissionMatrix(): array
             'guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302,
             'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 403,
         ]],
+        // Message groups (12-81). Writes need `messages.manage`, which only the ADMIN holds:
+        // everybody else is 403 before the group is looked at. Body-less create and add stop
+        // at the validation redirect (proof they got past the gate); a body-less update is a
+        // no-op 200. The picture is for members (ADMIN, Yaseen, Tapu): the MANAGER is not one,
+        // and gets the 404 a non-member gets. The DELETE removes Tapu from the group, so it is
+        // the last of these rows.
+        ['POST', 'messages/groups', $adminAction],
+        ['POST', 'messages/groups/{conversation}', $groupWrite(200), ['{conversation}' => 'group:matrix']],
+        ['POST', 'messages/groups/{conversation}/members', $groupWrite(302), ['{conversation}' => 'group:matrix']],
+        ['GET', 'messages/groups/{conversation}/avatar', [
+            'guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 404, 'EMPLOYEE' => 200,
+            'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403,
+        ], ['{conversation}' => 'group:matrix']],
+        ['DELETE', 'messages/groups/{conversation}/members/{user}', $groupWrite(200), ['{conversation}' => 'group:matrix']],
 
         // Meetings (Phase 7). Shared, like Messages and Leave, and gated on `meetings.use`, so
         // *"the Accountant has no meetings"* is a capability refusing them rather than a role

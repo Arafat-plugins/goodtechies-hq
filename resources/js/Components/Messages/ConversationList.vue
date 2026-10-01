@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { Hash, Megaphone, MessageSquare, Users } from '@lucide/vue';
+import { Hash, Megaphone, MessageSquare, Users, UsersRound } from '@lucide/vue';
 import { computed } from 'vue';
+import ConversationAvatar from '@/Components/Messages/ConversationAvatar.vue';
 import type { ConversationSummary, ConversationTypeKey } from '@/Components/Messages/messages';
 import { CONVERSATION_GROUPS, messagesHref } from '@/Components/Messages/messages';
+import { isOnline } from '@/Components/Messages/presence';
 import { isViewingConversation } from '@/Components/Realtime/shell';
 import { cn } from '@/lib/utils';
 
@@ -30,6 +32,12 @@ import { cn } from '@/lib/utils';
  * twenty times an hour, so it is dense on purpose; the label truncates and the excerpt
  * truncates, because a row that wraps is a row whose neighbours move.
  *
+ * ## Faces for people and groups (brief 010)
+ *
+ * A DM row and a group row draw `ConversationAvatar` — a group's picture or the initials — and a
+ * DM's carries the online dot (`presence.ts`). Channels keep their type icon. A group with no
+ * message yet says how many people are in it instead of an excerpt.
+ *
  * There is no message count per person anywhere here, and there is not going to be: what the
  * row shows is who spoke last and how much of it this reader has not seen. Part H.
  */
@@ -45,9 +53,10 @@ const ICONS: Record<ConversationTypeKey, typeof Hash> = {
     project: Hash,
     dm: MessageSquare,
     task: MessageSquare,
+    group: UsersRound,
 };
 
-/** The plan's order — Team, Announcements, Projects, Direct — with empty groups dropped. */
+/** The plan's order — Team, Announcements, Projects, Groups, Direct — with empty groups dropped. */
 const groups = computed(() =>
     CONVERSATION_GROUPS.map((name) => ({
         name,
@@ -66,6 +75,15 @@ function iconFor(row: ConversationSummary) {
  */
 function unreadShown(row: ConversationSummary): number {
     return isViewingConversation(row.id) ? 0 : row.unread_count;
+}
+
+/** People and groups get a face; channels keep their icon. */
+function hasFace(row: ConversationSummary): boolean {
+    return row.type === 'dm' || row.type === 'group';
+}
+
+function membersText(count: number | null | undefined): string {
+    return count === 1 ? '1 member' : `${count ?? 0} members`;
 }
 
 function unreadLabel(row: ConversationSummary): string {
@@ -96,8 +114,15 @@ function unreadLabel(row: ConversationSummary): string {
                             )
                         "
                     >
+                        <ConversationAvatar
+                            v-if="hasFace(row)"
+                            :label="row.label"
+                            :avatar-url="row.avatar_url ?? null"
+                            :online="row.type === 'dm' ? isOnline(row.peer_id, row.peer_last_seen_at) : null"
+                        />
                         <component
                             :is="iconFor(row)"
+                            v-else
                             class="size-4 shrink-0 text-muted-foreground"
                             aria-hidden="true"
                         />
@@ -109,6 +134,9 @@ function unreadLabel(row: ConversationSummary): string {
                             <span v-if="row.last_message" class="truncate text-xs text-muted-foreground">
                                 {{ row.last_message.is_mine ? 'You' : (row.last_message.author ?? 'Somebody') }}:
                                 {{ row.last_message.excerpt }}
+                            </span>
+                            <span v-else-if="row.type === 'group'" class="truncate text-xs text-muted-foreground">
+                                {{ membersText(row.member_count) }}
                             </span>
                         </span>
 

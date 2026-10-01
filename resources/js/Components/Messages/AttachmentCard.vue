@@ -1,6 +1,15 @@
+<script lang="ts">
+/**
+ * Brief 009, no flashing: the first url an image was drawn with, by file id. A re-read that
+ * re-signs the link does not change what the `<img>` loads, so the picture never blinks. An
+ * image that errors drops its entry, so the next render takes the fresh url.
+ */
+const imageUrls = new Map<number, string>();
+</script>
+
 <script setup lang="ts">
 import { Download } from '@lucide/vue';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { iconFor } from '@/Components/Files/files';
 import type { ThreadAttachment } from '@/Components/Messages/messages';
 import { formatDuration } from '@/Components/Messages/messages';
@@ -56,6 +65,30 @@ const props = withDefaults(
 const rendersImage = computed(() => props.inline && !props.stale && props.file.kind === 'image');
 const rendersVoice = computed(() => props.inline && !props.stale && props.file.kind === 'voice');
 
+/** Bumped when an image errors, so `imageUrl` reads the map again. */
+const imageEpoch = ref(0);
+
+const imageUrl = computed(() => {
+    void imageEpoch.value;
+
+    const held = imageUrls.get(props.file.id);
+
+    if (held !== undefined) {
+        return held;
+    }
+
+    imageUrls.set(props.file.id, props.file.url);
+
+    return props.file.url;
+});
+
+function onImageError(): void {
+    if (imageUrls.get(props.file.id) !== props.file.url) {
+        imageUrls.delete(props.file.id);
+        imageEpoch.value += 1;
+    }
+}
+
 const meta = computed(() => {
     const parts = [props.file.size_label];
     const duration = formatDuration(props.file.duration_seconds);
@@ -109,10 +142,11 @@ const meta = computed(() => {
             class="block w-fit max-w-full min-w-0 overflow-hidden rounded-md bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
         >
             <img
-                :src="file.url"
+                :src="imageUrl"
                 :alt="file.name"
                 loading="lazy"
                 class="block h-auto max-h-64 w-auto max-w-full object-contain sm:max-w-xs"
+                @error="onImageError"
             >
             <span class="sr-only">(opens in a new tab)</span>
         </a>
@@ -126,6 +160,7 @@ const meta = computed(() => {
         <VoicePlayer
             v-else-if="rendersVoice"
             :src="file.url"
+            :cache-key="file.id"
             :duration-seconds="file.duration_seconds"
             label="voice message"
             :on-accent="onAccent"

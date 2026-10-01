@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Listeners\ConversationBroadcaster;
+use App\Listeners\MessagePusher;
 use App\Listeners\NotificationDispatcher;
 use App\Models\User;
 use App\Services\Calendar\CalendarLink;
@@ -95,6 +96,10 @@ class AppServiceProvider extends ServiceProvider
         // that this line is its only registration: a class with both would be subscribed twice
         // and would broadcast twice. Its subscribe() is the map.
         Event::subscribe(ConversationBroadcaster::class);
+
+        // Push notifications for chat: one MessagePosted → one queued SendWebPush per reader (MessagePusher).
+        // A subscriber for the same reason as the two above.
+        Event::subscribe(MessagePusher::class);
     }
 
     /**

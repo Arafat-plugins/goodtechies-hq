@@ -37,7 +37,7 @@ use Illuminate\Support\Facades\Storage;
 |
 | ## The frame is a doorbell, not a payload
 |
-| `broadcastWith()` is `conversation_id` and `message_id` and nothing else. The
+| `broadcastWith()` is `conversation_id`, `message_id` and `kind` (12-79) and nothing else. The
 | screen answers a ping by re-reading `GET /messages/{conversation}`, so what it
 | paints is what the policy built. The KEY SET is asserted below, not just the
 | values: that is the test that stops somebody adding the body to the frame and
@@ -189,10 +189,11 @@ it('puts exactly two keys in the frame and nothing else', function () {
     // set is asserted, not just the values.
     $payload = (new ConversationActivity(12, 41))->broadcastWith();
 
-    expect(array_keys($payload))->toBe(['conversation_id', 'message_id'])
+    expect(array_keys($payload))->toBe(['conversation_id', 'message_id', 'kind'])
         ->and($payload)->toBe([
             'conversation_id' => 12,
             'message_id' => 41,
+            'kind' => 'posted',
         ]);
 })->group('phase6', 'realtime');
 
@@ -215,7 +216,7 @@ it('carries no body, author or timestamp however the message was written', funct
 
     $payload = $collected[0]->broadcastWith();
 
-    expect(array_keys($payload))->toBe(['conversation_id', 'message_id'])
+    expect(array_keys($payload))->toBe(['conversation_id', 'message_id', 'kind'])
         ->and($payload['message_id'])->toBe((int) $message->getKey())
         ->and(json_encode($payload))->not->toContain($this->admin->name)
         ->and(json_encode($payload))->not->toContain(CONVERSATION_BROADCAST_BODY);

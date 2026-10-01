@@ -161,6 +161,59 @@ export function playChime(): void {
     }
 }
 
+/* ------------------------------------------------------------------ the message sounds */
+
+/**
+ * Telegram's two message sounds (decided with the client, brief 009): one for a message that
+ * arrives, one for a message of yours the server has accepted. Plain files under
+ * `public/sounds/`, each played through ONE lazily created `HTMLAudioElement` that is reused —
+ * rewound to the start each time, so two quick sends replay rather than stack up.
+ */
+const MESSAGE_SOUND_VOLUME = 0.6;
+const players: Partial<Record<'received' | 'sent', HTMLAudioElement>> = {};
+
+function playFile(which: 'received' | 'sent'): void {
+    try {
+        if (typeof Audio === 'undefined') {
+            return;
+        }
+
+        let player = players[which];
+
+        if (player === undefined) {
+            player = new Audio(`/sounds/message-${which}.mp3`);
+            player.preload = 'auto';
+            player.volume = MESSAGE_SOUND_VOLUME;
+            players[which] = player;
+        }
+
+        player.currentTime = 0;
+        void player.play().catch(() => undefined);
+    } catch {
+        // Blocked or unsupported: a sound is a courtesy, not a channel.
+    }
+}
+
+/** The switch, the session: the same gate `noteUnread()` puts in front of `playChime()`. */
+function soundAllowed(): boolean {
+    return isSessionLive() && boundUser !== null && readSoundEnabled(boundUser);
+}
+
+/** A message arrived. Called from `noteUnread('messages', …)`, which owns the quiet windows. */
+export function playMessageReceived(): void {
+    playFile('received');
+}
+
+/**
+ * The server accepted a message of yours. Your own action, so no quiet window holds it back —
+ * only the on/off switch and a live session.
+ */
+export function playMessageSent(): void {
+    if (soundAllowed()) {
+        playFile('sent');
+    }
+}
+
 /* ------------------------------------------------------------------ when it plays */
 
 export type ChimeSource = 'bell' | 'messages';
@@ -221,7 +274,7 @@ export function noteUnread(source: ChimeSource, count: number): void {
         return;
     }
 
-    if (!isSessionLive() || boundUser === null || !readSoundEnabled(boundUser)) {
+    if (!soundAllowed()) {
         return;
     }
 
@@ -237,5 +290,11 @@ export function noteUnread(source: ChimeSource, count: number): void {
 
     lastChimeAt = now;
     lastChimeSource = source;
-    playChime();
+
+    // Brief 009: a message rise plays Telegram's incoming sound; the bell keeps the chime.
+    if (source === 'messages') {
+        playMessageReceived();
+    } else {
+        playChime();
+    }
 }

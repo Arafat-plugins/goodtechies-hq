@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { FormDataConvertible } from '@inertiajs/core';
 import { usePage } from '@inertiajs/vue3';
 import {
     ChevronUp,
     CircleAlert,
+    Loader2,
     MessagesSquare,
     Megaphone,
     Paperclip,
@@ -15,6 +15,8 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, wat
 import { DRAWER_FOOTER_INSET } from '@/Components/drawerFooter';
 import EmptyState from '@/Components/EmptyState.vue';
 import { FILE_ACCEPT, FILE_MAX_LABEL, rejectionFor } from '@/Components/Files/files';
+import EmojiPicker from '@/Components/Messages/EmojiPicker.vue';
+import { rememberEmoji } from '@/Components/Messages/emoji';
 import MentionPicker from '@/Components/Messages/MentionPicker.vue';
 import MessageRow from '@/Components/Messages/MessageRow.vue';
 import VoiceRecorder from '@/Components/Messages/VoiceRecorder.vue';
@@ -37,8 +39,10 @@ import type {
 } from '@/Components/Messages/messages';
 import {
     MESSAGE_MAX_BODY,
-    mutateMessage,
+    mergeThreadMessages,
+    refusalText,
     renderThread,
+    sendMessage,
     threadLayout,
     useMentions,
 } from '@/Components/Messages/messages';
@@ -51,7 +55,8 @@ import { Textarea } from '@/Components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { clearDraft, messageDraftKey, readDraft, writeDraft } from '@/lib/drafts';
 import { windowFocused } from '@/lib/attention';
-import { backoff, fetchWithTimeout, TOO_LARGE_TEXT } from '@/lib/net';
+import { backoff, fetchWithTimeout, reportNetworkFailure, reportNetworkSuccess, TOO_LARGE_TEXT } from '@/lib/net';
+import { playMessageSent } from '@/lib/sound';
 import { isSessionLive, reportResponse, sessionState } from '@/lib/session';
 import { useUnsavedGuard } from '@/lib/unsavedGuard';
 import { cn } from '@/lib/utils';
@@ -141,6 +146,10 @@ import { cn } from '@/lib/utils';
  *   reading" into "reading" with something still unread.
  * - **The unread line** advances only while the reader has stayed at the bottom
  *   (`viewingStreak`): arrivals they watched get no line, arrivals while they were away keep it.
+ *   Brief 009: "watched" is the tab visible and the list at the bottom when the re-read goes out
+ *   AND when it lands — whatever triggered it (a poll, a socket ping, a post) — and such a re-read
+ *   also marks read. A line already drawn stays where it is but does not count what was watched
+ *   (`watchedIds`); sending a message of your own clears it.
  * - The list stays pinned to the bottom when a lazy image grows it (`@load.capture`).
  * - **The task discussion** (`routes.read === null`) keeps the old rule: every fetch reads.
  *
@@ -194,6 +203,51 @@ const loadError = ref<string | null>(null);
  */
 const threadGone = ref(false);
 const refreshing = ref(false);
+
+/**
+ * Brief 009, resilience: a background re-read that fails while messages are on screen never
+ * blanks the thread. It says "Reconnecting…" quietly above the composer and tries again after
+ * 2 s, 5 s, 10 s, then every 30 s, until a read succeeds. Only the very first load (nothing on
+ * screen yet) may show the error panel; a 404 is still the permanent answer it always was.
+ */
+const reconnecting = ref(false);
+const RECONNECT_STEPS_MS = [2_000, 5_000, 10_000, 30_000] as const;
+let reconnectStep = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearReconnect(): void {
+    if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+}
+
+/** A failed read: blank the thread only when there is nothing to keep showing. */
+function readFailed(message: string): void {
+    if (thread.value.messages.length === 0) {
+        loadError.value = message;
+
+        return;
+    }
+
+    reconnecting.value = true;
+    clearReconnect();
+
+    const delay = RECONNECT_STEPS_MS[Math.min(reconnectStep, RECONNECT_STEPS_MS.length - 1)];
+
+    reconnectStep += 1;
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        void load();
+    }, delay);
+}
+
+function readSucceeded(): void {
+    reconnecting.value = false;
+    reconnectStep = 0;
+    clearReconnect();
+}
+
 /** Bumped per fetch so a slow answer for a thread that has moved on cannot land in it. */
 const token = ref(0);
 
@@ -217,7 +271,7 @@ const pickerEl = ref<HTMLInputElement | null>(null);
  * Reliability slice 2b. How far an attachment or a voice note has got (0-100) while it is
  * going, and — when it got no answer or a 5xx — which of the two is still sitting here waiting
  * for *Try again*. The composer is never reset on a failure, so the file or the clip is still
- * the one that goes. Said here and not also as a toast (`mutateMessage`'s `onSendFailed`).
+ * the one that goes. Said here and not also as a toast (brief 009: the send is a JSON request).
  */
 const sendProgress = ref<number | null>(null);
 const sendFailed = ref<'voice' | 'file' | null>(null);
@@ -423,12 +477,39 @@ function onPageHide(): void {
 useUnsavedGuard(() => picked.value !== null || voiceClip.value !== null || voiceActive.value || body.value.trim() !== '');
 
 function choose(event: Event): void {
-    const file = (event.target as HTMLInputElement).files?.[0] ?? null;
+    adoptFile((event.target as HTMLInputElement).files?.[0] ?? null);
+}
 
+/** One way in for a file, whether it was picked or pasted: same check, same preview. */
+function adoptFile(file: File | null): void {
     picked.value = file;
     serverError.value = null;
     sendFailed.value = null;
     pickedError.value = file === null ? null : rejectionFor(file);
+}
+
+function pad2(value: number): string {
+    return String(value).padStart(2, '0');
+}
+
+/**
+ * Ctrl/⌘ + V of an image attaches it, the way Telegram does. A text paste is left alone. A
+ * clipboard image arrives as `image.png` (or nameless), so it is renamed to when it was pasted.
+ */
+function onPaste(event: ClipboardEvent): void {
+    const image = Array.from(event.clipboardData?.files ?? []).find((file) => file.type.startsWith('image/'));
+
+    if (image === undefined || posting.value || attachBlocked.value) {
+        return;
+    }
+
+    event.preventDefault();
+
+    const at = new Date();
+    const stamp = `${at.getFullYear()}${pad2(at.getMonth() + 1)}${pad2(at.getDate())}-${pad2(at.getHours())}${pad2(at.getMinutes())}${pad2(at.getSeconds())}`;
+    const ext = (image.type.split('/')[1] ?? 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'png';
+
+    adoptFile(new File([image], `pasted-${stamp}.${ext}`, { type: image.type, lastModified: at.getTime() }));
 }
 
 // A clip discarded or re-recorded is not the one that failed.
@@ -457,6 +538,24 @@ function mention(person: MessagePerson): void {
 
         const at = body.value.length;
 
+        el?.setSelectionRange?.(at, at);
+        grow();
+    });
+}
+
+/** An emoji was picked: insert it at the caret (as `mention()` does) and give the caret back. */
+function insertEmoji(emoji: string): void {
+    const el = field();
+    const caret = el?.selectionStart ?? body.value.length;
+    const end = el?.selectionEnd ?? caret;
+
+    body.value = `${body.value.slice(0, caret)}${emoji}${body.value.slice(end)}`;
+    rememberEmoji(emoji);
+
+    const at = caret + emoji.length;
+
+    void nextTick(() => {
+        el?.focus();
         el?.setSelectionRange?.(at, at);
         grow();
     });
@@ -515,8 +614,11 @@ function advanceAnchor(messages: ThreadMessage[]): void {
     }
 }
 
+/** Arrivals the reader watched land while a line was already drawn: never counted as new. */
+const watchedIds = ref(new Set<number>());
+
 function isUnread(message: ThreadMessage): boolean {
-    if (message.is_mine) {
+    if (message.is_mine || message.id < 0 || watchedIds.value.has(message.id)) {
         return false;
     }
 
@@ -643,6 +745,11 @@ function reading(): boolean {
     return onScreen() && atBottom();
 }
 
+/** Brief 009: the tab is visible and the list is at the newest message — what arrives is seen. */
+function visibleAtBottom(): boolean {
+    return (typeof document === 'undefined' || document.visibilityState === 'visible') && atBottom();
+}
+
 /**
  * Has the reader stayed at the bottom, on screen, since the last re-read? Broken by a blur, a
  * hidden tab or a scroll up; the next re-read starts it again.
@@ -767,13 +874,59 @@ function keepLoadedHistory(current: ThreadPayload, payload: ThreadPayload): Thre
         return payload;
     }
 
-    const earlier = current.messages.filter((message) => message.id < oldest);
+    // Local (negative-id) rows are not history; `withLocal()` puts them back at the end.
+    const earlier = current.messages.filter((message) => message.id > 0 && message.id < oldest);
 
     if (earlier.length === 0) {
         return payload;
     }
 
     return { ...payload, messages: [...earlier, ...payload.messages], has_more: current.has_more };
+}
+
+/**
+ * Brief 009, no flashing: a re-read is MERGED into what is drawn (`mergeThreadMessages`) — an
+ * unchanged row keeps its object and an attachment keeps its first signed url — then the loaded
+ * history is kept in front of it and this composer's own unsent rows stay at the end.
+ */
+function mergeRead(current: ThreadPayload, payload: ThreadPayload): ThreadPayload {
+    const real = current.messages.filter((message) => message.id > 0);
+    const merged = mergeThreadMessages(real, payload.messages, Date.now() + EXPIRY_MARGIN_MS);
+    const next = keepLoadedHistory(current, { ...payload, messages: merged });
+
+    return withLocal(current, next);
+}
+
+/**
+ * Brief 010: an edit, a delete or a reaction answered with the server's `message` (or a row's
+ * optimistic version of it). It goes through the same merge a re-read uses, so the row's
+ * attachments keep the objects — and the signed urls — they were first drawn with.
+ */
+function replaceMessage(message: ThreadMessage): void {
+    const real = thread.value.messages.filter((item) => item.id > 0);
+
+    if (!real.some((item) => item.id === message.id)) {
+        return;
+    }
+
+    const merged = mergeThreadMessages(
+        real,
+        real.map((item) => (item.id === message.id ? message : item)),
+        Date.now() + EXPIRY_MARGIN_MS,
+    );
+
+    thread.value = withLocal(thread.value, { ...thread.value, messages: merged });
+}
+
+/** Optimistic rows still waiting (or failed) ride along under every re-read. */
+function withLocal(current: ThreadPayload, next: ThreadPayload): ThreadPayload {
+    const local = current.messages.filter((message) => message.id < 0);
+
+    if (local.length === 0) {
+        return next;
+    }
+
+    return { ...next, messages: [...next.messages, ...local] };
 }
 
 async function load(before: number | null = null): Promise<void> {
@@ -789,9 +942,10 @@ async function load(before: number | null = null): Promise<void> {
 
     // Messaging polish: read once, so the flag sent and the bookkeeping below agree. `?before=`
     // never marks on the server; the task discussion sends no flag and every fetch reads.
-    const markRead = before === null && tracksReading.value && reading();
-    // The reader stayed at the bottom since the last re-read — what arrives now, they watched.
-    const watched = before === null && viewingStreak && markRead;
+    const markRead = before === null && tracksReading.value && (reading() || visibleAtBottom());
+    // Visible and at the bottom when this went out — what arrives now, they are watching land,
+    // whether a poll, a socket ping or a post asked for it (brief 009).
+    const watched = before === null && (viewingStreak || visibleAtBottom());
     const hadUnread = thread.value.unread_count > 0;
 
     refreshing.value = true;
@@ -825,9 +979,12 @@ async function load(before: number | null = null): Promise<void> {
 
             // 404 is "you may not see this conversation", said the way the backend says it
             // everywhere. There is no 403 to tell it apart from.
-            loadError.value = response.status === 404
-                ? 'This conversation is not available.'
-                : 'The conversation could not be loaded.';
+            if (response.status === 404) {
+                loadError.value = 'This conversation is not available.';
+                readSucceeded();
+            } else {
+                readFailed('The conversation could not be loaded.');
+            }
 
             // A refusal is not a transient failure, so the live refresh stops asking. Anything
             // else — a dropped connection, a 500 — is worth the next tick.
@@ -851,12 +1008,22 @@ async function load(before: number | null = null): Promise<void> {
         }
 
         if (before === null) {
-            const freshFromOthers = payload.messages.some((message) => message.id > seen && !message.is_mine);
-            // Arrivals the reader watched get no unread line; a line already drawn stays.
-            const advance = watched && reading() && firstUnreadId.value === null;
+            const arrivals = payload.messages.filter((message) => message.id > seen && !message.is_mine);
+            const freshFromOthers = arrivals.length > 0;
+            // Arrivals the reader watched get no unread line; a line already drawn stays, but
+            // does not count them.
+            const sawThem = watched && visibleAtBottom();
+            const advance = sawThem && firstUnreadId.value === null;
+
+            if (sawThem && !advance && arrivals.length > 0) {
+                const next = new Set(watchedIds.value);
+
+                arrivals.forEach((message) => next.add(message.id));
+                watchedIds.value = next;
+            }
 
             announce(payload.messages);
-            thread.value = keepLoadedHistory(thread.value, payload);
+            thread.value = mergeRead(thread.value, payload);
             keepAtBottom(wasAtBottom);
 
             if (advance) {
@@ -883,13 +1050,14 @@ async function load(before: number | null = null): Promise<void> {
         }
 
         loadError.value = null;
+        readSucceeded();
     } catch {
         if (before === null) {
             threadGate.fail(sentAt);
         }
 
         if (mine === token.value) {
-            loadError.value = 'The conversation could not be loaded.';
+            readFailed('The conversation could not be loaded.');
         }
     } finally {
         if (mine === token.value) {
@@ -958,10 +1126,12 @@ watch(
     ([id, payload], [previousId]) => {
         if (id !== previousId) {
             anchor.value = parseAt(payload.last_read_at);
+            watchedIds.value = new Set();
             seen = highestId(payload.messages);
             announcement.value = '';
             actionStatus.value = '';
             loadError.value = null;
+            readSucceeded();
             // The old thread keeps its draft; the new one brings its own back.
             flushDraft();
             resetComposer();
@@ -977,7 +1147,7 @@ watch(
         const wasAtBottom = atBottom();
 
         announce(payload.messages);
-        thread.value = payload;
+        thread.value = mergeRead(thread.value, payload);
         keepAtBottom(wasAtBottom);
     },
 );
@@ -1088,6 +1258,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    clearReconnect();
     clearInterval(ticker);
     document.removeEventListener('visibilitychange', refreshIfStale);
     window.removeEventListener('focus', onAttentionChange);
@@ -1125,75 +1296,288 @@ function post(): void {
         return;
     }
 
-    posting.value = true;
-    serverError.value = null;
-    sendFailed.value = null;
-
     const file = picked.value;
     const clip = voiceClip.value;
-    const carrying = clip !== null ? 'voice' : file !== null ? 'file' : null;
+    const carrying: Outgoing['carrying'] = clip !== null ? 'voice' : file !== null ? 'file' : null;
+    const text = body.value;
 
-    sendProgress.value = carrying === null ? null : 0;
-    const named = mentions.ids();
-    const data: Record<string, FormDataConvertible> = { body: body.value };
+    // Nothing at all: let the server say its own sentence, as before, but without a ghost row.
+    if (carrying === null && text.trim() === '') {
+        void send({ tempId: null, text, people: [...mentions.picked.value], named: mentions.ids(), carrying, file, clip });
 
-    named.forEach((id, index) => {
-        data[`mentions[${index}]`] = id;
+        return;
+    }
+
+    const outgoing: Outgoing = {
+        tempId: --tempSeq,
+        text,
+        people: [...mentions.picked.value],
+        named: mentions.ids(),
+        carrying,
+        file,
+        clip,
+    };
+
+    appendLocal(optimistic(outgoing));
+
+    if (carrying === null) {
+        // Text only: the composer is free at once (Telegram), and the draft goes with it.
+        dropDraft();
+        resetComposer();
+    }
+
+    void send(outgoing);
+}
+
+/** One message on its way: what was typed, who it names, and the bytes if it carries any. */
+interface Outgoing {
+    /** The optimistic row's id (negative), or `null` for a send that draws none. */
+    tempId: number | null;
+    text: string;
+    people: MessagePerson[];
+    named: number[];
+    carrying: 'voice' | 'file' | null;
+    file: File | null;
+    clip: VoiceClip | null;
+}
+
+/** Negative, so a local row can never collide with a server id. */
+let tempSeq = 0;
+/** Sends waiting for an answer, by temp id — a failed one stays here for "tap to retry". */
+const outbox = new Map<number, Outgoing>();
+/** A text-only send gives up after this long and offers a retry; an upload is never timed out. */
+const TEXT_SEND_TIMEOUT_MS = 30_000;
+
+function optimistic(outgoing: Outgoing): ThreadMessage {
+    return {
+        id: outgoing.tempId ?? 0,
+        body: outgoing.text.trim() === '' ? null : outgoing.text,
+        author: userId.value === null ? null : { id: userId.value, name: null },
+        is_mine: true,
+        created_at: new Date().toISOString(),
+        attachments: [],
+        mentions: outgoing.people.filter((person) => outgoing.named.includes(person.id)),
+        mentions_me: false,
+        edited_at: null,
+        is_deleted: false,
+        can_edit: false,
+        can_delete: false,
+        reactions: [],
+        seen: null,
+        pending: true,
+    };
+}
+
+function appendLocal(message: ThreadMessage): void {
+    thread.value = { ...thread.value, messages: [...thread.value.messages, message] };
+
+    void nextTick(() => {
+        scrollToBottom();
+        pinned = true;
     });
+}
+
+function patchLocal(tempId: number, patch: Partial<ThreadMessage> | null): void {
+    const messages = thread.value.messages;
+    const index = messages.findIndex((message) => message.id === tempId);
+
+    if (index === -1) {
+        return;
+    }
+
+    const next = [...messages];
+
+    if (patch === null) {
+        next.splice(index, 1);
+    } else {
+        next[index] = { ...messages[index], ...patch };
+    }
+
+    thread.value = { ...thread.value, messages: next };
+}
+
+/** The server's row takes the optimistic one's place, ordered by id among the real ones. */
+function settleLocal(tempId: number, message: ThreadMessage): void {
+    const rest = thread.value.messages.filter((item) => item.id !== tempId && item.id !== message.id);
+    const real = [...rest.filter((item) => item.id > 0), message].sort((a, b) => a.id - b.id);
+    const local = rest.filter((item) => item.id < 0);
+
+    thread.value = { ...thread.value, messages: [...real, ...local] };
+    seen = Math.max(seen, message.id);
+}
+
+function dropDraft(): void {
+    if (draftTimer !== null) {
+        clearTimeout(draftTimer);
+        draftTimer = null;
+    }
+
+    clearDraft(draftKey);
+}
+
+/** "Not sent — tap to retry" on a row: the same message, sent again. */
+function retry(tempId: number): void {
+    const outgoing = outbox.get(tempId);
+
+    if (outgoing === undefined) {
+        return;
+    }
+
+    patchLocal(tempId, { failed: false, pending: true });
+    void send(outgoing);
+}
+
+async function send(outgoing: Outgoing): Promise<void> {
+    const { tempId, carrying, file, clip } = outgoing;
+    const conversationId = thread.value.conversation_id;
+    const data = new FormData();
+
+    data.append('body', outgoing.text);
+    outgoing.named.forEach((id, index) => data.append(`mentions[${index}]`, String(id)));
 
     // A recording wins only because the two cannot both exist: `micBlocked` and `attachBlocked`
     // are what make that true, and this order is the safety net rather than the rule.
     if (clip !== null) {
         // The filename carries the extension that matches the blob's own MIME type — the
         // server validates the pair, so `voice.webm` holding `audio/mp4` is a 422.
-        data.file = clipFile(clip);
-        data.kind = 'voice';
-        data.duration = clip.seconds;
+        data.append('file', clipFile(clip));
+        data.append('kind', 'voice');
+        data.append('duration', String(clip.seconds));
     } else if (file !== null) {
-        data.file = file;
+        data.append('file', file);
     }
 
-    mutateMessage(props.routes.store, data, {
-        forceFormData: file !== null || clip !== null,
-        onProgress: (percent) => {
-            if (carrying !== null) {
+    if (tempId !== null) {
+        outbox.set(tempId, outgoing);
+    }
+
+    serverError.value = null;
+
+    if (carrying !== null) {
+        // An upload holds the composer, as before: the file or clip stays until it lands.
+        posting.value = true;
+        sendFailed.value = null;
+        sendProgress.value = 0;
+    }
+
+    const stillHere = (): boolean => thread.value.conversation_id === conversationId;
+
+    try {
+        const result = await sendMessage(
+            props.routes.store,
+            data,
+            csrfToken(),
+            carrying === null ? undefined : (percent) => {
                 sendProgress.value = percent;
-            }
-        },
-        // Only a send that carries bytes speaks inline; a text-only send keeps the global
-        // toast, which already says nothing was saved.
-        onSendFailed: carrying === null
-            ? undefined
-            : (kind) => {
-                if (kind === 'too_large') {
-                    serverError.value = TOO_LARGE_TEXT;
-                } else {
-                    sendFailed.value = carrying;
-                }
             },
-        onAccepted: () => {
-            // Sent: the draft goes with it, before anything else can read it back.
-            if (draftTimer !== null) {
-                clearTimeout(draftTimer);
-                draftTimer = null;
+            carrying === null ? TEXT_SEND_TIMEOUT_MS : 0,
+        );
+
+        if (result.status >= 500) {
+            reportNetworkFailure();
+        } else {
+            reportNetworkSuccess();
+        }
+
+        if (result.status === 201 || (result.status >= 200 && result.status < 300)) {
+            if (tempId !== null) {
+                outbox.delete(tempId);
             }
 
-            clearDraft(draftKey);
-            resetComposer();
-            // Posting marked the thread read server-side; this is what brings the message back
-            // with its author, its attachment and a live signed URL on it.
-            void load();
+            const accepted = (result.json as { message?: ThreadMessage } | null)?.message;
+
+            if (stillHere() && tempId !== null) {
+                if (accepted !== undefined) {
+                    settleLocal(tempId, accepted);
+                } else {
+                    patchLocal(tempId, null);
+                    void load();
+                }
+            }
+
+            playMessageSent();
+
+            // Replying is reading: the "new messages" line has done its job.
+            if (stillHere()) {
+                advanceAnchor(thread.value.messages.filter((message) => message.id > 0));
+            }
+
+            if (carrying !== null) {
+                // Sent: the draft goes with it, before anything else can read it back.
+                dropDraft();
+                resetComposer();
+            }
+
             emit('settled');
-        },
-        onInvalid: (errors) => {
-            // Both halves of `required_without` carry the same sentence, so either will do.
-            serverError.value = (errors.body ?? errors.file ?? errors.mentions ?? 'That message was refused.') as string;
-        },
-        onFinish: () => {
+
+            return;
+        }
+
+        if (result.status >= 500 && carrying === null && tempId !== null) {
+            // The server broke, not the message: it stays as a failed row, a tap from a retry.
+            patchLocal(tempId, { pending: false, failed: true });
+
+            return;
+        }
+
+        if (tempId !== null) {
+            outbox.delete(tempId);
+            patchLocal(tempId, null);
+        }
+
+        // The session ended, or the role changed: the session module says so.
+        if (await reportResponse(new Response(JSON.stringify(result.json ?? {}), { status: result.status }))) {
+            restoreText(outgoing);
+
+            return;
+        }
+
+        if (result.status === 413) {
+            serverError.value = TOO_LARGE_TEXT;
+        } else if (result.status === 422) {
+            serverError.value = refusalText(result.json);
+        } else if (result.status >= 500 && carrying !== null) {
+            sendFailed.value = carrying;
+        } else {
+            serverError.value = refusalText(result.json);
+        }
+
+        restoreText(outgoing);
+    } catch {
+        reportNetworkFailure();
+
+        if (carrying !== null) {
+            // The composer still holds the bytes and says so, with its own Try again.
+            if (tempId !== null) {
+                outbox.delete(tempId);
+                patchLocal(tempId, null);
+            }
+
+            sendFailed.value = carrying;
+        } else if (tempId !== null) {
+            patchLocal(tempId, { pending: false, failed: true });
+        }
+    } finally {
+        if (carrying !== null) {
             posting.value = false;
             sendProgress.value = null;
-        },
+        }
+    }
+}
+
+/** A refused text-only send: its words (and who it named) go back into an empty composer. */
+function restoreText(outgoing: Outgoing): void {
+    if (outgoing.carrying !== null || body.value.trim() !== '' || outgoing.text.trim() === '') {
+        return;
+    }
+
+    body.value = outgoing.text;
+    outgoing.people.forEach((person) => {
+        if (!mentions.picked.value.some((held) => held.id === person.id)) {
+            mentions.picked.value = [...mentions.picked.value, person];
+        }
     });
+    void nextTick(grow);
 }
 
 /* ------------------------------------------------------------------ presentation */
@@ -1370,12 +1754,26 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                                 :starts-run="entry.startsRun"
                                 :links-stale="linksStale"
                                 :layout="layout"
+                                :conversation-id="thread.conversation_id"
                                 @announce="actionStatus = $event"
+                                @retry="retry(entry.message.id)"
+                                @replace="replaceMessage"
                             />
                         </li>
                     </template>
                 </ol>
             </div>
+
+            <!-- Brief 009: a failed background re-read, said quietly; the thread stays. -->
+            <p
+                v-if="reconnecting"
+                class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground"
+                role="status"
+                data-testid="thread-reconnecting"
+            >
+                <Loader2 class="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                Reconnecting…
+            </p>
 
             <!--
                 `can_post`, and nothing else. The announcements channel is where it is false for
@@ -1552,7 +1950,10 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         class="max-h-29 min-h-8 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-1.5 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
                         @input="grow"
                         @keydown.enter="onEnter"
+                        @paste="onPaste"
                     />
+
+                    <EmojiPicker :disabled="posting" @pick="insertEmoji" />
 
                     <VoiceRecorder
                         v-model:clip="voiceClip"
@@ -1643,6 +2044,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                             class="max-h-40 min-h-9 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-2 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
                             @input="grow"
                             @keydown.enter="onEnter"
+                            @paste="onPaste"
                         />
 
                         <!--
@@ -1650,6 +2052,8 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                             (`min-w-0 flex-1 basis-40`) while it is hidden, and the mic button. On
                             a browser that cannot record, both roots are nothing.
                         -->
+                        <EmojiPicker v-show="!voiceActive" :disabled="posting" @pick="insertEmoji" />
+
                         <VoiceRecorder
                             v-model:clip="voiceClip"
                             v-model:active="voiceActive"

@@ -41,6 +41,13 @@ namespace App\Support;
  * `team` and `announcement` have no linked object, and that is not an exception either: their
  * audience is computed from a PERMISSION, which is the same kind of answer `TaskPolicy` gives
  * and the same kind this codebase has always preferred to a role name (decisions 2-13, 2-31).
+ *
+ * ## `group` (decision 12-81)
+ *
+ * A named chat a holder of `messages.manage` creates for the people they choose. Its audience
+ * is the `conversation_group_members` table — a list kept for that purpose and written only by
+ * `GroupService`, never `conversation_members` (which still holds read state and grants nothing).
+ * It has no linked object and no DM pair; the CHECK on `conversations` says so.
  */
 enum ConversationType: string
 {
@@ -58,6 +65,9 @@ enum ConversationType: string
 
     /** One-way, from a holder of `announcements.send`. Everybody else reads. */
     case Announcement = 'announcement';
+
+    /** A named group of chosen people (12-81). Members listed in `conversation_group_members`. */
+    case Group = 'group';
 
     /**
      * @return list<string>
@@ -79,7 +89,7 @@ enum ConversationType: string
         return match ($this) {
             self::Project => 'linked_project_id',
             self::Task => 'linked_task_id',
-            self::Team, self::Dm, self::Announcement => null,
+            self::Team, self::Dm, self::Announcement, self::Group => null,
         };
     }
 
@@ -95,7 +105,7 @@ enum ConversationType: string
     public function membershipIsComputed(): bool
     {
         return match ($this) {
-            self::Task, self::Project, self::Team, self::Dm, self::Announcement => true,
+            self::Task, self::Project, self::Team, self::Dm, self::Announcement, self::Group => true,
         };
     }
 
@@ -149,6 +159,7 @@ enum ConversationType: string
             self::Project => 'Projects',
             self::Dm => 'Direct',
             self::Task => 'Tasks',
+            self::Group => 'Groups',
         };
     }
 }

@@ -37,6 +37,11 @@ class ProfileController extends Controller
                     ? count($user->two_factor_recovery_codes ?? [])
                     : 0,
             ],
+            'push' => [
+                'vapidPublicKey' => (string) config('webpush.vapid.public_key'),
+                'messages' => (bool) $user->push_messages,
+                'alerts' => (bool) $user->push_alerts,
+            ],
             'sessions' => $sessions->forUser($user, $request->session()->getId())
                 ->map(fn (array $session): array => [
                     'id' => $session['id'],

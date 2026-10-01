@@ -58,7 +58,7 @@ const form = useForm({
     joining_date: '',
     manager_id: '',
     tracking_mode: '',
-    working_days: [] as string[],
+    working_days: ['sun', 'mon', 'tue', 'wed', 'thu'] as string[],
     working_hours_per_day: '8',
     start_time: '',
     office_or_remote: 'office',

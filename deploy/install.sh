@@ -440,15 +440,27 @@ cat > "/etc/php/$PHP_VERSION/fpm/conf.d/99-goodtechies-hq.ini" <<'INI'
 upload_max_filesize = 50M
 post_max_size = 50M
 expose_php = Off
+; Speed: compiled code stays in memory. validate_timestamps=0 is safe because deploy.sh
+; reloads php-fpm after every release, which clears the cache.
+opcache.enable=1
+opcache.memory_consumption=96
+opcache.interned_strings_buffer=16
+opcache.max_accelerated_files=20000
+opcache.validate_timestamps=0
+realpath_cache_size=4096K
+realpath_cache_ttl=600
 INI
 php -r 'echo "PHP ", PHP_VERSION, PHP_EOL;'
-# Our own pool. `ondemand` on a small box: no idle workers held in RAM, at most five PHP
-# requests at once (about 50 MB each), recycled every 300 requests so a leak cannot grow.
+# Our own pool. On a small box: at most five PHP requests at once (about 50 MB each), with
+# one or two workers kept warm so the first request after a quiet spell has no cold start,
+# recycled every 500 requests so a leak cannot grow.
 if [ "$LOW_MEMORY" = "1" ]; then
-    fpm_pm="pm = ondemand
+    fpm_pm="pm = dynamic
 pm.max_children = 5
-pm.process_idle_timeout = 10s
-pm.max_requests = 300"
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 2
+pm.max_requests = 500"
 else
     fpm_pm="pm = dynamic
 pm.max_children = 12
@@ -844,7 +856,7 @@ GoodTechies HQ is installed.
   Workers:    supervisorctl status   (hq-reverb runs only when BROADCAST_CONNECTION=reverb)
   Realtime:   $(env_get BROADCAST_CONNECTION) / VITE_REALTIME=$(env_get VITE_REALTIME)  — docs/runbooks/realtime.md
   Releases:   automatic on every push to main (deploy/setup-actions-key.sh), or: cd $APP_DIR && bash deploy/deploy.sh
-  Memory:     $([ "$LOW_MEMORY" = "1" ] && echo "low-memory profile (PHP-FPM ondemand x5, PostgreSQL 128MB, Redis 96mb)" || echo "standard profile")
+  Memory:     $([ "$LOW_MEMORY" = "1" ] && echo "low-memory profile (PHP-FPM dynamic x5, PostgreSQL 128MB, Redis 96mb)" || echo "standard profile")
 
 Next steps (docs/runbooks/install.md):
   1. DNS: point $DOMAIN at this server, then run Certbot if it was skipped

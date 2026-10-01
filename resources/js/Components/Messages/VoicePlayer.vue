@@ -7,8 +7,50 @@
 /** How many bars the waveform draws, whatever the length of the note. */
 const BARS = 40;
 
-/** Peaks already worked out, by `src`. A thread re-rendering does not decode a note twice. */
+/**
+ * Peaks already worked out, and the note's bytes, by `cacheKey ?? src` (brief 009: the file id,
+ * so a re-signed url for the same note is the same note — no refetch, no spinner).
+ */
 const peakCache = new Map<string, number[]>();
+const blobCache = new Map<string, Blob>();
+/** Enough notes for a long thread; the oldest goes first. */
+const BLOB_CACHE_MAX = 60;
+
+function rememberBlob(key: string, blob: Blob): void {
+    blobCache.delete(key);
+    blobCache.set(key, blob);
+
+    while (blobCache.size > BLOB_CACHE_MAX) {
+        const oldest = blobCache.keys().next().value;
+
+        if (oldest === undefined) {
+            break;
+        }
+
+        blobCache.delete(oldest);
+    }
+}
+
+/** Brief 009: the playback speed is the reader's, for every note, until they change it. */
+const SPEED_KEY = 'hq.voice.speed';
+
+function storedSpeed(): 1 | 1.5 | 2 {
+    try {
+        const value = Number(window.localStorage.getItem(SPEED_KEY));
+
+        return value === 1.5 || value === 2 ? value : 1;
+    } catch {
+        return 1;
+    }
+}
+
+function storeSpeed(value: number): void {
+    try {
+        window.localStorage.setItem(SPEED_KEY, String(value));
+    } catch {
+        // Blocked storage: the speed lasts for this player only.
+    }
+}
 
 let sharedContext: AudioContext | null = null;
 
@@ -134,8 +176,10 @@ const props = withDefaults(
         label?: string;
         /** Sitting directly on the viewer's own DM bubble. */
         onAccent?: boolean;
+        /** What identifies the note across re-signed urls — `AttachmentCard` passes the file id. */
+        cacheKey?: string | number;
     }>(),
-    { durationSeconds: null, label: 'voice message', onAccent: false },
+    { durationSeconds: null, label: 'voice message', onAccent: false, cacheKey: undefined },
 );
 
 const SPEEDS = [1, 1.5, 2] as const;
@@ -155,7 +199,7 @@ const failed = ref(false);
 const playing = ref(false);
 const position = ref(0);
 const measured = ref<number | null>(null);
-const speed = ref<Speed>(1);
+const speed = ref<Speed>(storedSpeed());
 const peaks = ref<number[]>(flatPeaks());
 
 /** The object URL this player made, and must revoke. Never the caller's own `blob:` URL. */
@@ -199,23 +243,39 @@ function revoke(): void {
     }
 }
 
+function keyFor(src: string): string {
+    return props.cacheKey === undefined ? src : `key:${props.cacheKey}`;
+}
+
 async function load(src: string): Promise<void> {
     const token = ++loadToken;
+    const key = keyFor(src);
+    const cached = src.startsWith('blob:') ? undefined : blobCache.get(key);
 
     revoke();
     audioSrc.value = null;
-    loading.value = true;
+    loading.value = cached === undefined;
     failed.value = false;
-    peaks.value = peakCache.get(src) ?? flatPeaks();
+    peaks.value = peakCache.get(key) ?? flatPeaks();
 
     try {
-        const response = await fetch(src, { credentials: 'same-origin' });
+        let blob: Blob;
 
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+        if (cached !== undefined) {
+            blob = cached;
+        } else {
+            const response = await fetch(src, { credentials: 'same-origin' });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            blob = await response.blob();
+
+            if (!src.startsWith('blob:')) {
+                rememberBlob(key, blob);
+            }
         }
-
-        const blob = await response.blob();
 
         if (token !== loadToken) {
             return;
@@ -230,7 +290,7 @@ async function load(src: string): Promise<void> {
 
         loading.value = false;
 
-        if (!peakCache.has(src)) {
+        if (!peakCache.has(key)) {
             let next: number[];
 
             try {
@@ -239,7 +299,7 @@ async function load(src: string): Promise<void> {
                 next = flatPeaks();
             }
 
-            peakCache.set(src, next);
+            peakCache.set(key, next);
 
             if (token === loadToken) {
                 peaks.value = next;
@@ -280,6 +340,7 @@ function cycleSpeed(): void {
     const next = SPEEDS[(index + 1) % SPEEDS.length] ?? 1;
 
     speed.value = next;
+    storeSpeed(next);
 
     if (audioEl.value !== null) {
         audioEl.value.playbackRate = next;
@@ -401,8 +462,13 @@ function onEnded(): void {
 
 /** A new src is a new note: stop the old one rather than playing its bytes under a new label. */
 watch(
-    () => props.src,
-    (src) => {
+    () => [props.src, props.cacheKey] as const,
+    ([src, key], [, previousKey]) => {
+        // Brief 009: the same note under a freshly signed url is not a new note.
+        if (key !== undefined && key === previousKey) {
+            return;
+        }
+
         const audio = audioEl.value;
 
         if (audio !== null && !audio.paused) {
