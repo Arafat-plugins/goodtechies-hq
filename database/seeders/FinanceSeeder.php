@@ -182,6 +182,12 @@ class FinanceSeeder extends Seeder
         $this->seedCategories(FinanceCategoryKind::Income, self::INCOME_CATEGORIES);
         $this->seedCategories(FinanceCategoryKind::Expense, self::EXPENSE_CATEGORIES);
 
+        // The two category lists are reference data and every install gets them; the income
+        // and expense rows below are demo data and production does not (DatabaseSeeder::seedsDemo).
+        if (! DatabaseSeeder::seedsDemo()) {
+            return;
+        }
+
         $accountant = User::query()
             ->whereHas('employee.role', fn ($query) => $query->where('name', RoleName::ACCOUNTANT->value))
             ->first();

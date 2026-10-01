@@ -59,7 +59,7 @@ supervisorctl stop all                   # queue worker (and Reverb from Phase 6
 
 - **Option A: point `.env` at the restored database.**
   - Set `DB_DATABASE=goodtechies_hq_restored`.
-  - Release with `SKIP_PULL=1 deploy/deploy.sh` (the config is cached, so a release is required).
+  - Release with `SKIP_PULL=1 bash deploy/deploy.sh` (the config is cached, so a release is required).
 - **Option B: swap the database names.** `.env` stays unchanged, but nothing may be connected to either database:
   ```bash
   systemctl stop php8.3-fpm
@@ -93,7 +93,7 @@ Uploaded files are recovered from the file bucket, not from the zip.
   - With the CLI: run `aws s3api list-object-versions --bucket <bucket> --prefix <path>`, then copy the wanted `VersionId` back over the key.
 - **Bucket or region lost:** the replica bucket holds a full copy.
   - Either point `AWS_BUCKET` (plus `AWS_ENDPOINT` / `AWS_DEFAULT_REGION`) at the replica, or copy it back with `aws s3 sync s3://<replica> s3://<new-primary>`.
-  - Then release with `SKIP_PULL=1 deploy/deploy.sh`.
+  - Then release with `SKIP_PULL=1 bash deploy/deploy.sh`.
 
 ## Afterwards
 

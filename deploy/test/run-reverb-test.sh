@@ -156,6 +156,7 @@ contains "deploy.sh stops hq-reverb in the polling mode" "supervisorctl stop hq-
 
 contains "nginx proxies the websocket" "location ^~ /app/" "$nginx_conf"
 contains "nginx proxies the publish API" "location ^~ /apps/" "$nginx_conf"
+# shellcheck disable=SC2016 # PHP/nginx/JS source, expanded by that program and not by bash
 contains "nginx sends the upgrade header" 'proxy_set_header Upgrade $http_upgrade;' "$nginx_conf"
 contains "nginx sends the connection header" 'proxy_set_header Connection "Upgrade";' "$nginx_conf"
 contains "nginx proxies to the loopback Reverb" "proxy_pass http://127.0.0.1:8080;" "$nginx_conf"
@@ -214,6 +215,7 @@ step "open a real websocket, publish a real broadcast, and read the frame back"
 # is under test HERE is the transport: does a frame published through the HTTP API come out of
 # the websocket on the other side.
 ws_result="$(
+    # shellcheck disable=SC2016 # PHP/nginx/JS source, expanded by that program and not by bash
     cd "$APP_DIR" && PORT="$PORT" APP_ID="$APP_ID" APP_KEY="$APP_KEY" APP_SECRET="$APP_SECRET" node --input-type=module -e '
 import WebSocket from "ws";
 import crypto from "node:crypto";

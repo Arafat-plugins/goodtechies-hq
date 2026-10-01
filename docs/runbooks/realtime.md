@@ -39,15 +39,16 @@ Neither is an outage. Both are a line in `.env` and a release.
 ```bash
 cd /var/www/goodtechies-hq
 vim .env                       # BROADCAST_CONNECTION=reverb  and  VITE_REALTIME=reverb
-                               # REVERB_HOST=<your domain>  REVERB_PORT=443  REVERB_SCHEME=https
-SKIP_PULL=1 deploy/deploy.sh   # rebuilds the assets, then starts hq-reverb
+                               # REVERB_HOST/PORT/SCHEME are already right: install.sh keeps them
+                               # at <domain>/443/https, or <ip>/80/http on an IP install
+SKIP_PULL=1 bash deploy/deploy.sh   # rebuilds the assets, then starts hq-reverb
 ```
 
 ### Turning it off again (the fallback)
 
 ```bash
 vim .env                       # BROADCAST_CONNECTION=log  and  VITE_REALTIME=polling
-SKIP_PULL=1 deploy/deploy.sh   # rebuilds the assets, then STOPS hq-reverb
+SKIP_PULL=1 bash deploy/deploy.sh   # rebuilds the assets, then STOPS hq-reverb
 ```
 
 A `config:clear` is **not** enough for either. `VITE_REALTIME` is inside the compiled bundle,

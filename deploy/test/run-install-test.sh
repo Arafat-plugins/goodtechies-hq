@@ -4,6 +4,11 @@
 #   deploy/test/run-install-test.sh
 #
 # Environment:
+#   TEST_DOMAIN     DOMAIN for install.sh (default: hq.test). An IPv4 address tests the http
+#                   IP mode, including a real sign-in over http (deploy/test/http-login-check.sh).
+#   INSTALL_ENV     extra variables for install.sh, e.g. "LOW_MEMORY=1 SWAP_SIZE_MB=64"
+#   TEST_WORKTREE   1 = overlay the whole working tree (tracked + untracked, not ignored) instead
+#                   of deploy/ only, so uncommitted application changes are tested too
 #   LOG_FILE        where the transcript goes (default: $TMPDIR/hq-install-test-<timestamp>.log)
 #   EXTRA_CA_CERT   PEM bundle to trust inside the container (TLS-intercepting egress proxy)
 #   KEEP_CONTAINER  1 = keep the container after the run (it is always kept on failure)
@@ -11,7 +16,11 @@
 #   unless they point at the host loopback, which a bridged container cannot reach.
 #
 # The container clones the committed HEAD of this checkout from /src; the working-copy
-# deploy/ directory is then copied over the clone so uncommitted deploy changes are tested.
+# deploy/ directory (or, with TEST_WORKTREE=1, the whole working tree) is then copied over the
+# clone and committed there, so uncommitted changes are tested and the checkout is clean — which
+# deploy.sh now insists on. A bare repository in the container then plays GitHub, so the real
+# pull path (fetch, fast-forward, the pushed-commit check) and the restricted Actions key are
+# exercised too.
 #
 # From Phase 6 it also proves the realtime kit on the real layout: the polling default, then
 # the .env switch to Reverb and a release, then Supervisor, the loopback bind and Nginx's
@@ -24,7 +33,9 @@ SRC_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 IMAGE="goodtechies-hq-install-test:ubuntu24"
 CONTAINER="hq-install-test-$$"
 APP_DIR="/var/www/goodtechies-hq"
-DOMAIN="hq.test"
+DOMAIN="${TEST_DOMAIN:-hq.test}"
+INSTALL_ENV="${INSTALL_ENV:-}"
+TEST_WORKTREE="${TEST_WORKTREE:-0}"
 DB_NAME="goodtechies_hq"
 LOG_FILE="${LOG_FILE:-${TMPDIR:-/tmp}/hq-install-test-$(date +%Y%m%d-%H%M%S).log}"
 EXTRA_CA_CERT="${EXTRA_CA_CERT:-}"
@@ -118,19 +129,33 @@ step "start container"
 docker run "${RUN_ARGS[@]}" "$IMAGE" > /dev/null
 in_container 'grep PRETTY_NAME /etc/os-release; test -d /run/systemd/system && echo systemd || echo "no systemd (service fallback)"'
 
-step "clone the committed HEAD and overlay the working-copy deploy/"
+step "clone the committed HEAD and overlay the working copy"
 in_container "git config --global --add safe.directory /src \
     && git config --global --add safe.directory '*' \
+    && git config --global user.email install-test@localhost \
+    && git config --global user.name 'install test' \
     && git clone --branch '$BRANCH' /src '$APP_DIR' \
-    && cp -a /src/deploy/. '$APP_DIR/deploy/' \
-    && echo 'copied /src/deploy over $APP_DIR/deploy (uncommitted deploy kit under test)' \
     && git -C '$APP_DIR' log -1 --format='clone HEAD: %h %s'"
+if [ "$TEST_WORKTREE" = "1" ]; then
+    in_container "cd /src \
+        && git ls-files -z -co --exclude-standard | tar --null -T - --ignore-failed-read -cf - 2> /dev/null | tar -xf - -C '$APP_DIR' \
+        && git ls-files -z --deleted | (cd '$APP_DIR' && xargs -0 -r rm -f) \
+        && echo 'copied the whole working tree over $APP_DIR (uncommitted changes under test)'"
+else
+    in_container "cp -a /src/deploy/. '$APP_DIR/deploy/' && echo 'copied /src/deploy over $APP_DIR/deploy (uncommitted deploy kit under test)'"
+fi
+# Commit the overlay, then make a bare repository that plays GitHub's role from here on.
+in_container "cd '$APP_DIR' && git add -A && (git diff --cached --quiet || git commit -q -m 'install test: working-copy overlay') \
+    && git clone -q --bare '$APP_DIR' /srv/origin.git \
+    && git remote set-url origin /srv/origin.git && git fetch -q origin \
+    && git branch -q --set-upstream-to='origin/$BRANCH' \
+    && git log -1 --format='test HEAD: %h %s'"
 
 step "run deploy/install.sh"
-in_container "cd '$APP_DIR' && REPO_URL=/src BRANCH='$BRANCH' SKIP_FIREWALL=1 DOMAIN='$DOMAIN' bash deploy/install.sh"
+in_container "cd '$APP_DIR' && $INSTALL_ENV REPO_URL=/srv/origin.git BRANCH='$BRANCH' SKIP_FIREWALL=1 DOMAIN='$DOMAIN' bash deploy/install.sh"
 
 step "run deploy/deploy.sh again (idempotency)"
-in_container "cd '$APP_DIR' && SKIP_PULL=1 deploy/deploy.sh"
+in_container "cd '$APP_DIR' && SKIP_PULL=1 BRANCH='$BRANCH' bash deploy/deploy.sh"
 
 step "checks"
 check "GET /login returns 200" 200 \
@@ -139,6 +164,21 @@ check "GET / returns 302" 302 \
     "$(in_container "curl -s -o /dev/null -w '%{http_code}' -H 'Host: $DOMAIN' http://127.0.0.1/")"
 check "users seeded" 5 \
     "$(in_container "sudo -u postgres psql -d $DB_NAME -tAc 'select count(*) from users'")"
+# The production seed: reference data, no demo rows (SEED_DEMO=0 from the env template).
+db_count() {
+    in_container "sudo -u postgres psql -d $DB_NAME -tAc 'select count(*) from $1'"
+}
+check "SEED_DEMO=0 in .env" 0 "$(in_container "sed -n 's/^SEED_DEMO=//p' $APP_DIR/.env")"
+for table in clients projects tasks recurring_tasks meetings income expenses employee_salaries payroll_periods payroll_items attendance_records time_entries; do
+    if [ "$(in_container "sudo -u postgres psql -d $DB_NAME -tAc \"select to_regclass('public.$table') is not null\"")" = "t" ]; then
+        check "production seed: no demo $table" 0 "$(db_count "$table")"
+    else
+        echo "SKIP  table $table does not exist"
+    fi
+done
+check "production seed: six leave types" 6 "$(db_count leave_types)"
+check "production seed: finance categories present" 1 "$([ "$(db_count finance_categories)" -gt 0 ] && echo 1 || echo 0)"
+check "production seed: holidays present" 1 "$([ "$(db_count holidays)" -gt 0 ] && echo 1 || echo 0)"
 audit_acl="$(in_container "sudo -u postgres psql -d $DB_NAME -c '\\dp audit_logs'")"
 echo "$audit_acl"
 check "audit_logs grants hq_app ar only" "hq_app=ar/hq_migrator" \
@@ -155,6 +195,90 @@ about="$(in_container "cd '$APP_DIR' && php artisan about --only=environment")"
 echo "$about"
 check "artisan about shows production" production \
     "$(grep -oE 'Environment \.+ [a-z]+' <<<"$about" | awk '{print $NF}' | head -n 1)"
+check "PHP served through the goodtechies-hq pool" 1 \
+    "$(in_container "ls /run/php/php8.3-fpm-goodtechies-hq.sock > /dev/null 2>&1 && echo 1 || echo 0")"
+
+if [[ "$DOMAIN" =~ ^[0-9.]+$ ]]; then
+    step "IP mode: plain http, no HSTS, and people can sign in"
+    check "no HSTS header over http" 0 \
+        "$(in_container "curl -s -D - -o /dev/null -H 'Host: $DOMAIN' http://127.0.0.1/login | grep -ci strict-transport-security || true")"
+    if in_container "cd '$APP_DIR' && bash /src/deploy/test/http-login-check.sh '$DOMAIN' '$APP_DIR'"; then
+        check "sign-in over http (Employee, Admin with 2FA enrolment)" PASS PASS
+    else
+        check "sign-in over http (Employee, Admin with 2FA enrolment)" PASS FAIL
+    fi
+fi
+
+if [[ " $INSTALL_ENV " == *" LOW_MEMORY=1 "* ]]; then
+    step "low-memory profile"
+    check "PHP-FPM pool is ondemand" "pm = ondemand" \
+        "$(in_container "grep -m1 '^pm = ' /etc/php/8.3/fpm/pool.d/goodtechies-hq.conf")"
+    check "PostgreSQL shared_buffers" 128MB "$(in_container "sudo -u postgres psql -tAc 'show shared_buffers'")"
+    check "PostgreSQL max_connections" 40 "$(in_container "sudo -u postgres psql -tAc 'show max_connections'")"
+    check "Redis maxmemory (96 MB)" 100663296 "$(in_container "redis-cli config get maxmemory | tail -n 1")"
+    check "Redis maxmemory-policy" volatile-lru "$(in_container "redis-cli config get maxmemory-policy | tail -n 1")"
+    check "vm.swappiness persisted" "vm.swappiness=10" "$(in_container "cat /etc/sysctl.d/99-goodtechies-hq.conf")"
+fi
+
+step "release path: a push, a refused dirty checkout, the restricted Actions key"
+# A "push": a new commit lands on the bare origin from another clone.
+pushed_sha="$(in_container "rm -rf /tmp/pusher && git clone -q /srv/origin.git /tmp/pusher \
+    && cd /tmp/pusher && git checkout -q '$BRANCH' && echo '<!-- install test -->' >> README.md \
+    && git commit -q -am 'install test: a pushed change' && git push -q origin '$BRANCH' && git rev-parse HEAD")"
+echo "pushed $pushed_sha to the test origin"
+in_container "cd '$APP_DIR' && SSH_ORIGINAL_COMMAND='deploy $pushed_sha' BRANCH='$BRANCH' bash deploy/deploy.sh"
+check "deploy.sh released exactly the pushed commit" "$pushed_sha" "$(in_container "git -C '$APP_DIR' rev-parse HEAD")"
+check "GET /login after the release" 200 \
+    "$(in_container "curl -s -o /dev/null -w '%{http_code}' -H 'Host: $DOMAIN' http://127.0.0.1/login")"
+
+in_container "echo '# local edit' >> '$APP_DIR/README.md'"
+if in_container "cd '$APP_DIR' && BRANCH='$BRANCH' bash deploy/deploy.sh" > /dev/null 2>&1; then
+    check "deploy.sh refuses a checkout with local changes" refused released
+else
+    check "deploy.sh refuses a checkout with local changes" refused refused
+fi
+check "the site stays up after the refused release" 200 \
+    "$(in_container "curl -s -o /dev/null -w '%{http_code}' -H 'Host: $DOMAIN' http://127.0.0.1/login")"
+in_container "git -C '$APP_DIR' checkout -- README.md"
+
+if in_container "cd '$APP_DIR' && SSH_ORIGINAL_COMMAND='rm -rf /' bash deploy/deploy.sh" > /dev/null 2>&1; then
+    check "deploy.sh refuses any other SSH command" refused ran
+else
+    check "deploy.sh refuses any other SSH command" refused refused
+fi
+
+# The Actions key over a real sshd: it may run the release and nothing else.
+in_container "apt-get install -y -qq --no-install-recommends openssh-server openssh-client > /dev/null \
+    && mkdir -p /run/sshd && ssh-keygen -A > /dev/null && (pgrep -x sshd > /dev/null || /usr/sbin/sshd)"
+# An ssh login does not inherit docker exec's environment; give it the extra CA like the rest.
+if [ -n "$EXTRA_CA_CERT" ]; then
+    in_container "grep -q '^NODE_EXTRA_CA_CERTS=' /etc/environment || echo 'NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt' >> /etc/environment"
+fi
+in_container "bash /src/deploy/setup-deploy-key.sh" > /dev/null
+check "setup-deploy-key.sh made the GitHub key" 1 "$(in_container "test -f /root/.ssh/hq_github && grep -c 'IdentityFile /root/.ssh/hq_github' /root/.ssh/config")"
+actions_out="$(in_container "APP_DIR='$APP_DIR' VPS_HOST=127.0.0.1 bash /src/deploy/setup-actions-key.sh")"
+check "setup-actions-key.sh installed a restricted key" 1 \
+    "$(in_container "grep -c '^restrict,command=\"/bin/bash $APP_DIR/deploy/deploy.sh\" ssh-ed25519 .* goodtechies-hq-actions-deploy\$' /root/.ssh/authorized_keys")"
+check "setup-actions-key.sh keeps no private key on the server" 0 \
+    "$(in_container "grep -l 'PRIVATE KEY' /root/.ssh/* 2> /dev/null | grep -vc '/root/.ssh/hq_github\$' || true")"
+awk '/^---- VPS_SSH_KEY/ { on = 1; next } on && /^----$/ { on = 0 } on' <<<"$actions_out" \
+    | docker exec -i "$CONTAINER" bash -c 'umask 077; cat > /tmp/actions_key'
+awk '/^---- VPS_KNOWN_HOSTS/ { on = 1; next } on && /^$/ { on = 0 } on' <<<"$actions_out" \
+    | docker exec -i "$CONTAINER" bash -c 'cat > /tmp/actions_known_hosts'
+ssh_cmd="ssh -i /tmp/actions_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/actions_known_hosts -o BatchMode=yes root@127.0.0.1"
+second_sha="$(in_container "cd /tmp/pusher && echo '<!-- second -->' >> README.md && git commit -q -am 'install test: pushed again' && git push -q origin '$BRANCH' && git rev-parse HEAD")"
+if in_container "$ssh_cmd 'deploy $second_sha'" > /dev/null 2>&1; then
+    check "the Actions key runs the release over ssh" ok ok
+else
+    check "the Actions key runs the release over ssh" ok failed
+fi
+check "the Actions key released the pushed commit" "$second_sha" "$(in_container "git -C '$APP_DIR' rev-parse HEAD")"
+if in_container "$ssh_cmd 'id; cat /etc/shadow'" 2> /dev/null | grep -q 'uid=0'; then
+    check "the Actions key cannot run anything else" refused "ran a shell command"
+else
+    check "the Actions key cannot run anything else" refused refused
+fi
+
 # ---------------------------------------------------------------------------
 # Realtime (Phase 6). The install defaults to POLLING, so the first two checks are that the
 # kit is present and correctly switched off; the rest turn the socket on the way a person
@@ -184,7 +308,7 @@ in_container "cd '$APP_DIR' \
     && sed -i 's/^BROADCAST_CONNECTION=.*/BROADCAST_CONNECTION=reverb/' .env \
     && sed -i 's/^VITE_REALTIME=.*/VITE_REALTIME=reverb/' .env \
     && sed -i 's/^REVERB_HOST=.*/REVERB_HOST=$DOMAIN/' .env \
-    && SKIP_PULL=1 deploy/deploy.sh"
+    && SKIP_PULL=1 bash deploy/deploy.sh"
 
 for _ in $(seq 1 20); do
     reverb_status="$(in_container 'supervisorctl status hq-reverb' || true)"
@@ -217,7 +341,7 @@ step "realtime: back to polling, and Reverb is stopped again"
 in_container "cd '$APP_DIR' \
     && sed -i 's/^BROADCAST_CONNECTION=.*/BROADCAST_CONNECTION=log/' .env \
     && sed -i 's/^VITE_REALTIME=.*/VITE_REALTIME=polling/' .env \
-    && SKIP_PULL=1 deploy/deploy.sh"
+    && SKIP_PULL=1 bash deploy/deploy.sh"
 check "hq-reverb stopped again" 1 \
     "$(in_container 'supervisorctl status hq-reverb | grep -cE "STOPPED|not started" || true')"
 check "the polling build ships no socket client again" 0 \
@@ -225,7 +349,7 @@ check "the polling build ships no socket client again" 0 \
 
 step "shellcheck"
 in_container "apt-get install -y -qq --no-install-recommends shellcheck > /dev/null"
-if shellcheck_out="$(in_container "shellcheck /src/deploy/install.sh /src/deploy/deploy.sh /src/deploy/test/run-install-test.sh /src/deploy/test/run-reverb-test.sh" 2>&1)"; then
+if shellcheck_out="$(in_container "shellcheck /src/deploy/install.sh /src/deploy/deploy.sh /src/deploy/setup-deploy-key.sh /src/deploy/setup-actions-key.sh /src/deploy/test/run-install-test.sh /src/deploy/test/run-reverb-test.sh /src/deploy/test/http-login-check.sh" 2>&1)"; then
     shellcheck_out="${shellcheck_out}clean"
 fi
 echo "$shellcheck_out"

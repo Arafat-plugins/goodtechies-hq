@@ -14,6 +14,23 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        // Production (SEED_DEMO off): the reference data a real install needs and nothing
+        // invented — roles, permissions, settings, the five team members, the Bangladesh
+        // holiday list, the leave types with their opening balances, and the finance category
+        // lists (FinanceSeeder skips its demo income and expenses itself). See seedsDemo().
+        if (! self::seedsDemo()) {
+            $this->call([
+                RolePermissionSeeder::class,
+                SettingsSeeder::class,
+                TeamSeeder::class,
+                HolidaySeeder::class,
+                LeaveSeeder::class,
+                FinanceSeeder::class,
+            ]);
+
+            return;
+        }
+
         $this->call([
             RolePermissionSeeder::class,
             SettingsSeeder::class,
@@ -67,5 +84,29 @@ class DatabaseSeeder extends Seeder
             // than to discover on the morning somebody wires the two together.
             WorkSeeder::class,
         ]);
+    }
+
+    /**
+     * Whether the demo data (clients, projects, tasks, recurring templates, meetings, finance
+     * rows, salaries and payroll, attendance and tracked time) is seeded.
+     *
+     * `SEED_DEMO` decides when it is set (1/0, true/false, on/off, yes/no). When it is blank or
+     * absent the answer is "everywhere except production", so local development and the test
+     * suite seed exactly what they always have, and `db:seed --force` on the VPS never writes
+     * an invented client, project or payroll line into the real database.
+     */
+    public static function seedsDemo(): bool
+    {
+        $flag = env('SEED_DEMO');
+
+        if ($flag !== null && $flag !== '') {
+            $parsed = filter_var($flag, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+            if ($parsed !== null) {
+                return $parsed;
+            }
+        }
+
+        return ! app()->isProduction();
     }
 }
