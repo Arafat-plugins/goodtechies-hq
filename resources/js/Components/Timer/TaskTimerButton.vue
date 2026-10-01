@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { usePage } from "@inertiajs/vue3";
-import { Pause, Play, Square } from "@lucide/vue";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { formatClock } from "@/Components/Timer/timer";
+import { Pause, Play } from "@lucide/vue";
+import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
+import {
+    formatClock,
+    formatDuration,
+    spokenDuration,
+} from "@/Components/Timer/timer";
 import type { MyTaskTimer } from "@/Components/Timer/taskTimer";
 import {
     CLOCK_IN_CONFIRM_TEXT,
@@ -26,15 +30,26 @@ import {
 } from "@/Components/ui/tooltip";
 
 /**
- * ▶ / ⏸ / ⏹ for ONE task — flow F3. Mounted on a board card (`variant="card"`) and in the
- * drawer's Time section (`variant="panel"`).
+ * ONE button for ONE task's timer — flow F3, brief 029. Mounted on a board card
+ * (`variant="card"`), in the drawer header and the Show pages' actions (`variant="panel"`).
  *
  * Drawn only where the server said `permissions.can_track_time` — the parent decides; this
- * component never asks a role. Its states are the reader's own `my_timer` from `TaskResource`:
+ * component never asks a role. Its states are the reader's own `my_timer` from `TaskResource`,
+ * and the label carries the task's tracked time (`trackedSeconds`), so a card needs no second
+ * clock counter beside it:
  *
- *   none     ▶ Start                  "Start timer"   (all three: one light pill, no border)
- *   running  ⏸ 0:12:34  ⏹           "Pause timer", "Stop timer"
- *   paused   ▶ 0:12:34  ⏹           "Start timer" (resumes), "Stop timer"
+ *   none, tracked ≥ 1 min   ▶ 18h 11m    "Start timer"   (every state: one light pill, no border)
+ *   none, nothing tracked   ▶ Start      "Start timer"
+ *   running                 ⏸ 18:11:05   "Pause timer"   (ticks every second)
+ *   paused                  ▶ 18:11:05   "Start timer"   (resumes)
+ *
+ * One click: none → start, running → pause, paused → resume. **There is no ⏹** (brief 029): an
+ * open timer still closes on clock-out, on starting another task, and by the watchdog.
+ *
+ * **Running and paused show the task's total plus the reader's own open session.**
+ * `tasks.tracked_seconds` is the sum of STOPPED entries only (`TimerService::refreshTaskTotal`,
+ * `->stopped()->tracked()`), so the open entry is never in it and adding `my_timer`'s elapsed
+ * time cannot count it twice. Without `trackedSeconds` (or at 0) it is the reader's own clock.
  *
  * **The one-second clock is local to this small component** and runs only while the reader's
  * own timer is running here. Nothing else on the card reads it, so a tick re-renders this
@@ -48,9 +63,14 @@ const props = withDefaults(
     defineProps<{
         taskId: number;
         myTimer: MyTaskTimer | null;
+        /**
+         * The task's `tracked_seconds` — stopped, approved entries only, so never the open one.
+         * Omitted or 0: the label is `Start` idle, and the reader's own session clock otherwise.
+         */
+        trackedSeconds?: number | null;
         variant?: "card" | "panel";
     }>(),
-    { variant: "card" },
+    { variant: "card", trackedSeconds: null },
 );
 
 const emit = defineEmits<{
@@ -108,7 +128,36 @@ const elapsed = computed(() =>
         ? 0
         : ownElapsed(props.myTimer, receivedAt.value, now.value),
 );
-const clock = computed(() => formatClock(elapsed.value));
+const tracked = computed(() => {
+    const seconds = props.trackedSeconds;
+
+    return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0
+        ? Math.floor(seconds)
+        : 0;
+});
+/** The task's total so far: the stopped entries plus the reader's own open session. */
+const total = computed(() => tracked.value + elapsed.value);
+/**
+ * What the button reads. Idle with a whole minute tracked: `18h 11m` (the card's own
+ * `formatDuration`, since nothing is moving); idle under that: `Start`; open: `18:11:05`.
+ */
+const label = computed(() => {
+    if (props.myTimer !== null) {
+        return formatClock(total.value);
+    }
+
+    return tracked.value >= 60 ? formatDuration(tracked.value) : "Start";
+});
+/**
+ * The total for a screen reader, which never hears the ticking label: whole minutes only, so it
+ * changes at most once a minute, and it is a description, never announced on change.
+ */
+const descriptionId = useId();
+const description = computed(() =>
+    props.myTimer === null && tracked.value < 60
+        ? ""
+        : `${spokenDuration(total.value)} tracked`,
+);
 
 const asking = computed(() => actions.prompt.value?.owner === owner);
 
@@ -126,10 +175,6 @@ function onPrimary(): void {
     }
 }
 
-function onStop(): void {
-    actions.stop(settled);
-}
-
 function confirmClockIn(): void {
     actions.start(props.taskId, owner, { clockIn: true, onSettled: settled });
 }
@@ -144,15 +189,13 @@ const primaryLabel = computed(() =>
     props.myTimer?.state === "running" ? "Pause timer" : "Start timer",
 );
 const size = computed(() => (props.variant === "card" ? "xs" : "sm"));
-const iconSize = computed(() =>
-    props.variant === "card" ? "icon-xs" : "icon-sm",
-);
 
 /**
  * **One light pill for every state** (brief 026): idle `▶ Start`, running `⏸ 0:12:34` and paused
  * `▶ 0:12:34` all wear the same soft `--brand-tint` fill with `--primary` text (4.63:1 light /
  * 5.93:1 dark) and **no border** — `border-transparent`, so the computed border colour is never a
- * red or orange ring. The running time is inside this one button; there is no separate time chip.
+ * red or orange ring. The time is inside this one button; there is no separate time chip and,
+ * since brief 029, no ⏹ beside it.
  * Hover stays light: `--brand-tint-strong` with `--foreground` text (11.06:1 / 11.96:1), because
  * `--primary` text drops to 4.16:1 on that fill.
  */
@@ -170,6 +213,7 @@ const PILL =
                         variant="ghost"
                         :size="size"
                         :aria-label="primaryLabel"
+                        :aria-describedby="description ? descriptionId : undefined"
                         :aria-pressed="myTimer?.state === 'running'"
                         :disabled="actions.busy.value"
                         draggable="false"
@@ -183,37 +227,23 @@ const PILL =
                         />
                         <Play v-else aria-hidden="true" class="fill-current" />
                         <span
-                            v-if="myTimer === null"
                             aria-hidden="true"
-                            data-task-timer-start
-                            >Start</span
+                            :data-task-timer-start="myTimer === null ? '' : undefined"
+                            :data-task-timer-clock="myTimer !== null ? '' : undefined"
+                            >{{ label }}</span
                         >
-                        <span v-else aria-hidden="true" data-task-timer-clock>{{
-                            clock
-                        }}</span>
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent>{{ primaryLabel }}</TooltipContent>
             </Tooltip>
 
-            <Tooltip v-if="myTimer !== null">
-                <TooltipTrigger as-child>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        :size="iconSize"
-                        aria-label="Stop timer"
-                        :disabled="actions.busy.value"
-                        draggable="false"
-                        data-task-timer-stop
-                        class="rounded-full border-transparent"
-                        @click.stop="onStop"
-                    >
-                        <Square aria-hidden="true" />
-                    </Button>
-                </TooltipTrigger>
-                <TooltipContent>Stop timer</TooltipContent>
-            </Tooltip>
+            <span
+                v-if="description"
+                :id="descriptionId"
+                class="sr-only"
+                data-task-timer-total
+                >{{ description }}</span
+            >
 
             <!-- Said to a screen reader once, not every second: the state, not the count. -->
             <span class="sr-only" aria-live="polite">

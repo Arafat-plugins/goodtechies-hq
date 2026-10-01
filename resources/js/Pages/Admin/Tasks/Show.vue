@@ -63,7 +63,12 @@ useFlashAsToast();
         <!-- Brief 025: the task's own timer at the top right, as in the drawer's header. The
              project is named once, by the Project row in the body. -->
         <template v-if="task.permissions.can_track_time || task.my_timer" #actions>
-            <TaskTimerButton :task-id="task.id" :my-timer="task.my_timer ?? null" variant="panel" />
+            <TaskTimerButton
+                :task-id="task.id"
+                :my-timer="task.my_timer ?? null"
+                :tracked-seconds="task.tracked_seconds"
+                variant="panel"
+            />
         </template>
 
         <TaskDetailBody

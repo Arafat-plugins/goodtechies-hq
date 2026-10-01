@@ -235,13 +235,15 @@ function close(): void {
             Brief 025: no project subline — the Project row in the body names it once, as a link,
             with the Admin's move beside it. The task's own timer sits here, top right, beside
             Open: drawn where the server said `permissions.can_track_time`, and also while the
-            reader's own timer is open on it, so a running timer can always be stopped.
+            reader's own timer is open on it, so a running timer can always be paused. Brief 029:
+            it carries the task's tracked total, and there is no ⏹ beside it.
         -->
         <template #header-actions>
             <TaskTimerButton
                 v-if="detail !== null && detail.task.id === current && (detail.task.permissions.can_track_time || detail.task.my_timer)"
                 :task-id="detail.task.id"
                 :my-timer="detail.task.my_timer ?? null"
+                :tracked-seconds="detail.task.tracked_seconds"
                 variant="panel"
                 @settled="refresh"
             />

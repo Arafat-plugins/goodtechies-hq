@@ -6,6 +6,7 @@ use App\Http\Middleware\EnsureActiveUser;
 use App\Http\Middleware\EnsureSurface;
 use App\Http\Middleware\EnsureTwoFactorEnrolled;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\SweepAbandonedTimers;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -37,6 +38,10 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(append: [
+            // Brief 028: the timer watchdog's rules, at most once a minute, with or without a
+            // scheduler. After the session (it needs the user), before Inertia's shared props
+            // and the controller, so the page that triggers it already reads the result.
+            SweepAbandonedTimers::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);

@@ -295,6 +295,17 @@ class TimerService
 
         $endedAt = $this->notBefore($this->notInTheFuture($at ?? Carbon::now()), $entry->started_at);
 
+        // Rule 1 applied at the moment of the stop (brief 028). A RUNNING entry whose browser
+        // went quiet for longer than the timeout ends at its last heartbeat, not at whatever
+        // moment somebody finally pressed ⏹, clocked out or ▶'d another task — the same ending
+        // the watchdog would have written had it run. Without this, a clock-out the morning after
+        // a PC was switched off banks the whole night. A paused entry is left alone: time after
+        // its pause never counts, so its end point cannot add any.
+        if ($entry->paused_at === null && $this->isAbandonedAt($entry, $endedAt)) {
+            $endedAt = $this->lastSignOfLife($entry);
+            $flagReason ??= TimerFlag::heartbeatTimeout($this->heartbeatTimeoutMinutes(), $endedAt->format('g:i a'));
+        }
+
         $pausedSeconds = (int) $entry->paused_seconds;
 
         if ($entry->paused_at !== null && $entry->paused_at->lessThanOrEqualTo($endedAt)) {
@@ -959,7 +970,7 @@ class TimerService
     public function stopAbandoned(?Carbon $now = null): array
     {
         $now = $now ?? Carbon::now();
-        $timeout = max(1, (int) $this->settings->get('heartbeat_timeout_minutes'));
+        $timeout = $this->heartbeatTimeoutMinutes();
         $deadline = $now->copy()->subMinutes($timeout);
 
         $stale = TimeEntry::query()
@@ -981,6 +992,98 @@ class TimerService
         }
 
         return $stopped;
+    }
+
+    /**
+     * Both rules, in the watchdog's order, behind ONE cheap `exists` — what the request sweep
+     * runs (`TimerSweep`, brief 028). Nearly every minute nothing is stale or overlong, and then
+     * this costs that one statement; only when something is does it pay for the two sweeps.
+     *
+     * @return array{stopped: list<int>, paused: list<int>}
+     */
+    public function sweep(?Carbon $now = null): array
+    {
+        $now = $now ?? Carbon::now();
+        $staleBefore = $now->copy()->subMinutes($this->heartbeatTimeoutMinutes());
+        $maxHours = (float) $this->settings->get('timer_max_session_hours');
+
+        $due = TimeEntry::query()
+            ->open()
+            ->where(function (Builder $query) use ($staleBefore, $maxHours, $now): void {
+                $query->whereRaw('coalesce(last_heartbeat_at, started_at) <= ?', [$staleBefore]);
+
+                if ($maxHours > 0) {
+                    $query->orWhere(fn (Builder $overlong) => $overlong
+                        ->whereNull('paused_at')
+                        ->whereNull('flagged_at')
+                        ->where('started_at', '<=', $now->copy()->subSeconds((int) round($maxHours * 3600))));
+                }
+            })
+            ->exists();
+
+        if (! $due) {
+            return ['stopped' => [], 'paused' => []];
+        }
+
+        return [
+            'stopped' => $this->stopAbandoned($now),
+            'paused' => $this->pauseOverlongSessions($now),
+        ];
+    }
+
+    /**
+     * Brief 028 — the one-off repair for what rule 1 should have done and did not, because no
+     * scheduler was running: a task-timer BREAKDOWN row (`counts_toward_hours = false`, decision
+     * 12-73) that was closed more than the heartbeat timeout after its last heartbeat — by a
+     * clock-out, a ⏹ or a ▶ elsewhere, the next morning — is re-ended at that heartbeat.
+     *
+     * - **Breakdown rows only.** A counting row is somebody's hours and pay; it is never
+     *   rewritten here (a counting row is a correction through `edit()`, with its audit trail).
+     * - **Timer rows only**: an `auto` entry nobody has hand-corrected (`edited_at` null). A
+     *   manual entry has no heartbeats to be measured against.
+     * - **The duration never grows**: it becomes the smaller of what was stored and the wall
+     *   clock up to the heartbeat. Only the pause TOTAL is stored, not when each pause fell, so
+     *   that is the one figure that is certainly not past the last heartbeat.
+     * - **Idempotent**: a repaired row ends at its heartbeat, so it no longer matches.
+     *
+     * @return list<int> the ids repaired
+     */
+    public function repairOverruns(): array
+    {
+        $timeout = $this->heartbeatTimeoutMinutes();
+
+        $overruns = TimeEntry::query()
+            ->stopped()
+            ->where('counts_toward_hours', false)
+            ->where('entry_type', TimeEntryType::Auto->value)
+            ->whereNull('edited_at')
+            ->whereRaw('ended_at > coalesce(last_heartbeat_at, started_at) + make_interval(mins => ?::int)', [$timeout])
+            ->orderBy('id')
+            ->get();
+
+        $repaired = [];
+
+        foreach ($overruns as $entry) {
+            DB::transaction(function () use ($entry, $timeout): void {
+                $endAt = $this->lastSignOfLife($entry);
+                $wall = (int) $entry->started_at->diffInSeconds($endAt);
+                $duration = max(0, min((int) $entry->duration_seconds, $wall));
+
+                $entry->forceFill([
+                    'ended_at' => $endAt,
+                    'paused_at' => null,
+                    'paused_seconds' => $wall - $duration,
+                    'duration_seconds' => $duration,
+                ])->save();
+
+                $this->flag($entry, TimerFlag::heartbeatTimeout($timeout, $endAt->format('g:i a')));
+                $this->refreshTaskTotal((int) $entry->task_id);
+            });
+
+            $repaired[] = (int) $entry->getKey();
+        }
+
+        return $repaired;
     }
 
     /**
@@ -1193,7 +1296,35 @@ class TimerService
     {
         $now = Carbon::now();
 
-        return $at->greaterThan($now->copy()->addMinute()) ? $now : $at->copy();
+        // In the app's zone, always (brief 028). The widget sends `toISOString()` — UTC, `Z` —
+        // and Eloquent writes a Carbon as `Y-m-d H:i:s` in ITS OWN zone with no offset, which
+        // PostgreSQL then reads in the connection's zone (`Asia/Dhaka`). A UTC start was stored
+        // six hours early, and every remote session started from the widget counted six hours
+        // it never ran. Every client timestamp this service accepts passes through here.
+        $at = $at->copy()->setTimezone((string) config('app.timezone'));
+
+        return $at->greaterThan($now->copy()->addMinute()) ? $now : $at;
+    }
+
+    /** `settings.heartbeat_timeout_minutes`, never below a minute — rule 1's threshold. */
+    private function heartbeatTimeoutMinutes(): int
+    {
+        return max(1, (int) $this->settings->get('heartbeat_timeout_minutes'));
+    }
+
+    /** The last moment the entry's client is known to have been there. */
+    private function lastSignOfLife(TimeEntry $entry): Carbon
+    {
+        return ($entry->last_heartbeat_at ?? $entry->started_at)->copy();
+    }
+
+    /**
+     * Rule 1's test, asked about one entry at one moment: has its client been silent for the
+     * timeout or longer by `$at`? The same comparison `stopAbandoned()` makes in SQL.
+     */
+    private function isAbandonedAt(TimeEntry $entry, Carbon $at): bool
+    {
+        return $this->lastSignOfLife($entry)->lessThanOrEqualTo($at->copy()->subMinutes($this->heartbeatTimeoutMinutes()));
     }
 
     private function notBefore(Carbon $at, ?Carbon $floor): Carbon

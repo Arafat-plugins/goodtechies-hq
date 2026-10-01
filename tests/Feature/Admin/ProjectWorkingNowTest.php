@@ -79,6 +79,8 @@ it('gives the admin the open timers grouped by project on the list and none for 
     $this->actingAs($this->yaseen)->post("/tasks/{$b->id}/timer", ['clock_in' => true])->assertRedirect();
 
     Carbon::setTestNow(PWN_DAY.' 10:12:00');
+    // Both tabs alive all along (a jump with no pings is a switched-off PC — brief 028).
+    TimeEntry::query()->open()->update(['last_heartbeat_at' => Carbon::now()]);
 
     $props = $this->actingAs($this->admin)->get('/admin/projects')->assertOk()->viewData('page')['props'];
 

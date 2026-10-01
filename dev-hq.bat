@@ -122,6 +122,13 @@ REM already pins, so this is a no-op once you are current and the fix when you a
 call composer install --no-interaction
 call npm install
 
+REM `composer run dev` starts the server, the queue worker and Vite - but no
+REM scheduler. The scheduler runs routes\console.php (the timer watchdog every
+REM minute, the overdue notices, the recurring tasks), so it gets its own window
+REM here, the way start-hq.bat does it. The app also stops a dead task timer by
+REM itself now, so this is belt and braces.
+start "goodERP scheduler - leave this open" cmd /k php artisan schedule:work
+
 call composer run dev
 
 echo.

@@ -201,6 +201,18 @@ if errorlevel 1 (
 echo    [ok]
 echo.
 
+REM ---------- 2d. Repair task timers that ran past their last heartbeat ----------
+REM Before the app stopped a task timer whose PC went off, such a timer was
+REM closed only when somebody next clocked out or pressed stop - and counted the
+REM whole gap. This re-ends those rows at their last heartbeat. It touches only
+REM task-timer breakdown rows (never anybody's hours or pay), and once they are
+REM right it finds nothing, so running it on every start is safe.
+echo === hq:repair-task-timer-overruns === >> "%LOG%"
+call php artisan hq:repair-task-timer-overruns >> "%LOG%" 2>&1
+if errorlevel 1 (
+    echo    [!] task-timer repair failed - see %LOG% ^(the app still starts^)
+)
+
 REM ---------- 3. Build the frontend ----------
 echo [4/5] Building the frontend ^(about 30 seconds^)...
 echo === npm run build === >> "%LOG%"
@@ -251,8 +263,13 @@ if defined REALTIME_UP (
 ) else (
     start "goodERP queue worker - leave this open" cmd /k php artisan queue:work --tries=1 --sleep=1 --timeout=60
     start "goodERP realtime ^(Reverb^) - leave this open" cmd /k php artisan reverb:start --host=127.0.0.1 --port=8080
-    echo    [ok] started the realtime server and the queue worker in two new windows.
-    echo started reverb + queue:work >> "%LOG%"
+    REM The SCHEDULER runs routes\console.php: the timer watchdog every minute, the
+    REM overdue and due-tomorrow notices, the recurring tasks. Without it a task timer
+    REM on a PC that was switched off was never stopped. The app now also stops such
+    REM a timer by itself, so this window is belt and braces, not a requirement.
+    start "goodERP scheduler - leave this open" cmd /k php artisan schedule:work
+    echo    [ok] started the realtime server, the queue worker and the scheduler in three new windows.
+    echo started reverb + queue:work + schedule:work >> "%LOG%"
 )
 echo.
 
@@ -282,10 +299,11 @@ echo     php artisan hq:two-factor-code shahadat@goodtechies.test
 echo.
 echo   LEAVE THIS WINDOW OPEN. The app only works while it runs.
 echo.
-echo   Two other windows opened beside this one - the realtime server and
-echo   the queue worker. Leave those open too: they are what makes a new
-echo   message appear without a reload. Close them and the app still
-echo   works, it just re-reads on a timer instead.
+echo   Three other windows opened beside this one - the realtime server,
+echo   the queue worker and the scheduler. Leave those open too: they are
+echo   what makes a new message appear without a reload and what runs the
+echo   timed jobs. Close them and the app still works, it just re-reads on a
+echo   timer instead.
 echo ============================================================
 echo.
 echo === php artisan serve === >> "%LOG%"

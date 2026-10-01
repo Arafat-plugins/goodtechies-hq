@@ -122,6 +122,13 @@ const hiddenNames = computed(() => hidden.value.map((person) => person.name ?? '
 const canDrag = computed(() => props.moves.length > 0 || props.canMoveUp || props.canMoveDown);
 
 /**
+ * Flow F3, brief 029: whether this reader gets the timer button. When they do, the button
+ * carries the task's tracked time (`▶ 18h 11m`, then the ticking total), so the separate 🕒
+ * counter is drawn only on cards with no button — readers who may not time this task.
+ */
+const showTimer = computed(() => props.card.permissions.can_track_time || props.card.my_timer !== null);
+
+/**
  * Flow F3: a press that began on the timer's buttons is a press, never the start of a drag.
  * A native `dragstart` fires on the draggable `<li>`, not on the button inside it, so the card
  * remembers where the pointer went down and refuses the drag from there.
@@ -278,8 +285,9 @@ function onDragStart(event: DragEvent): void {
                 <!--
                     Follow-up to brief 026: the counters give way BEFORE the countdown, and
                     whole. The row is one `h-4` line that wraps into a clipped second line,
-                    so the LAST items drop first: tracked time, then comments (attachments
-                    with them), then subtasks and the checklist. `leading-3.5` keeps the
+                    so the LAST items drop first: tracked time (only on cards without the timer
+                    button, brief 029), then comments (attachments with them), then subtasks
+                    and the checklist. `leading-3.5` keeps the
                     Archived chip inside that 16 px line.
 
                     The zero-width, full-height spacer holds line one, so even the first counter can wrap
@@ -348,10 +356,11 @@ function onDragStart(event: DragEvent): void {
                 <!--
                     Flow F3: the task's total tracked time — every approved entry, remote or an
                     office/Admin breakdown. Drawn from a whole minute up, like the counters beside it
-                    (under a minute it would read "0m").
+                    (under a minute it would read "0m"). Brief 029: only where there is NO timer
+                    button — the button shows this same total inside itself.
                 -->
                 <span
-                    v-if="card.tracked_seconds >= 60"
+                    v-if="!showTimer && card.tracked_seconds >= 60"
                     role="img"
                     data-card-tracked
                     class="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
@@ -363,12 +372,16 @@ function onDragStart(event: DragEvent): void {
 
                 </span>
 
-                <!-- Flow F3: ▶ / ⏸ 0:12:34 / ⏹ — only where the server said this reader may time it. -->
+                <!--
+                    Flow F3, brief 029: ONE button — ▶ 18h 11m / ⏸ 18:11:05 / ▶ 18:11:05 — only
+                    where the server said this reader may time it. It carries the tracked total.
+                -->
                 <span class="ml-auto inline-flex shrink-0 items-center">
                     <TaskTimerButton
-                        v-if="card.permissions.can_track_time || card.my_timer"
+                        v-if="showTimer"
                         :task-id="card.id"
                         :my-timer="card.my_timer"
+                        :tracked-seconds="card.tracked_seconds"
                     />
                 </span>
             </div>

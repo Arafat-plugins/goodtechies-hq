@@ -59,6 +59,8 @@ it('lists every open task timer for an Admin on the Time page, running and pause
     $this->actingAs($this->tapu)->post("/tasks/{$b->id}/timer", ['client_uuid' => (string) Str::uuid()])->assertRedirect();
 
     Carbon::setTestNow(WN_DAY.' 09:42:00');
+    // Both tabs alive all along (a jump with no pings is a switched-off PC — brief 028).
+    TimeEntry::query()->open()->update(['last_heartbeat_at' => Carbon::now()]);
     $this->actingAs($this->yaseen)->post('/task-timer/pause')->assertRedirect();
 
     $rows = collect($this->actingAs($this->admin)->get('/admin/time')->assertOk()

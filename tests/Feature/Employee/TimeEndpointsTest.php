@@ -44,6 +44,18 @@ afterEach(function (): void {
     Carbon::setTestNow();
 });
 
+/**
+ * Move the clock to `$at` with the open timer's widget still alive — pinging once a minute, as a
+ * real one does. A jump with no pings is a switched-off PC, which the request sweep ends at the
+ * last heartbeat (brief 028).
+ */
+function TIMEEND_at(string $at): void
+{
+    Carbon::setTestNow($at);
+
+    TimeEntry::query()->open()->update(['last_heartbeat_at' => Carbon::now()]);
+}
+
 /** Every timer endpoint, as method + path, so a refusal test covers all of them and not three. */
 function timerEndpoints(): array
 {
@@ -144,13 +156,13 @@ it('runs a session end to end: start, pause, resume, stop', function (): void {
         ->post('/employee/time/start', ['task_id' => $this->task->id, 'client_uuid' => $uuid])
         ->assertRedirect();
 
-    Carbon::setTestNow('2026-09-24 11:30:00');
+    TIMEEND_at('2026-09-24 11:30:00');
     $this->actingAs($this->tapu->user)->post('/employee/time/pause')->assertRedirect();
 
-    Carbon::setTestNow('2026-09-24 12:17:00');
+    TIMEEND_at('2026-09-24 12:17:00');
     $this->actingAs($this->tapu->user)->post('/employee/time/resume')->assertRedirect();
 
-    Carbon::setTestNow('2026-09-24 14:00:00');
+    TIMEEND_at('2026-09-24 14:00:00');
     $this->actingAs($this->tapu->user)->post('/employee/time/stop')->assertRedirect();
 
     $entry = TimeEntry::where('client_uuid', $uuid)->sole();
@@ -257,7 +269,7 @@ it('never hands one employee another\'s entry through a reused start uuid', func
     $theirTask = Task::factory()->create();
     $theirTask->assignees()->attach($other->id, ['is_primary' => true]);
 
-    Carbon::setTestNow('2026-09-24 09:10:00');
+    TIMEEND_at('2026-09-24 09:10:00');
 
     // Employee B sends A's uuid. B gets a start of their own — a new row, under a uuid the
     // server chose — and A's entry is neither returned, reassigned nor touched.

@@ -74,6 +74,18 @@ function TIMER_channels(TaskChanged $event): array
 }
 
 /**
+ * Move the clock to `$at` with every open timer's tab still ALIVE — pinging once a minute all
+ * along, which is what a real tab does. Without the pings the jump is a PC switched off, and
+ * the timer ends at its last heartbeat (brief 028); `StaleTaskTimerTest` is about that case.
+ */
+function TIMER_at(string $at): void
+{
+    Carbon::setTestNow($at);
+
+    TimeEntry::query()->open()->update(['last_heartbeat_at' => Carbon::now()]);
+}
+
+/**
  * Every figure that is somebody's hours or pay for `$user` on TIMER_DAY — read fresh.
  *
  * @return array<string, mixed>
@@ -169,7 +181,7 @@ it('keeps one open entry per person: ▶ on task B stops task A', function () {
 
     $this->actingAs($this->yaseen)->post("/tasks/{$a->id}/timer", ['clock_in' => true])->assertRedirect();
 
-    Carbon::setTestNow(TIMER_DAY.' 09:40:00');
+    TIMER_at(TIMER_DAY.' 09:40:00');
 
     $this->actingAs($this->yaseen)->post("/tasks/{$b->id}/timer")->assertRedirect();
 
@@ -191,7 +203,7 @@ it('stops the running task timer when the person clocks out', function () {
 
     $this->actingAs($this->yaseen)->post("/tasks/{$task->id}/timer", ['clock_in' => true])->assertRedirect();
 
-    Carbon::setTestNow(TIMER_DAY.' 12:00:00');
+    TIMER_at(TIMER_DAY.' 12:00:00');
 
     $this->actingAs($this->yaseen)->post('/attendance/clock-out')->assertRedirect();
 
@@ -213,11 +225,11 @@ it('never lets an office task entry move attendance, tracked minutes, the timesh
     $b = TIMER_task($this->yaseen);
 
     $this->actingAs($this->yaseen)->post("/tasks/{$a->id}/timer", ['clock_in' => true])->assertRedirect();
-    Carbon::setTestNow(TIMER_DAY.' 11:00:00');
+    TIMER_at(TIMER_DAY.' 11:00:00');
     $this->actingAs($this->yaseen)->post("/tasks/{$b->id}/timer")->assertRedirect();
-    Carbon::setTestNow(TIMER_DAY.' 12:30:00');
+    TIMER_at(TIMER_DAY.' 12:30:00');
     $this->actingAs($this->yaseen)->post('/task-timer/stop')->assertRedirect();
-    Carbon::setTestNow(TIMER_DAY.' 17:00:00');
+    TIMER_at(TIMER_DAY.' 17:00:00');
     $this->actingAs($this->yaseen)->post('/attendance/clock-out')->assertRedirect();
 
     expect(TimeEntry::query()->stopped()->sum('duration_seconds'))->toBe(12600);
@@ -242,7 +254,7 @@ it('lets a remote employee ▶ a card on the timer he already had, counting as i
 
     // No clock-in for the timer's own people: their timer IS their day.
     $this->actingAs($this->tapu)->post("/tasks/{$a->id}/timer")->assertRedirect();
-    Carbon::setTestNow(TIMER_DAY.' 10:00:00');
+    TIMER_at(TIMER_DAY.' 10:00:00');
     $this->actingAs($this->tapu)->post("/tasks/{$b->id}/timer")->assertRedirect();
 
     $first = TimeEntry::query()->orderBy('id')->firstOrFail();
@@ -325,7 +337,7 @@ it('shows running timers to an Admin and keeps them absent for an employee', fun
 
     $this->actingAs($this->yaseen)->post("/tasks/{$task->id}/timer", ['clock_in' => true])->assertRedirect();
 
-    Carbon::setTestNow(TIMER_DAY.' 09:12:00');
+    TIMER_at(TIMER_DAY.' 09:12:00');
 
     $card = function (array $board) use ($task): array {
         foreach ($board['columns'] as $column) {
@@ -469,7 +481,7 @@ it('starts again after a stop the same day — the same task and another task', 
 
     $this->actingAs($user)->post("/tasks/{$a->id}/timer", ['client_uuid' => (string) Str::uuid(), 'clock_in' => $office])
         ->assertSessionHas('success');
-    Carbon::setTestNow(TIMER_DAY.' 10:00:00');
+    TIMER_at(TIMER_DAY.' 10:00:00');
     $this->actingAs($user)->post('/task-timer/stop')->assertSessionHas('success');
 
     // The same task again, the same day.
@@ -482,7 +494,7 @@ it('starts again after a stop the same day — the same task and another task', 
     expect($again->task_id)->toBe($a->id)->and($again->isRunning())->toBeTrue();
 
     // And another task after a second stop.
-    Carbon::setTestNow(TIMER_DAY.' 11:00:00');
+    TIMER_at(TIMER_DAY.' 11:00:00');
     $this->actingAs($user)->post('/task-timer/stop')->assertSessionHas('success');
     $this->actingAs($user)->post("/tasks/{$b->id}/timer", ['client_uuid' => (string) Str::uuid()])
         ->assertSessionHas('success');

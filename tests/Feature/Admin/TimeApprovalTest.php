@@ -471,7 +471,9 @@ it('answers 404 for an entry id that does not exist, never a refusal that confir
 });
 
 it('refuses to rule on a session that is still going', function (): void {
-    $running = TimeEntry::factory()->forEmployee($this->tapu)->onTask($this->task)->running()->create();
+    // Alive: the factory's default heartbeat is an hour old, which the request sweep would
+    // rightly end before the approval is even asked (brief 028).
+    $running = TimeEntry::factory()->forEmployee($this->tapu)->onTask($this->task)->running()->heartbeatAt(Carbon::now())->create();
 
     $this->actingAs($this->admin)
         ->post('/admin/time/entries/'.$running->id.'/approve')

@@ -152,6 +152,7 @@ it('stores the wall clock minus the pause, to the second', function (): void {
     // 09:00 → 11:30 running, 11:30 → 12:17 paused, 12:17 → 14:00 running.
     $this->timer->pause($entry, at('11:30:00'));
     $this->timer->resume($entry, at('12:17:00'));
+    $this->timer->heartbeat($entry, at('13:59:00'));
 
     $this->timer->stop($entry, at('14:00:00'));
 
@@ -203,13 +204,13 @@ it('refuses to pause what is paused and to resume what is running', function ():
 
 it('keeps tasks.tracked_seconds as a recomputed sum and never an increment', function (): void {
     $first = $this->timer->start($this->tapu, $this->task, (string) Str::uuid(), at('09:00:00'));
-    at('10:00:00');
+    $this->timer->heartbeat($first, at('10:00:00'));
     $this->timer->stop($first);
 
     expect((int) DB::table('tasks')->where('id', $this->task->id)->value('tracked_seconds'))->toBe(3600);
 
     $second = $this->timer->start($this->tapu, $this->task, (string) Str::uuid(), at('11:00:00'));
-    at('11:30:00');
+    $this->timer->heartbeat($second, at('11:30:00'));
     $this->timer->stop($second);
 
     expect((int) DB::table('tasks')->where('id', $this->task->id)->value('tracked_seconds'))->toBe(3600 + 1800);
