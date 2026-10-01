@@ -34,9 +34,9 @@ import { cn } from '@/lib/utils';
  *
  * ## `onAccent` — why a body needs to know what it is sitting on
  *
- * A DM draws the viewer's own messages in a solid `bg-primary` bubble. A mention inside one is
- * `text-primary`: **brand on brand, 1.00:1, invisible.** So on an accent surface both the
- * mention and the link drop to `text-primary-foreground` (4.99:1 light / 7.31:1 dark, measured)
+ * A DM draws the viewer's own messages in a solid `bg-bubble-own` bubble (bubble-own, 12-77).
+ * A brand-coloured mention on that grey says nothing by hue. So on an accent surface both the
+ * mention and the link use `text-bubble-own-foreground` (~9:1, bubble-own, 12-77)
  * and separate themselves by WEIGHT and UNDERLINE STYLE rather than by hue — a mention is
  * semibold with a dotted underline, a link is a solid underline at normal weight.
  *
@@ -49,7 +49,7 @@ const props = withDefaults(
     defineProps<{
         body: string;
         mentions: MessagePerson[];
-        /** This body sits on a `--primary` fill: hue is unavailable, so weight carries. */
+        /** This body sits on the `--bubble-own` fill (bubble-own, 12-77): weight carries, not hue. */
         onAccent?: boolean;
     }>(),
     { onAccent: false },
@@ -58,17 +58,14 @@ const props = withDefaults(
 /**
  * A link is an underline in both variants; only its colour and weight move.
  *
- * The focus ring has to move too. `--ring` is `--brand`, two lightness steps off `--primary` on
- * the same hue, so on a `--primary` fill it is 1.43:1 — a ring nobody can see. (It was 1.20:1 when
- * the app still painted `ring-ring/50`; Phase 12's polish pass made every ring opaque, which fixed
- * the other surfaces and could not fix this one.) On accent the ring becomes
- * `--primary-foreground` instead, 5.01:1 / 7.31:1. Everywhere else it is the app's own `--ring`.
+ * The focus ring has to move too: on the own bubble the ring becomes
+ * `--bubble-own-foreground` (~9:1, bubble-own, 12-77). Everywhere else it is the app's own `--ring`.
  */
 const linkClass = computed(() =>
     cn(
         'rounded-sm break-all underline underline-offset-2 focus-visible:ring-3 focus-visible:outline-none',
         props.onAccent
-            ? 'text-primary-foreground decoration-primary-foreground focus-visible:ring-primary-foreground'
+            ? 'text-bubble-own-foreground decoration-bubble-own-foreground focus-visible:ring-bubble-own-foreground'
             : 'focus-visible:ring-ring',
     ),
 );
@@ -77,7 +74,7 @@ const mentionClass = computed(() =>
     cn(
         'break-words',
         props.onAccent
-            ? 'font-semibold text-primary-foreground underline decoration-dotted underline-offset-2'
+            ? 'font-semibold text-bubble-own-foreground underline decoration-dotted underline-offset-2'
             : 'font-medium text-primary',
     ),
 );

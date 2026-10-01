@@ -331,10 +331,12 @@ class AttendanceService
      *
      * A day that is already CLOSED (clocked in and out) is **re-opened** instead of refused —
      * decision 12-74, the client's "once a person stop the timer … its cant turn on in the
-     * current day". The first `clock_in` stays, `clock_out` is cleared, and the next clock-out
-     * closes the day again; the gap between the two counts inside `worked_minutes` (there is no
-     * break concept to put it in). Both the Clock-in button and ▶'s "Clock in and start?" come
-     * through here, so the two paths cannot disagree.
+     * current day". The first `clock_in` stays, `clock_out` is cleared, a new attendance
+     * session starts, and the next clock-out closes it and the day again. The gap between two
+     * sessions is a break and is NOT worked time: `worked_minutes` is the sum of the closed
+     * sessions (decision 12-76, superseding the "gap counts" clause of 12-74). Both the
+     * Clock-in button and ▶'s "Clock in and start?" come through here, so the two paths cannot
+     * disagree.
      */
     public function clockIn(Employee $employee, ?CarbonInterface $at = null): AttendanceRecord
     {
@@ -356,7 +358,7 @@ class AttendanceService
             $existing = AttendanceRecord::lockForDay((int) $employee->getKey(), $date);
 
             if ($existing?->clock_in !== null && $existing->clock_out !== null) {
-                return $this->reopen($existing, $employee, $schedule);
+                return $this->reopen($existing, $employee, $schedule, $at);
             }
 
             if ($existing?->clock_in !== null) {
@@ -378,20 +380,34 @@ class AttendanceService
 
             $record->save();
 
+            $record->sessions()->create(['clock_in' => $at]);
+
             return $record;
         });
     }
 
     /**
-     * Re-open a closed day (decision 12-74): keep the first `clock_in`, clear `clock_out`.
+     * Re-open a closed day (decision 12-74): keep the first `clock_in`, clear `clock_out`, and
+     * start a new attendance session at `$at`. The gap since the last clock-out is a break and
+     * is NOT worked time (decision 12-76, superseding that clause of 12-74).
+     *
+     * A legacy day with no session rows is first given one session spanning its clock-in and
+     * clock-out, so the morning it already holds is not lost from the sum.
      *
      * A Half Day that `half_day_auto` wrote at the clock-out being undone is undone with it —
      * the status goes back to what the first clock-in earned, and the next clock-out judges the
      * whole day again. A Half Day an Admin set (`edited_by`) is theirs and stays. Called inside
      * `clockIn()`'s transaction, on the row it has locked.
      */
-    private function reopen(AttendanceRecord $record, Employee $employee, Schedule $schedule): AttendanceRecord
+    private function reopen(AttendanceRecord $record, Employee $employee, Schedule $schedule, CarbonInterface $at): AttendanceRecord
     {
+        if ($record->sessions()->doesntExist()) {
+            $record->sessions()->create([
+                'clock_in' => $record->clock_in,
+                'clock_out' => $record->clock_out,
+            ]);
+        }
+
         $record->clock_out = null;
 
         if ($record->status === AttendanceStatus::HalfDay && $record->edited_by === null) {
@@ -403,6 +419,8 @@ class AttendanceService
         $record->save();
 
         $this->activity->record($record, 're-opened the day', $employee->user);
+
+        $record->sessions()->create(['clock_in' => $at]);
 
         return $record;
     }
@@ -433,7 +451,17 @@ class AttendanceService
                 throw AttendanceStateException::clockOutBeforeClockIn();
             }
 
+            $open = $record->sessions()->whereNull('clock_out')->lockForUpdate()->first();
+
+            if ($open === null) {
+                $record->sessions()->create(['clock_in' => $record->clock_in, 'clock_out' => $at]);
+            } else {
+                $open->clock_out = $at;
+                $open->save();
+            }
+
             $record->clock_out = $at;
+            $record->unsetRelation('sessions');
 
             if ($this->isHalfDay($employee->schedule, $record->workedMinutes())) {
                 $record->status = AttendanceStatus::HalfDay;
@@ -530,6 +558,22 @@ class AttendanceService
             $record->note = $attributes['note'];
             $record->edited_by = $actor->getKey();
             $record->save();
+
+            // A change to the times collapses the day to the one session the Admin typed
+            // (decision 12-76); a status- or note-only edit leaves the sessions as they were.
+            // Compared to the minute: the dialog sends back the HH:mm it was shown, so a stored
+            // 09:03:27 must read as unchanged when the Admin only touched the status.
+            $minute = fn (?string $iso): ?string => $iso === null ? null : Carbon::parse($iso)->format('Y-m-d H:i');
+
+            if ($creating
+                || $clockIn?->format('Y-m-d H:i') !== $minute($old['clock_in'])
+                || $clockOut?->format('Y-m-d H:i') !== $minute($old['clock_out'])) {
+                $record->sessions()->delete();
+
+                if ($clockIn !== null) {
+                    $record->sessions()->create(['clock_in' => $clockIn, 'clock_out' => $clockOut]);
+                }
+            }
 
             $this->audit->record(
                 AuditEvent::AttendanceEdited,
@@ -674,7 +718,7 @@ class AttendanceService
         $records = AttendanceRecord::keyByDate(
             $employee->attendanceRecords()
                 ->between($start, $end)
-                ->with('editor')
+                ->with(['editor', 'sessions'])
                 ->get()
                 ->toBase(),
         );
@@ -729,7 +773,7 @@ class AttendanceService
         $records = AttendanceRecord::query()
             ->forDate($date)
             ->whereIn('employee_id', $employees->modelKeys())
-            ->with('editor')
+            ->with(['editor', 'sessions'])
             ->get()
             ->keyBy('employee_id');
 

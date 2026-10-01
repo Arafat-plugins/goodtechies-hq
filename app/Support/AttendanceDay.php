@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\AttendanceRecord;
+use App\Models\AttendanceSession;
 use Illuminate\Support\Carbon;
 
 /**
@@ -99,6 +100,9 @@ final readonly class AttendanceDay
             // have been here, which is the one thing they are looking at it to find out.
             'clock_in_at' => $this->record?->clock_in?->toIso8601String(),
             'worked_minutes' => $this->workedMinutes,
+            // The day's clock-in -> clock-out stretches (decision 12-76); the gaps are breaks.
+            'sessions' => $this->sessions(),
+            'open_since' => $this->openSince(),
             'tracked_minutes' => $this->trackedMinutes,
 
             'note' => $this->record?->note,
@@ -110,5 +114,64 @@ final readonly class AttendanceDay
             'is_today' => $this->isToday,
             'is_future' => $this->isFuture,
         ];
+    }
+
+    /**
+     * `{clock_in, clock_out, minutes}` per session, earliest first. Empty with no record or no
+     * clock-in; a legacy record with a clock-in but no session rows reads as one session.
+     *
+     * @return list<array{clock_in: string, clock_out: string|null, minutes: int|null}>
+     */
+    private function sessions(): array
+    {
+        $record = $this->record;
+
+        if ($record === null || $record->clock_in === null) {
+            return [];
+        }
+
+        $sessions = $record->sessions;
+
+        if ($sessions->isEmpty()) {
+            return [[
+                'clock_in' => $record->clock_in->format('H:i'),
+                'clock_out' => $record->clock_out?->format('H:i'),
+                'minutes' => $record->clock_out === null
+                    ? null
+                    : intdiv((int) $record->clock_in->diffInSeconds($record->clock_out, true), 60),
+            ]];
+        }
+
+        return $sessions
+            ->map(fn (AttendanceSession $session): array => [
+                'clock_in' => $session->clock_in->format('H:i'),
+                'clock_out' => $session->clock_out?->format('H:i'),
+                'minutes' => $session->minutes(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * ISO-8601 moment the open session began, so a screen can count up from it; null when no
+     * session is open. A legacy open record with no session rows answers with its clock-in.
+     */
+    private function openSince(): ?string
+    {
+        $record = $this->record;
+
+        if ($record === null || $record->clock_in === null) {
+            return null;
+        }
+
+        $sessions = $record->sessions;
+
+        if ($sessions->isEmpty()) {
+            return $record->clock_out === null ? $record->clock_in->toIso8601String() : null;
+        }
+
+        $open = $sessions->first(fn (AttendanceSession $session): bool => $session->clock_out === null);
+
+        return $open?->clock_in->toIso8601String();
     }
 }

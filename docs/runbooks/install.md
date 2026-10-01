@@ -96,6 +96,35 @@ Service calls go through `svc()`. That helper uses `systemctl` when `/run/system
    php artisan about --only=environment
    ```
 
+## Email (password reset)
+
+The "Forgot password?" link on the sign-in page sends its reset link through Laravel's own mailer, so `MAIL_MAILER` in `.env` decides how it leaves the server. Three options:
+
+- **smtp** with the domain's own mailbox (e.g. Hostinger: `smtp.hostinger.com`, port 465, `MAIL_SCHEME=smtps`). Lands best.
+- **sendmail**: the server's local MTA. Needs postfix and a PTR record, or Gmail rejects it.
+- **log**: writes the mail to `storage/logs` (nothing is sent).
+
+For SMTP, set these keys in `/var/www/goodtechies-hq/.env`:
+
+```dotenv
+MAIL_MAILER=smtp
+MAIL_SCHEME=smtps
+MAIL_HOST=smtp.hostinger.com
+MAIL_PORT=465
+MAIL_USERNAME=no-reply@hq.example.com
+MAIL_PASSWORD=the-mailbox-password
+MAIL_FROM_ADDRESS="no-reply@hq.example.com"
+```
+
+Apply it with a release, then send a test mail:
+
+```bash
+cd /var/www/goodtechies-hq && SKIP_PULL=1 bash deploy/deploy.sh
+php artisan tinker --execute="Illuminate\Support\Facades\Mail::raw('goodERP test', fn (\$m) => \$m->to('you@example.com')->subject('goodERP mail test'));"
+```
+
+The reset email itself is queued, so `hq-queue` must be RUNNING for it to go out.
+
 ## Proof
 
 `docs/runbooks/install-log-2026-09-17.md` holds the transcript of `deploy/test/run-install-test.sh`: a fresh Ubuntu 24.04 container runs install.sh, then deploy.sh a second time, then the checks.

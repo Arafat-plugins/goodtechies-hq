@@ -31,6 +31,16 @@ export type AttendanceStatusKey =
     | 'remote'
     | 'off_day';
 
+/** One clock-in to clock-out stretch within a day. */
+export interface AttendanceSession {
+    /** `HH:mm` the session started. */
+    clock_in: string;
+    /** `HH:mm` the session ended, or null while it is still open. */
+    clock_out: string | null;
+    /** Minutes in this session, or null while it is still open. */
+    minutes: number | null;
+}
+
 /**
  * One day, as the server answers it. The same shape in a roster row, a month cell and the
  * clock widget's *today*.
@@ -52,6 +62,10 @@ export interface AttendanceDay {
     clock_in_at: string | null;
     /** Null until a clock-out: it is a difference and one end has not happened yet. */
     worked_minutes: number | null;
+    /** Today's sessions in order, `HH:mm`; `[]` when there is no clock-in yet. */
+    sessions: AttendanceSession[];
+    /** ISO moment the currently open session started; null when not clocked in. */
+    open_since: string | null;
     /**
      * Minutes the remote timer recorded. **Null means not known**, not zero: the timer is the
      * other half of Phase 4, and every surface prints this clause only when it is a number.

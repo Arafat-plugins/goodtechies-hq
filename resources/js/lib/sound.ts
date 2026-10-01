@@ -6,8 +6,9 @@ import { isSessionLive } from '@/lib/session';
  * The chime for something new — reliability slice 5.
  *
  * Somebody with goodERP open behind another window hears a short chime when the bell's unread
- * count or the Messages unread total goes UP. Off by default, switched on per person on the
- * Profile page. The client chose this over a tab-title count and desktop pop-ups; there is no
+ * count or the Messages unread total goes UP. On by default since 12-77 (the client asked for a
+ * Telegram-like sound); switched off per person on the Profile page, and an explicit off is
+ * remembered. The client chose this over a tab-title count and desktop pop-ups; there is no
  * Notification API, no service worker and no push here, by design (Part H).
  *
  * **Stored per browser, not on the server.** There is no per-person preference store to put it
@@ -16,8 +17,9 @@ import { isSessionLive } from '@/lib/session';
  * migration or a recorded decision. So it is `localStorage` key `hq.sound.<userId>`, and the
  * Profile hint says "Saved on this device". Every storage call is wrapped (DESIGN.md §5.9).
  *
- * The tone is generated with the Web Audio API — two short soft sine tones, ~250 ms, modest
- * gain — so there is no audio file and no dependency. A browser that blocks audio until the
+ * The tone is generated with the Web Audio API — an original, Telegram-like "pop" (a quick
+ * triangle note with a falling pitch and a soft octave above it, then a quieter second note),
+ * ~260 ms, modest gain — so there is no audio file and no dependency. A browser that blocks audio until the
  * page has had a gesture simply stays silent; the Profile page's *Play a test sound* is such a
  * gesture, and it also resumes the one shared `AudioContext`.
  */
@@ -38,12 +40,13 @@ export function readSoundEnabled(userId: number): boolean {
         return cache.value[userId];
     }
 
-    let on = false;
+    // On by default since 12-77: only a stored '0' (an explicit off) turns it off.
+    let on = true;
 
     try {
-        on = window.localStorage.getItem(storageKey(userId)) === '1';
+        on = window.localStorage.getItem(storageKey(userId)) !== '0';
     } catch {
-        on = false;
+        on = true;
     }
 
     cache.value = { ...cache.value, [userId]: on };
@@ -56,9 +59,9 @@ export function writeSoundEnabled(userId: number, on: boolean): void {
 
     try {
         if (on) {
-            window.localStorage.setItem(storageKey(userId), '1');
-        } else {
             window.localStorage.removeItem(storageKey(userId));
+        } else {
+            window.localStorage.setItem(storageKey(userId), '0');
         }
     } catch {
         // Private mode: the switch still works for this page's lifetime.
@@ -99,16 +102,31 @@ function audioContext(): AudioContext | null {
     return context;
 }
 
-function tone(ctx: AudioContext, frequency: number, startAt: number, duration: number): void {
+/**
+ * One note with a soft envelope: an 8 ms attack to `peak`, then an exponential fade to silence
+ * by `duration`, so neither edge clicks. `glideTo` drops (or raises) the pitch over 60 ms.
+ */
+function tone(
+    ctx: AudioContext,
+    frequency: number,
+    startAt: number,
+    duration: number,
+    type: OscillatorType = 'sine',
+    peak = 0.08,
+    glideTo: number | null = null,
+): void {
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
 
-    oscillator.type = 'sine';
+    oscillator.type = type;
     oscillator.frequency.setValueAtTime(frequency, startAt);
 
-    // A soft attack and an exponential fade, so neither edge clicks.
+    if (glideTo !== null) {
+        oscillator.frequency.exponentialRampToValueAtTime(glideTo, startAt + 0.06);
+    }
+
     gain.gain.setValueAtTime(0.0001, startAt);
-    gain.gain.exponentialRampToValueAtTime(0.08, startAt + 0.015);
+    gain.gain.exponentialRampToValueAtTime(peak, startAt + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
 
     oscillator.connect(gain);
@@ -117,7 +135,7 @@ function tone(ctx: AudioContext, frequency: number, startAt: number, duration: n
     oscillator.stop(startAt + duration + 0.02);
 }
 
-/** Two short tones, ~250 ms. Silent — never an error — when the browser will not play. */
+/** A short Telegram-like pop, ~260 ms. Silent — never an error — when the browser will not play. */
 export function playChime(): void {
     try {
         const ctx = audioContext();
@@ -132,8 +150,12 @@ export function playChime(): void {
 
         const now = ctx.currentTime;
 
-        tone(ctx, 880, now, 0.11);
-        tone(ctx, 1318.5, now + 0.12, 0.13);
+        // The pop: ~C6 on a triangle, its pitch dropping to ~G5 over 60 ms, with a softer sine an
+        // octave above it (×0.3), gone by 220 ms.
+        tone(ctx, 1046.5, now, 0.22, 'triangle', 0.12, 784);
+        tone(ctx, 2093, now, 0.22, 'sine', 0.12 * 0.3, 1568);
+        // Then a second, quieter note (~G6) from +90 ms, gone by 260 ms.
+        tone(ctx, 1568, now + 0.09, 0.17, 'sine', 0.06);
     } catch {
         // Blocked or unsupported: the chime is a courtesy, not a channel.
     }

@@ -3,6 +3,7 @@
 namespace App\Listeners;
 
 use App\Events\ConversationActivity;
+use App\Events\InboxActivity;
 use App\Events\MessagePosted;
 
 /**
@@ -60,6 +61,12 @@ class ConversationBroadcaster
         ConversationActivity::dispatch(
             (int) $event->conversation->getKey(),
             (int) $event->message->getKey(),
+        );
+
+        InboxActivity::dispatch(
+            (int) $event->conversation->getKey(),
+            (int) $event->message->getKey(),
+            (int) $event->message->author_id,
         );
     }
 }

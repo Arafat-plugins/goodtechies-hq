@@ -56,6 +56,8 @@
     --primary: oklch(0.56 0.205 34.4);              /* #D12D00 — 5.13:1 on card */
     --primary-hover: oklch(0.50 0.205 34.4);        /* #BC0A00 — 6.48:1 on background */
     --primary-foreground: oklch(0.99 0 0);          /* #FCFCFC — 4.99:1 on primary */
+    --bubble-own: oklch(0.42 0 0);                  /* own DM bubble, client's colour, 12-77; ~9:1 */
+    --bubble-own-foreground: oklch(0.99 0 0);       /* own DM bubble, client's colour, 12-77; ~9:1 */
     --destructive: oklch(0.577 0.245 27.325);       /* #E7000B — shadcn default, unchanged */
     --ring: var(--brand);                           /* #F04E27 — focus ring is brand, painted opaque */
 
@@ -245,6 +247,8 @@
     --primary: oklch(0.72 0.174 34.4);              /* #FE7555 — 7.31:1 on canvas */
     --primary-hover: oklch(0.78 0.150 34.4);        /* #FF9175 */
     --primary-foreground: oklch(0.1582 0.0118 260.6); /* #0A0D12 — 7.31:1 on primary */
+    --bubble-own: oklch(0.42 0 0);                  /* own DM bubble, client's colour, 12-77; ~9:1 */
+    --bubble-own-foreground: oklch(0.99 0 0);       /* own DM bubble, client's colour, 12-77; ~9:1 */
     --destructive: oklch(0.704 0.191 22.216);       /* #FF6467 — shadcn default, unchanged */
     --ring: var(--brand);                           /* #FE6845 */
 
@@ -383,6 +387,8 @@
     --color-primary: var(--primary);
     --color-primary-hover: var(--primary-hover);
     --color-primary-foreground: var(--primary-foreground);
+    --color-bubble-own: var(--bubble-own);
+    --color-bubble-own-foreground: var(--bubble-own-foreground);
     --color-secondary: var(--secondary);
     --color-secondary-foreground: var(--secondary-foreground);
     --color-muted: var(--muted);
@@ -478,7 +484,8 @@
  * how this was wrong for so long.
  *
  * The one surface --ring cannot clear is --primary (1.43:1 light, 1.08:1 dark): a control inside
- * a DM's own bubble paints `ring-primary-foreground` instead (5.01:1 / 7.31:1). See
+ * a DM's own bubble now sits on --bubble-own and paints `ring-bubble-own-foreground` (~9:1,
+ * bubble-own, 12-77). See
  * Components/Messages/MessageBody.vue.
  */
 /*

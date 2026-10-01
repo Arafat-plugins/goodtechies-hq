@@ -340,3 +340,14 @@ createInertiaApp({
         color: 'var(--ring)',
     },
 });
+
+// The Android app (a Trusted Web Activity) and "Add to Home screen" both load this live site.
+// public/sw.js only supplies an offline fallback page — it caches no app code, so every deploy
+// shows up on the next load. Registered from the bundle because the CSP allows no inline script.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {
+            /* No service worker: the app still works online; only the offline page is lost. */
+        });
+    });
+}

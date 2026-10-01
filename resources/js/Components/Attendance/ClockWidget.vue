@@ -32,12 +32,14 @@ import { inlineUploadFailure } from '@/lib/net';
  *
  * ## While the day is open, it counts
  *
- * `worked_minutes` is null until a clock-out — it is a difference and one end has not
- * happened yet — so until then this counts up from `clock_in_at` in the browser. It ticks once
+ * The count is the closed sessions plus the open one: the server's `worked_minutes` (the sum
+ * of the sessions already closed, null until the first one closes) plus the minutes since the
+ * open session started (`open_since`, falling back to `clock_in_at`), counted in the browser.
+ * The gaps between sessions are breaks and are not counted (decision 12-76). It ticks once
  * a minute, not once a second: this figure is read in minutes, a seconds hand on it would be a
  * moving thing nobody asked to watch, and the ticking number is `aria-hidden` with the spoken
- * text carried beside it. The moment a clock-out lands, the server's `worked_minutes` takes
- * over and the browser stops guessing.
+ * text carried beside it. The moment a clock-out lands, the server's `worked_minutes` alone is
+ * the figure and the browser stops guessing.
  *
  * ## It announces nothing itself
  *
@@ -70,10 +72,15 @@ const CLOCK_OUT_FAILED_TEXT = "Couldn't reach goodERP, so you are not clocked ou
 const failed = ref<{ url: string; text: string } | null>(null);
 
 /** Clocked in and not yet out. The only state in which Clock out is the next thing to do. */
-const isOpen = computed(() => props.today.clock_in !== null && props.today.clock_out === null);
+const isOpen = computed(
+    () => props.today.open_since !== null || (props.today.clock_in !== null && props.today.clock_out === null),
+);
 
-/** The day is finished: both times are in, so there is nothing left to press. */
-const isFinished = computed(() => props.today.clock_out !== null);
+/** Clocked out; the next press starts a new session. */
+const isFinished = computed(() => props.today.clock_out !== null && !isOpen.value);
+
+const sessions = computed(() => props.today.sessions ?? []);
+const hasBreaks = computed(() => sessions.value.length > 1);
 
 const statusLabel = computed(() => props.today.status_label ?? noStatusLabel(props.today));
 
@@ -98,28 +105,30 @@ onBeforeUnmount(() => {
 });
 
 /**
- * How long they have been here — the server's figure once the day is closed, and the live
- * count from `clock_in_at` while it is open. Never both, and never a guess once a real
- * number exists.
+ * How long they have worked today — while a session is open, the server's closed-session sum
+ * plus the live count since the open session started; once clocked out, the server's figure
+ * alone. Breaks between sessions are never counted.
  */
 const elapsedMinutes = computed<number | null>(() => {
-    if (props.today.worked_minutes !== null) {
+    if (!isOpen.value) {
         return props.today.worked_minutes;
     }
 
-    if (!isOpen.value || props.today.clock_in_at === null) {
-        return null;
+    const since = props.today.open_since ?? props.today.clock_in_at;
+
+    if (since === null) {
+        return props.today.worked_minutes;
     }
 
-    const started = new Date(props.today.clock_in_at).getTime();
+    const started = new Date(since).getTime();
 
     if (Number.isNaN(started)) {
-        return null;
+        return props.today.worked_minutes;
     }
 
     // A clock skew between the browser and the server could make this negative for a moment
     // after a clock-in; zero is the honest floor, not a minus sign.
-    return Math.max(0, Math.floor((now.value - started) / 60_000));
+    return (props.today.worked_minutes ?? 0) + Math.max(0, Math.floor((now.value - started) / 60_000));
 });
 
 function clock(url: string): void {
@@ -169,34 +178,46 @@ function retry(): void {
                 <StatusBadge v-if="today.tone" :status="today.tone" :label="statusLabel" />
                 <span v-else class="text-sm text-muted-foreground">{{ statusLabel }}</span>
 
-                <span v-if="today.clock_in" class="text-sm tabular-nums text-muted-foreground">
+                <span v-if="hasBreaks" class="text-sm tabular-nums text-muted-foreground">
+                    First in {{ sessions[0].clock_in }}<template v-if="today.clock_out"> · Last out {{ today.clock_out }}</template>
+                </span>
+                <span v-else-if="today.clock_in" class="text-sm tabular-nums text-muted-foreground">
                     In {{ today.clock_in }}<template v-if="today.clock_out"> · Out {{ today.clock_out }}</template>
                 </span>
             </div>
 
             <p v-if="elapsedMinutes !== null" class="text-xs tabular-nums text-muted-foreground">
                 <span aria-hidden="true">
-                    {{ formatMinutes(elapsedMinutes) }} {{ isFinished ? 'worked' : 'so far today' }}
+                    {{ formatMinutes(elapsedMinutes) }} {{ isOpen ? 'so far today' : 'worked today' }}
                 </span>
                 <span class="sr-only">
-                    {{ isFinished ? 'Worked' : 'Clocked in for' }} {{ formatMinutes(elapsedMinutes) }}
+                    {{ isOpen ? 'Clocked in, worked so far' : 'Worked today' }} {{ formatMinutes(elapsedMinutes) }}
                 </span>
             </p>
+
+            <template v-if="hasBreaks">
+                <ul aria-label="Today's sessions" class="flex flex-col gap-0.5 text-xs tabular-nums text-muted-foreground">
+                    <li v-for="(s, i) in sessions" :key="i">
+                        {{ s.clock_in }} – {{ s.clock_out ?? 'now' }}<template v-if="s.minutes !== null"> · {{ formatMinutes(s.minutes) }}</template>
+                    </li>
+                </ul>
+                <p class="text-xs text-muted-foreground">Breaks between sessions are not counted.</p>
+            </template>
         </div>
 
         <!-- One primary control. Full width on a phone so it can be hit with a thumb. -->
-        <div class="shrink-0">
+        <div class="shrink-0" :class="isFinished ? 'flex flex-col gap-2 sm:items-end' : ''">
+            <p v-if="isFinished" class="text-sm text-muted-foreground">Clocked out at {{ today.clock_out }}.</p>
+
             <Button
-                v-if="!isFinished"
                 class="h-11 w-full sm:w-auto"
+                :variant="isOpen || today.clock_in === null ? 'default' : 'outline'"
                 :disabled="busy"
                 @click="clock(isOpen ? attendanceRoutes.clockOut : attendanceRoutes.clockIn)"
             >
                 <component :is="isOpen ? LogOut : LogIn" class="size-4" aria-hidden="true" />
-                {{ isOpen ? 'Clock out' : 'Clock in' }}
+                {{ isOpen ? 'Clock out' : today.clock_in === null ? 'Clock in' : 'Clock in again' }}
             </Button>
-
-            <p v-else class="text-sm text-muted-foreground">Clocked out for the day.</p>
         </div>
 
         <div

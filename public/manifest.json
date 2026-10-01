@@ -1,0 +1,16 @@
+{
+    "id": "/",
+    "name": "goodERP",
+    "short_name": "goodERP",
+    "description": "GoodTechies HQ — tasks, attendance, team and finance in one place.",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#FCFDFE",
+    "theme_color": "#FCFDFE",
+    "icons": [
+        { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+        { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+        { "src": "/brand/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    ]
+}

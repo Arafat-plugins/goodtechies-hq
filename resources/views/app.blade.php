@@ -10,6 +10,9 @@
         <link rel="icon" href="/brand/mark.svg" type="image/svg+xml">
         <link rel="icon" href="/brand/favicon-32.png" type="image/png" sizes="32x32">
         <link rel="apple-touch-icon" href="/brand/favicon-180.png">
+        <link rel="manifest" href="/manifest.json">
+        <meta name="theme-color" content="#FCFDFE" media="(prefers-color-scheme: light)">
+        <meta name="theme-color" content="#0A0D12" media="(prefers-color-scheme: dark)">
 
         {{-- Theme, before first paint. This runs synchronously in <head>, ahead of the
              stylesheet and the bundle, so the document is already `dark` (or not) the

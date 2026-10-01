@@ -41,6 +41,9 @@ enum AuditEvent: string
     // never in it — `old_value` is null, because a hash is not a before-value anybody should be
     // shown, and there is nothing about the new one worth recording except that it happened.
     case EmployeePasswordReset = 'employee.password_reset';
+    // Somebody choosing a new password through the emailed reset link. The actor is the user
+    // themselves; as above, no password or hash is ever in the row.
+    case PasswordResetByEmail = 'user.password_reset_by_email';
     case ProjectCreated = 'project.created';
     case ProjectPriceChanged = 'project.price_changed';
     case TaskAssigned = 'task.assigned';
@@ -223,6 +226,7 @@ enum AuditEvent: string
             self::UserLogin => 'Signed in',
             self::TwoFactorDisabled => 'Two-factor turned off',
             self::EmployeePasswordReset => 'Password re-issued',
+            self::PasswordResetByEmail => 'Password reset by email',
             self::RestrictedAccessAttempt => 'Restricted access attempt',
 
             self::RoleChanged => 'Role changed',
@@ -282,6 +286,7 @@ enum AuditEvent: string
             self::UserLogin,
             self::TwoFactorDisabled,
             self::EmployeePasswordReset,
+            self::PasswordResetByEmail,
             self::RestrictedAccessAttempt => self::GROUP_ACCESS,
 
             self::RoleChanged,

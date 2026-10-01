@@ -171,8 +171,8 @@ class AttendanceController extends Controller
         // so "Clocked in at 09:00" at one o'clock would read as a mistake.
         if (! $out && $record->wasChanged('clock_out')) {
             return back()->with('success', sprintf(
-                'Day re-opened. You are clocked in again since %s.',
-                $record->clock_in?->format('H:i') ?? '—',
+                'Clocked in again at %s. Breaks between sessions are not counted as worked time.',
+                $record->openSession()?->clock_in->format('H:i') ?? '—',
             ));
         }
 

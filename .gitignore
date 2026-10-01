@@ -36,3 +36,12 @@ start-hq.log
 
 # Local-only push script - never send this to GitHub
 /push-to-github.bat
+
+# Android app (android/README.md). The signing key must NEVER reach the public repo.
+/android/keystore/
+/android/local.properties
+/android/.gradle/
+/android/build/
+/android/app/build/
+*.jks
+*.keystore

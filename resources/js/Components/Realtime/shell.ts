@@ -100,6 +100,13 @@ const channelId = ref<number | null>(null);
 /** Has a response ever carried `shell`? Until it has, the badge shows nothing rather than zero. */
 const loaded = ref(false);
 
+/** Screens that want to hear the inbox doorbell (`inbox.message`, decision 12-78). */
+const inboxListeners = new Set<() => void>();
+
+/** When the doorbell last reloaded the shell — rings within `INBOX_PING_COALESCE_MS` are one. */
+let lastInboxPing = 0;
+const INBOX_PING_COALESCE_MS = 400;
+
 /** What every count on screen shows: the total, less the conversation that is on screen. */
 const shownUnread = computed(() => {
     const own = viewing.value === null ? 0 : (unreadByConversation.value[String(viewing.value)] ?? 0);
@@ -206,6 +213,40 @@ export function adoptInbox(rows: readonly ConversationSummary[]): void {
 
     if (row !== undefined) {
         announcement.value = { ...banner, is_unread: row.unread_count > 0 };
+    }
+}
+
+/* ------------------------------------------------------------------ the inbox doorbell */
+
+/**
+ * Listen for the inbox doorbell. Returns the function that stops listening — call it on unmount.
+ */
+export function onInboxPing(listener: () => void): () => void {
+    inboxListeners.add(listener);
+
+    return () => {
+        inboxListeners.delete(listener);
+    };
+}
+
+/**
+ * The reader's own `notifications.{user}` channel rang `inbox.message`: a message arrived in a
+ * conversation they may see (decision 12-78). The frame is ids only, so the answer is to ask the
+ * server — the shell's unread count and banner, then every screen that registered with
+ * `onInboxPing()`. Rings within 400 ms of the last one are coalesced into it.
+ */
+export function pingInbox(): void {
+    const now = Date.now();
+
+    if (now - lastInboxPing < INBOX_PING_COALESCE_MS) {
+        return;
+    }
+
+    lastInboxPing = now;
+    liveReload(['shell']);
+
+    for (const listener of inboxListeners) {
+        listener();
     }
 }
 

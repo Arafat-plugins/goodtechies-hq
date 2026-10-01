@@ -64,8 +64,9 @@ use Symfony\Component\HttpFoundation\Response;
  *     has not uploaded yet from an object URL.
  *   - **`media-src 'self' blob:`** — the same recorder, and the `<audio src>` an attached voice
  *     note plays from.
- *   - **`connect-src 'self'` plus the Reverb origin** — Inertia's XHR, the command palette's
- *     `fetch('/search')`, the bell's poll, and the websocket.
+ *   - **`connect-src 'self' blob:` plus the Reverb origin** — Inertia's XHR, the command palette's
+ *     `fetch('/search')`, the bell's poll, and the websocket. `blob:` because the voice player
+ *     reads the recorder's unsent clip (an object URL) to draw its waveform (12-77).
  *
  *     A websocket matches `'self'` when it is the secure upgrade of the document's own origin
  *     (CSP3 §6.6.2.6), which on the VPS is true: `deploy/install.sh` sets `REVERB_HOST` to the
@@ -146,7 +147,7 @@ class ContentSecurityPolicy
             'font-src \'self\' '.self::FONT_ORIGIN,
             "img-src 'self' data: blob:",
             "media-src 'self' blob:",
-            rtrim("connect-src 'self' ".self::reverbOrigin()),
+            rtrim("connect-src 'self' blob: ".self::reverbOrigin()),
             "worker-src 'self' blob:",
             "manifest-src 'self'",
         ]);

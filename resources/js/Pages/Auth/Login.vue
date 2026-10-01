@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { CircleCheck } from '@lucide/vue';
 import AuthLayout from '@/Layouts/AuthLayout.vue';
 import { Alert, AlertDescription } from '@/Components/ui/alert';
@@ -84,6 +84,14 @@ function submit(): void {
                 <p v-if="form.errors.password" id="password-error" class="text-xs text-destructive">
                     {{ form.errors.password }}
                 </p>
+                <div class="flex justify-end">
+                    <Link
+                        href="/forgot-password"
+                        class="text-sm text-primary underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none rounded-sm"
+                    >
+                        Forgot password?
+                    </Link>
+                </div>
             </div>
 
             <div class="flex items-center gap-2">

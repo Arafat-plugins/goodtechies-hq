@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#FCFDFE" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0A0D12" media="(prefers-color-scheme: dark)">
+    <title>Offline — goodERP</title>
+    <style>
+        :root { color-scheme: light dark; --bg: #FCFDFE; --fg: #2C2E31; --muted: #6B7280; --btn: #0A0D12; --btn-fg: #FFFFFF; }
+        @media (prefers-color-scheme: dark) { :root { --bg: #0A0D12; --fg: #E5E7EB; --muted: #9CA3AF; --btn: #FFFFFF; --btn-fg: #0A0D12; } }
+        html, body { height: 100%; margin: 0; }
+        body { display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box;
+               background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; text-align: center; }
+        main { max-width: 320px; }
+        img { width: 64px; height: 64px; border-radius: 14px; }
+        h1 { font-size: 20px; font-weight: 600; margin: 20px 0 8px; }
+        p { font-size: 15px; line-height: 1.5; color: var(--muted); margin: 0 0 24px; }
+        a { display: inline-block; padding: 10px 20px; border-radius: 8px; background: var(--btn); color: var(--btn-fg);
+            font-size: 15px; font-weight: 500; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <main>
+        <img src="/brand/mark.svg" alt="goodERP">
+        <h1>You're offline</h1>
+        <p>goodERP needs an internet connection. Check your connection, then try again.</p>
+        <a href="/">Try again</a>
+    </main>
+</body>
+</html>

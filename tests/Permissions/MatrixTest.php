@@ -77,6 +77,9 @@ const MATRIX_PARAMETERS = [
     // which is asserted in tests/Feature/Reports rather than here: this file's job is which
     // roles reach a route that exists.
     '{report}' => 'task',
+
+    // `/reset-password/{token}` renders the form for any string; the token is checked on POST.
+    '{token}' => 'not-a-real-reset-token',
 ];
 
 /**
@@ -571,6 +574,10 @@ function permissionMatrix(): array
         ['POST', 'login', $guestOnly],
         ['GET', 'two-factor/challenge', ['guest' => '302 /login'] + $guestOnly],
         ['POST', 'two-factor/challenge', $guestOnly],
+        ['GET', 'forgot-password', ['guest' => 200] + $guestOnly],
+        ['POST', 'forgot-password', $guestOnly],
+        ['GET', 'reset-password/{token}', ['guest' => 200] + $guestOnly],
+        ['POST', 'reset-password', $guestOnly],
 
         // Auth (signed in)
         ['POST', 'logout', $everyone('302 /login')],

@@ -2,7 +2,7 @@
 /**
  * The chime switch — reliability slice 5.
  *
- * Off by default; on, a short chime plays when the bell's unread count or the Messages unread
+ * On by default (12-77); while on, a short chime plays when the bell's unread count or the Messages unread
  * total goes up while goodERP is open (`lib/sound.ts` owns when). It is stored **per browser**,
  * under `hq.sound.<userId>`, because there is no per-person preference store on the server and
  * adding one would need a migration — hence the hint's "Saved on this device".
@@ -51,7 +51,7 @@ const enabled = computed<boolean>({
                     <span class="min-w-0 text-sm">{{ enabled ? 'On' : 'Off' }}</span>
                 </div>
                 <p :id="hintId" class="text-xs text-muted-foreground">
-                    Off by default. Plays a short chime when something new arrives while goodERP is open. Saved on this device.
+                    On by default. Plays a short chime when something new arrives while goodERP is open. Saved on this device.
                 </p>
             </div>
             <div>

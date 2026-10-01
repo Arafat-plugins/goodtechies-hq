@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -71,6 +72,28 @@ class AttendanceRecord extends Model
     }
 
     /**
+     * The day's clock-in -> clock-out stretches, earliest first (decision 12-76).
+     *
+     * @return HasMany<AttendanceSession, $this>
+     */
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(AttendanceSession::class)->orderBy('clock_in')->orderBy('id');
+    }
+
+    /**
+     * The session still running, or null when every session is closed.
+     */
+    public function openSession(): ?AttendanceSession
+    {
+        if ($this->relationLoaded('sessions')) {
+            return $this->sessions->first(fn (AttendanceSession $session): bool => $session->clock_out === null);
+        }
+
+        return $this->sessions()->whereNull('clock_out')->first();
+    }
+
+    /**
      * @param  Builder<$this>  $query
      */
     public function scopeForDate(Builder $query, Carbon $date): void
@@ -87,19 +110,41 @@ class AttendanceRecord extends Model
     }
 
     /**
-     * Minutes between clock-in and clock-out, or null while the day is still open.
+     * Minutes worked: the sum of the day's closed sessions (decision 12-76). The gaps between
+     * sessions are breaks and are not counted.
+     *
+     * A record with no session rows (written before sessions existed, or directly) falls back
+     * to its span: floor of the seconds between clock-in and clock-out, over 60. Each session
+     * is floored the same way, which is the rule `daily_work_summary` uses too.
      *
      * Null and zero are different answers and the difference is the point: null means "still
-     * in the office", zero means "clocked out in the same minute". A screen that printed 0m
-     * for somebody who has not left yet would be reporting a day that has not happened.
+     * in the office, nothing closed yet", zero means "clocked out in the same minute". A screen
+     * that printed 0m for somebody who has not left yet would be reporting a day that has not
+     * happened.
      */
     public function workedMinutes(): ?int
     {
-        if ($this->clock_in === null || $this->clock_out === null) {
+        if ($this->clock_in === null) {
             return null;
         }
 
-        return (int) $this->clock_in->diffInMinutes($this->clock_out);
+        $sessions = $this->relationLoaded('sessions') ? $this->sessions : $this->sessions()->get();
+
+        if ($sessions->isEmpty()) {
+            if ($this->clock_out === null) {
+                return null;
+            }
+
+            return intdiv((int) $this->clock_in->diffInSeconds($this->clock_out, true), 60);
+        }
+
+        $closed = $sessions->filter(fn (AttendanceSession $session): bool => $session->clock_out !== null);
+
+        if ($closed->isEmpty()) {
+            return null;
+        }
+
+        return (int) $closed->sum(fn (AttendanceSession $session): int => (int) $session->minutes());
     }
 
     public function isOpen(): bool

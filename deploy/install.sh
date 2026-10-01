@@ -690,6 +690,10 @@ env_set DB_PASSWORD "$DB_APP_PASSWORD"
 env_set DB_MIGRATOR_PASSWORD "$DB_MIGRATOR_PASSWORD"
 env_set DB_RO_PASSWORD "$DB_RO_PASSWORD"
 env_set SEED_PASSWORD "$SEED_PASSWORD"
+# The sender of password-reset mail; only a blank or placeholder address is replaced.
+case "$(env_get MAIL_FROM_ADDRESS)" in
+    "" | hello@example.com) env_set MAIL_FROM_ADDRESS "no-reply@${DOMAIN}" ;;
+esac
 
 # Realtime. The credentials always; the MODE only when this run was asked for one, so that a
 # re-run of install.sh never quietly turns somebody's socket off (or on).

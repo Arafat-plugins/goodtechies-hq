@@ -123,6 +123,13 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Forgot-password and reset: a burst limit per IP, and an hourly one per address so one
+        // inbox cannot be flooded with reset emails from a rotating set of IPs.
+        RateLimiter::for('password-reset', fn (Request $request): array => [
+            Limit::perMinute(5)->by('pr-ip|'.$request->ip()),
+            Limit::perHour(5)->by('pr-email|'.Str::lower((string) $request->input('email'))),
+        ]);
+
         RateLimiter::for('two-factor', fn (Request $request): Limit => Limit::perMinute(5)->by(
             ($request->hasSession() ? (string) $request->session()->get(TwoFactorService::PENDING_LOGIN_SESSION_KEY) : '').'|'.$request->ip(),
         ));

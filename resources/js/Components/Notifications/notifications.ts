@@ -2,6 +2,7 @@ import { router, usePage } from '@inertiajs/vue3';
 import { ChevronDown, ChevronUp, Minus } from '@lucide/vue';
 import type { Component, Ref } from 'vue';
 import { computed, onScopeDispose, ref, watch } from 'vue';
+import { pingInbox } from '@/Components/Realtime/shell';
 import { listenPrivate, realtimeConnection, realtimeMode, realtimeReconnects } from '@/echo';
 import { backoff, fetchWithTimeout, onReconnect } from '@/lib/net';
 import { isSessionLive, reportResponse, sessionState } from '@/lib/session';
@@ -538,6 +539,8 @@ export function useNotificationBell(): {
         if (userId !== null && realtimeMode === 'reverb') {
             unsubscribe = listenPrivate(`notifications.${userId}`, {
                 'feed.changed': (payload: never) => apply(payload as NotificationRecent),
+                // The inbox doorbell (decision 12-78): ids only, so it just asks the server again.
+                'inbox.message': () => pingInbox(),
             });
         }
 

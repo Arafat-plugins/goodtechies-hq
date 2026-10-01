@@ -35,10 +35,9 @@ import { cn } from '@/lib/utils';
  * that measures 1.31:1 and reads as grime; the card's own fill against the bubble is the edge
  * (5.13:1 light / 6.66:1 dark), which is a stronger boundary than the border ever was.
  *
- * That same paragraph is why `VoicePlayer` below takes no accent variant and draws no surface:
- * this root has already put it on `--card`, in every bubble on every screen, so its pairs are
- * card-relative and pass as they are. A player that recoloured itself for the bubble outside
- * would be reinstating exactly the 1.01:1 bug the paragraph above describes.
+ * A voice note is the exception since 12-77: the card draws no surface for it at all and the
+ * `VoicePlayer` sits directly on the bubble, so it is passed `onAccent` and recolours itself to
+ * `--bubble-own-foreground` on the viewer's own bubble (~9:1, bubble-own, 12-77).
  */
 
 const props = withDefaults(
@@ -48,7 +47,7 @@ const props = withDefaults(
         stale?: boolean;
         /** Render an image or a voice note in place, above the card's own line. */
         inline?: boolean;
-        /** This card sits inside a `--primary` bubble: drop the hairline, keep the surface. */
+        /** This card sits inside the own `--bubble-own` bubble: drop the hairline, keep the surface. */
         onAccent?: boolean;
     }>(),
     { stale: false, inline: false, onAccent: false },
@@ -83,16 +82,21 @@ const meta = computed(() => {
 
         Only the card is a link. The image opens itself; a file card is ONE link (glyph, name,
         size, the download arrow) that opens or downloads the file exactly as the old arrow did;
-        a voice note keeps its player and its own download arrow. Nothing outside the card —
+        a voice note is only its player (12-77: Telegram-style, no name, size or download row,
+        no card around it). Nothing outside the card —
         the message row, its author, the bubble — is clickable.
     -->
     <div
         :class="
             cn(
-                'flex w-fit max-w-full min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-1.5 text-card-foreground shadow-flat',
-                !rendersImage && 'w-full sm:max-w-xs',
-                rendersVoice && 'sm:max-w-sm',
-                onAccent && 'border-transparent',
+                'flex max-w-full min-w-0 flex-col gap-1.5',
+                // 12-77: a voice note is only its player, sitting straight on the bubble and
+                // taking the bubble's own foreground — no card, no border, no padding.
+                rendersVoice
+                    ? 'w-64 border-0 bg-transparent p-0'
+                    : 'w-fit rounded-lg border bg-card p-1.5 text-card-foreground shadow-flat',
+                !rendersImage && !rendersVoice && 'w-full sm:max-w-xs',
+                onAccent && !rendersVoice && 'border-transparent',
             )
         "
     >
@@ -124,10 +128,11 @@ const meta = computed(() => {
             :src="file.url"
             :duration-seconds="file.duration_seconds"
             label="voice message"
+            :on-accent="onAccent"
         />
 
         <!-- An image's caption line: its name and a download, kept to the image's width. -->
-        <div v-if="rendersImage || rendersVoice" class="flex w-0 min-w-full items-center gap-2 px-1">
+        <div v-if="rendersImage" class="flex w-0 min-w-full items-center gap-2 px-1">
             <span class="flex min-w-0 flex-1 flex-col">
                 <span class="min-w-0 truncate text-xs font-medium" :title="file.name">
                     {{ file.name }}
@@ -158,7 +163,7 @@ const meta = computed(() => {
 
         <!-- A file: the whole compact card is the one link. -->
         <a
-            v-else-if="!stale"
+            v-else-if="!stale && !rendersVoice"
             :href="file.url"
             :target="file.is_previewable ? '_blank' : undefined"
             rel="noopener noreferrer"
@@ -184,7 +189,7 @@ const meta = computed(() => {
         </a>
 
         <!-- The links have lapsed: the name stays, as text, and says why it is not a link. -->
-        <div v-else class="flex min-w-0 items-center gap-2.5 p-1">
+        <div v-else-if="stale" class="flex min-w-0 items-center gap-2.5 p-1">
             <span class="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
                 <component :is="iconFor(file)" class="size-4" aria-hidden="true" />
             </span>

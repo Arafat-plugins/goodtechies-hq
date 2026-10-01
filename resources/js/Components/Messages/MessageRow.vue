@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
  * ## `sided` — a DM
  *
  * Two people talking, drawn the way every messaging app on the client's phone draws it. The
- * viewer's own messages sit RIGHT in a solid `--primary` bubble; the other person's sit LEFT on
+ * viewer's own messages sit RIGHT in a solid `--bubble-own` bubble (bubble-own, 12-77); the other person's sit LEFT on
  * `--muted`. The author name drops out entirely — there are two people and the side says which
  * — and so does the avatar, because a column of the same two faces down a two-person
  * conversation carries nothing. The clock stays, inside the bubble.
@@ -81,7 +81,7 @@ let settle: ReturnType<typeof setTimeout> | undefined;
 const sided = computed(() => props.layout === 'sided');
 const mine = computed(() => props.message.is_mine);
 
-/** Everything in here is sitting on a `--primary` fill and cannot use hue to say anything. */
+/** Everything in here is sitting on the `--bubble-own` fill (bubble-own, 12-77) and cannot use hue to say anything. */
 const onAccent = computed(() => sided.value && mine.value);
 
 const author = computed(() =>
@@ -109,13 +109,13 @@ const bubbleClass = computed(() =>
     cn(
         'flex min-w-0 flex-col gap-1 rounded-xl px-3 py-2',
         mine.value
-            ? 'rounded-br-sm bg-primary text-primary-foreground'
+            ? 'rounded-br-sm bg-bubble-own text-bubble-own-foreground'
             : 'rounded-bl-sm border bg-muted text-foreground',
         // The mention highlight has to survive on both fills, so it is a ring rather than a
-        // left bar here: `--primary` on `--muted` is 4.71:1 and `--primary-foreground` on
-        // `--primary` is 4.99:1, both clear of the 3:1 a boundary needs.
+        // left bar here: `--primary` on `--muted` is 4.71:1 and `--bubble-own-foreground` on
+        // `--bubble-own` is ~9:1 (bubble-own, 12-77), both clear of the 3:1 a boundary needs.
         props.message.mentions_me && 'ring-2',
-        props.message.mentions_me && (mine.value ? 'ring-primary-foreground' : 'ring-primary'),
+        props.message.mentions_me && (mine.value ? 'ring-bubble-own-foreground' : 'ring-primary'),
     ),
 );
 
@@ -123,7 +123,7 @@ const bubbleClass = computed(() =>
 const mentionChipClass = computed(() =>
     cn(
         'inline-flex w-fit shrink-0 items-center rounded-full px-1.5 text-xs font-medium',
-        onAccent.value ? 'bg-primary-foreground text-primary' : 'bg-primary text-primary-foreground',
+        onAccent.value ? 'bg-bubble-own-foreground text-bubble-own' : 'bg-primary text-primary-foreground',
     ),
 );
 
@@ -200,15 +200,15 @@ async function copy(): Promise<void> {
 
                 <!--
                     The clock stays, and in a DM it is always on: there is no author line above
-                    it to hang it from. `text-primary-foreground` at 4.99:1 rather than a muted
-                    grey — any alpha on top of that number puts it under 4.5:1, so the size is
-                    what makes it quiet, not the colour.
+                    it to hang it from. `text-bubble-own-foreground/80` (bubble-own, 12-77): the
+                    ~9:1 base leaves room for a little alpha and still clears 4.5:1, so the size
+                    and that alpha make it quiet.
                 -->
                 <span
                     :class="
                         cn(
                             'self-end text-xs tabular-nums',
-                            mine ? 'text-primary-foreground' : 'text-muted-foreground',
+                            mine ? 'text-bubble-own-foreground/80' : 'text-muted-foreground',
                         )
                     "
                 >

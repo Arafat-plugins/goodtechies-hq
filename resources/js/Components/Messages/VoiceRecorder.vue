@@ -20,8 +20,8 @@ import { cn } from '@/lib/utils';
  *
  * It renders **two** roots: a strip that only exists while something is happening, and the mic
  * button itself. The composer drops it straight into its control row; the strip carries
- * `order-first basis-full`, so it takes the line above the controls rather than pushing the
- * paperclip and Send onto three lines of their own. `inheritAttrs` is off because two roots
+ * `min-w-0 flex-1 basis-40`, so it sits inside the pill where the textarea was — the composer
+ * hides the paperclip, the textarea and Mentions while `active` is true. `inheritAttrs` is off because two roots
  * cannot share one `class`.
  *
  * ## Both gestures, and the rule that tells them apart
@@ -363,12 +363,13 @@ onBeforeUnmount(() => {
 
 <template>
     <!--
-        The strip. `order-first basis-full` puts it on the line above the composer's controls
-        without moving any of them, and it exists only while something is happening.
+        The strip. `min-w-0 flex-1 basis-40` puts it in the composer's own row, in the place
+        the textarea leaves while it is hidden (12-77), and it exists only while something is
+        happening.
     -->
     <div
         v-if="drawn && shown"
-        class="order-first flex w-full min-w-0 basis-full flex-col gap-2 rounded-md border bg-card p-2 text-card-foreground shadow-flat"
+        class="flex min-w-0 flex-1 basis-40 flex-col gap-2 rounded-md p-1 text-card-foreground"
     >
         <div v-if="recording" class="flex min-w-0 items-center gap-2">
             <!--
@@ -434,7 +435,7 @@ onBeforeUnmount(() => {
             />
 
             <div class="flex min-w-0 flex-wrap items-center gap-2">
-                <p class="min-w-0 flex-1 text-xs text-muted-foreground">
+                <p class="min-w-0 flex-1 basis-full text-xs text-muted-foreground sm:basis-auto">
                     <span v-if="voice.cutoff.value">
                         Stopped at the limit of {{ VOICE_MAX_LABEL }}.
                     </span>

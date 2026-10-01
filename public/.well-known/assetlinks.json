@@ -1,0 +1,12 @@
+[
+    {
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "com.goodtechies.erp",
+            "sha256_cert_fingerprints": [
+                "20:76:76:65:8B:25:55:FB:0A:3B:64:61:56:FB:0F:62:96:6E:C6:82:76:39:5F:3E:49:71:94:B7:4D:54:FC:CE"
+            ]
+        }
+    }
+]

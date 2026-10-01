@@ -1487,17 +1487,17 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
 
                 <!--
                     Messaging polish: the composer is ONE pill (DESIGN.md §1.7b) — Attach, the
-                    textarea, the mic and "@ Mentions" inside it, and Send joined to its right end
-                    as a `--primary` segment. The textarea has no border or ring of its own; its
+                    textarea, the mic and "@ Mentions" inside it, and Send a round `--primary` disc
+                    inside its right end (12-77; it was a joined segment that overflowed). The textarea has no border or ring of its own; its
                     focus indicator was painted on the pill. Since 2026-09-30 (decision 12-72,
                     superseding 12-70's 1 px `--ring` border) the pill paints NO focus border or
                     ring: the client asked for none on any text field anywhere; the caret shows
                     focus. The pill's border stays `--input` (or `--destructive` on an error). Below `sm` the words go and the icons stay,
                     each keeping its accessible name.
 
-                    `VoiceRecorder` has two roots: its strip (`order-first basis-full`) takes a
-                    line of its own at the top of the pill while a clip is in hand, and the mic
-                    sits after the textarea.
+                    `VoiceRecorder` has two roots: its strip (`min-w-0 flex-1 basis-40`) sits in
+                    the pill's own row while a clip is in hand, and the mic sits after the
+                    textarea.
                 -->
                 <!--
                     Brief 016, the pinned row: [Attach] [textarea] [mic] [@] [Send], every
@@ -1597,16 +1597,17 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 >
                     <div class="flex min-w-0 flex-1 flex-wrap items-end gap-1 py-1 pl-1 sm:pl-1.5">
                         <!--
-                            The paperclip stays on screen while a recording is in hand and says
-                            why it is off. A control that disappeared would read as a bug, and
-                            §5.12's "hide rather than disable" is about controls that are *never*
-                            available here — this one is available the moment the recording is
+                            12-77: while a recording or a preview is in hand the paperclip, the
+                            textarea and Mentions step aside (`v-show`, so the draft text is kept)
+                            and the recorder's strip takes their place in this same row, the way
+                            Telegram does it. They come back the moment the clip is sent or
                             discarded.
                         -->
                         <TooltipProvider :delay-duration="150">
                             <Tooltip>
                                 <TooltipTrigger as-child>
                                     <Button
+                                        v-show="!voiceActive"
                                         type="button"
                                         variant="ghost"
                                         size="sm"
@@ -1630,6 +1631,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         </TooltipProvider>
 
                         <Textarea
+                            v-show="!voiceActive"
                             :id="bodyId"
                             ref="bodyEl"
                             v-model="body"
@@ -1644,9 +1646,9 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         />
 
                         <!--
-                            Two roots: the strip, which takes a line of its own at the top of the
-                            pill (`order-first basis-full`), and the mic button. On a browser that
-                            cannot record, both roots are nothing.
+                            Two roots: the strip, which takes the textarea's place in this row
+                            (`min-w-0 flex-1 basis-40`) while it is hidden, and the mic button. On
+                            a browser that cannot record, both roots are nothing.
                         -->
                         <VoiceRecorder
                             v-model:clip="voiceClip"
@@ -1656,6 +1658,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         />
 
                         <MentionPicker
+                            v-show="!voiceActive"
                             :people="thread.mentionable"
                             :disabled="posting"
                             labelled
@@ -1669,12 +1672,11 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     -->
                     <Button
                         type="submit"
-                        class="h-auto min-h-10 shrink-0 gap-1.5 self-stretch rounded-l-none rounded-r-3xl px-3 sm:px-4"
+                        class="m-1 size-10 shrink-0 self-end rounded-full p-0"
                         :disabled="posting || stillRecording"
                         :aria-label="stillRecording ? 'Send (unavailable while recording)' : posting ? 'Sending' : 'Send'"
                     >
                         <Send aria-hidden="true" />
-                        <span class="hidden sm:inline" aria-hidden="true">{{ posting ? 'Sending…' : 'Send' }}</span>
                     </Button>
                 </div>
 

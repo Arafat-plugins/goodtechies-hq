@@ -125,10 +125,11 @@ it('keeps the three elevation tokens defined', function () {
 });
 
 it('keeps the DM bubble on its own opaque ring', function () {
-    // The one place --ring cannot work: over a --primary fill it is 1.43:1 light, 1.08:1 dark.
+    // The one place --ring cannot work: over the own-bubble fill. Since 12-77 that fill is
+    // --bubble-own (oklch 0.42 0 0), and the ring on it is --bubble-own-foreground (~9:1).
     $body = (string) file_get_contents(dirname(__DIR__, 2).'/resources/js/Components/Messages/MessageBody.vue');
 
-    expect($body)->toContain('focus-visible:ring-primary-foreground');
+    expect($body)->toContain('focus-visible:ring-bubble-own-foreground');
 });
 
 it('keeps every elevation token composable, so a shadow cannot delete the focus ring', function () {

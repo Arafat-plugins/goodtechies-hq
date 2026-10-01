@@ -12,13 +12,13 @@ import {
     Users,
 } from '@lucide/vue';
 import { useMediaQuery } from '@vueuse/core';
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import ConversationContextPanel from '@/Components/Messages/ConversationContextPanel.vue';
 import MessagesRail from '@/Components/Messages/MessagesRail.vue';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
 import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
-import { adoptInbox, isViewingConversation } from '@/Components/Realtime/shell';
+import { adoptInbox, isViewingConversation, onInboxPing } from '@/Components/Realtime/shell';
 import {
     RAIL_POLL_MS,
     THREAD_POLL_MS,
@@ -225,11 +225,14 @@ function reloadRail(): void {
 }
 
 /**
- * **There is no per-user inbox channel**, so the rail is poll-only — `null` is that mode, said
- * out loud. A message in a conversation this reader does not have open therefore takes up to
- * `RAIL_POLL_MS` to reach the rail even on a socket build; giving it a socket needs a channel
- * that does not exist yet and is out of this slice.
+ * On a socket build the rail is rung by `inbox.message` on the reader's own `notifications.{user}`
+ * channel (decision 12-78): a message in any conversation they may see reloads the rail within
+ * about a second. The interval below remains the polling-build path, and the fallback while the
+ * socket is down.
  */
+const stopInboxPing = onInboxPing(reloadRail);
+onBeforeUnmount(stopInboxPing);
+
 useLiveRefresh(null, reloadRail, { intervalMs: RAIL_POLL_MS });
 
 /**
