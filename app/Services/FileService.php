@@ -69,15 +69,22 @@ class FileService
     /**
      * The biggest file this application will store, in bytes.
      *
-     * 25 MB. The number is set by the transport, not by taste: `deploy/nginx.conf` allows a
-     * 50 MB body and `deploy/install.sh` sets PHP's `upload_max_filesize` and `post_max_size`
-     * to match. A limit at the transport ceiling means the file that is one byte over comes
-     * back as an nginx 413 with no message anybody can read; a limit at half of it means
-     * multipart overhead, a long filename and a second field still fit, and the refusal is a
-     * validation error against the field. It is comfortably above the screenshots, PDFs and
-     * deliverable zips an agency actually attaches.
+     * 25 MB, for task, project and client files (messages are exempt — see MESSAGE_MAX_BYTES).
+     * `deploy/nginx.conf` allows a 256 MB body and `deploy/install.sh` sets PHP's
+     * `upload_max_filesize` and `post_max_size` to match, so this refusal is always a validation
+     * error against the field rather than an nginx 413. It is comfortably above the screenshots,
+     * PDFs and deliverable zips an agency actually attaches.
      */
     public const MAX_BYTES = 25 * 1024 * 1024;
+
+    /**
+     * The biggest MESSAGE attachment this application will store, in bytes.
+     *
+     * Messages: no application cap (12-82); nginx/PHP keep the transport limit
+     * (`client_max_body_size` in deploy/nginx.conf, `upload_max_filesize` / `post_max_size` in
+     * deploy/install.sh). Task, project and client uploads keep MAX_BYTES.
+     */
+    public const MESSAGE_MAX_BYTES = null;
 
     /**
      * What may be uploaded: extension → the content types that extension may legitimately be.
@@ -88,7 +95,8 @@ class FileService
      *
      * Deliberately absent, and each for its own reason:
      *   - `svg`: an XML document that can carry script. It is an image everywhere except in the
-     *     one place it matters, and we serve files from our own origin.
+     *     one place it matters, and we serve files from our own origin. (Messages accept it
+     *     through MESSAGE_EXTRA_TYPES, script-checked and served sandboxed — 12-82.)
      *   - `html`, `htm`: the same hole without the disguise.
      *   - `exe`, `bat`, `sh`, `php`, `js`: nothing here ever needs to store an executable.
      * An allow-list rather than a deny-list, so the next extension somebody invents is refused
@@ -182,6 +190,34 @@ class FileService
     ];
 
     /**
+     * What a MESSAGE attachment may be on top of TYPES (12-82). Messages only: the Files panels
+     * on tasks, projects and clients keep TYPES alone. `zip` is already in TYPES.
+     *
+     * Measured 2026-10-02 on this box with finfo over real samples (an SVG text file with and
+     * without an XML prolog, `ffmpeg -f lavfi -i sine -t 1 x.mp3` / `x.mp4`, a video+audio mp4,
+     * a plain zip renamed .apk and a zip carrying AndroidManifest.xml):
+     *
+     *   | svg | image/svg+xml |   | mp3 | audio/mpeg |   | mp4 | video/mp4 |
+     *   | apk | application/vnd.android.package-archive (manifest first), application/zip |
+     *
+     * Only the reported strings plus the canonical one are listed. An SVG is additionally
+     * refused if it carries script (see `assertSafeSvg()`), and is served sandboxed.
+     *
+     * @var array<string, list<string>>
+     */
+    public const MESSAGE_EXTRA_TYPES = [
+        'svg' => ['image/svg+xml'],
+        'mp3' => ['audio/mpeg'],
+        'mp4' => ['video/mp4'],
+        'apk' => ['application/vnd.android.package-archive', 'application/zip'],
+    ];
+
+    /**
+     * How much of an SVG is scanned for script before it is accepted: the first 1 MB.
+     */
+    private const SVG_SCAN_BYTES = 1024 * 1024;
+
+    /**
      * How long a download link lives.
      *
      * Fifteen minutes. A link is minted when a page is rendered and used when somebody clicks
@@ -251,9 +287,13 @@ class FileService
      *
      * @return array<string, list<string>>
      */
-    private static function acceptedTypes(?AttachmentKind $kind): array
+    private static function acceptedTypes(?AttachmentKind $kind, bool $forMessage = false): array
     {
-        return $kind === AttachmentKind::Voice ? self::VOICE_TYPES : self::TYPES;
+        if ($kind === AttachmentKind::Voice) {
+            return self::VOICE_TYPES;
+        }
+
+        return $forMessage ? self::TYPES + self::MESSAGE_EXTRA_TYPES : self::TYPES;
     }
 
     /** The size limit in kilobytes, which is the unit Laravel's `max:` rule counts in. */
@@ -283,7 +323,7 @@ class FileService
     {
         $this->guardOwner($owner);
         $this->guardMayAttach($actor, $owner);
-        self::assertAcceptable($upload, $kind);
+        self::assertAcceptable($upload, $kind, forMessage: $owner instanceof Message);
 
         return DB::transaction(function () use ($actor, $owner, $upload): File {
             $file = $this->write($owner, $upload, $actor, null, 1);
@@ -535,9 +575,12 @@ class FileService
      * extension-versus-contents rule are identical for a recording and for a spreadsheet. Left
      * null — which is every caller that existed before Phase 6 — it is TYPES, unchanged.
      *
+     * `$forMessage` is true only on the message upload path: it lifts the MAX_BYTES check (see
+     * MESSAGE_MAX_BYTES) and widens the allow-list by MESSAGE_EXTRA_TYPES.
+     *
      * @throws FileStateException
      */
-    public static function assertAcceptable(UploadedFile $upload, ?AttachmentKind $kind = null): void
+    public static function assertAcceptable(UploadedFile $upload, ?AttachmentKind $kind = null, bool $forMessage = false): void
     {
         if (! $upload->isValid()) {
             throw FileStateException::upload();
@@ -549,11 +592,11 @@ class FileService
             throw FileStateException::empty();
         }
 
-        if ($size > self::MAX_BYTES) {
+        if (! $forMessage && $size > self::MAX_BYTES) {
             throw FileStateException::tooLarge($size, self::MAX_BYTES);
         }
 
-        $types = self::acceptedTypes($kind);
+        $types = self::acceptedTypes($kind, $forMessage);
         $extension = strtolower($upload->getClientOriginalExtension());
 
         if (! array_key_exists($extension, $types)) {
@@ -564,6 +607,32 @@ class FileService
 
         if (! in_array($mime, $types[$extension], true)) {
             throw FileStateException::mimeMismatch($extension, $mime === '' ? 'unreadable' : $mime);
+        }
+
+        if ($extension === 'svg') {
+            self::assertSafeSvg($upload, array_keys($types));
+        }
+    }
+
+    /**
+     * Refuse an SVG that can run anything. A malicious SVG is the risk, so it is refused rather
+     * than sanitized: script elements, inline event handlers, `javascript:` URLs and
+     * `<foreignObject>` (which can embed HTML) anywhere in the first 1 MB, case-insensitive.
+     *
+     * @param  list<string>  $allowed
+     *
+     * @throws FileStateException
+     */
+    private static function assertSafeSvg(UploadedFile $upload, array $allowed): void
+    {
+        $head = @file_get_contents($upload->getRealPath(), false, null, 0, self::SVG_SCAN_BYTES);
+
+        if ($head === false) {
+            throw FileStateException::upload();
+        }
+
+        if (preg_match('/<script|[\s\/"\']on[a-z]+\s*=|javascript:|<foreignObject/i', $head) === 1) {
+            throw FileStateException::typeNotAllowed('svg', array_values(array_diff($allowed, ['svg'])));
         }
     }
 

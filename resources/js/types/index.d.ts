@@ -50,6 +50,12 @@ export interface SharedProps {
      * is what the shell renders from.
      */
     shell?: ShellLive;
+    /**
+     * `HandleInertiaRequests::sharedClock()`: whether the signer-in is clocked in, for an
+     * employee on the office clock; `null` for everyone else. Read through
+     * `Components/Attendance/clockState.ts`.
+     */
+    clock?: { clocked_in: boolean } | null;
 }
 
 declare module '@inertiajs/core' {

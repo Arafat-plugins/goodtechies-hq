@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Support\BillingType;
 use App\Support\Permission;
 use App\Support\Priority;
+use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
 use App\Support\ProjectType;
 use App\Support\RoleName;
@@ -25,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'domain',
     'project_type',
     'billing_type',
+    'recurrence_frequency',
     'start_date',
     'deadline',
     'status',
@@ -54,6 +56,7 @@ class Project extends Model
         return [
             'project_type' => ProjectType::class,
             'billing_type' => BillingType::class,
+            'recurrence_frequency' => ProjectRecurrenceFrequency::class,
             'status' => ProjectStatus::class,
             'priority' => Priority::class,
             'start_date' => 'date',

@@ -16,6 +16,7 @@ const props = defineProps<{
     statuses: Option[];
     priorities: Option[];
     billingTypes: Option[];
+    recurrenceFrequencies: Option[];
     billingFrequencies: Option[];
 }>();
 
@@ -37,6 +38,7 @@ const project = computed(() => props.project.data);
             :statuses="statuses"
             :priorities="priorities"
             :billing-types="billingTypes"
+            :recurrence-frequencies="recurrenceFrequencies"
             :billing-frequencies="billingFrequencies"
             submit-label="Save changes"
         />

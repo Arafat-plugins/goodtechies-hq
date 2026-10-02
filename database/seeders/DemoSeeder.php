@@ -12,6 +12,7 @@ use App\Support\BillingFrequency;
 use App\Support\BillingType;
 use App\Support\ClientStatus;
 use App\Support\Priority;
+use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
 use App\Support\ProjectType;
 use Illuminate\Database\Seeder;
@@ -62,6 +63,10 @@ class DemoSeeder extends Seeder
             'domain' => $projectData['domain'] ?? null,
             'project_type' => $projectData['project_type'],
             'billing_type' => $projectData['billing_type'],
+            // A former monthly retainer is Recurring + Monthly (CHECK projects_recurrence_matches_billing).
+            'recurrence_frequency' => $projectData['billing_type'] === BillingType::Recurring
+                ? ($projectData['recurrence_frequency'] ?? ProjectRecurrenceFrequency::Monthly)
+                : null,
             'start_date' => $projectData['start_date'],
             'deadline' => $projectData['deadline'],
             'status' => $projectData['status'] ?? ProjectStatus::Active,
@@ -152,7 +157,7 @@ class DemoSeeder extends Seeder
                         'name' => 'Buffalo Modular — SEO',
                         'domain' => 'buffalomodular.com',
                         'project_type' => ProjectType::Seo,
-                        'billing_type' => BillingType::MonthlyRecurring,
+                        'billing_type' => BillingType::Recurring,
                         'start_date' => Carbon::today()->subMonths(4),
                         'deadline' => null,
                         'pm' => 'shahadat',
@@ -169,7 +174,7 @@ class DemoSeeder extends Seeder
                         'name' => 'Buffalo Modular — Website Maintenance',
                         'domain' => 'buffalomodular.com',
                         'project_type' => ProjectType::WebsiteMaintenance,
-                        'billing_type' => BillingType::MonthlyRecurring,
+                        'billing_type' => BillingType::Recurring,
                         'start_date' => Carbon::today()->subMonths(6),
                         'deadline' => Carbon::today()->addWeeks(2),
                         'pm' => 'faruk',
@@ -198,7 +203,7 @@ class DemoSeeder extends Seeder
                         'name' => 'Heat Gap — SEO Retainer',
                         'domain' => 'heatgap.co.uk',
                         'project_type' => ProjectType::Seo,
-                        'billing_type' => BillingType::MonthlyRecurring,
+                        'billing_type' => BillingType::Recurring,
                         'start_date' => Carbon::today()->subMonths(3),
                         'deadline' => Carbon::today()->addDays(10),
                         'pm' => 'shahadat',
@@ -227,7 +232,7 @@ class DemoSeeder extends Seeder
                         'name' => 'APH — Website Maintenance',
                         'domain' => 'aphstalbans.co.uk',
                         'project_type' => ProjectType::WebsiteMaintenance,
-                        'billing_type' => BillingType::MonthlyRecurring,
+                        'billing_type' => BillingType::Recurring,
                         'start_date' => Carbon::today()->subMonths(8),
                         'deadline' => Carbon::today()->subDays(4),
                         'status' => ProjectStatus::OnHold,
@@ -258,7 +263,7 @@ class DemoSeeder extends Seeder
                         'name' => 'abc.com — Monthly Maintenance',
                         'domain' => 'abc.com',
                         'project_type' => ProjectType::WebsiteMaintenance,
-                        'billing_type' => BillingType::MonthlyRecurring,
+                        'billing_type' => BillingType::Recurring,
                         'start_date' => Carbon::today()->subYear(),
                         'deadline' => Carbon::today()->addDays(3),
                         'priority' => Priority::Urgent,

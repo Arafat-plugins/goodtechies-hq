@@ -6,6 +6,7 @@ use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\TimeEntry;
 use App\Models\User;
+use App\Services\AttendanceService;
 use App\Services\ConversationService;
 use App\Support\ConversationType;
 use Illuminate\Http\JsonResponse;
@@ -124,10 +125,40 @@ class HandleInertiaRequests extends Middleware
             // 8 statements' worth of prop. Resolving it into the document costs the 8 and
             // saves the second request outright. Every Inertia visit after that — navigations
             // and the 30-second poll — is unchanged: optional, asked for by name.
+            // Is the signer-in clocked in right now? Only for an employee the office clock
+            // tracks; `null` for everyone else. The tab-close guard (TaskTimerPulse.vue) asks
+            // whether to clock out too when this is true (decision 12-84).
+            'clock' => fn (): ?array => $this->sharedClock($request),
             'shell' => $this->shellOnFirstPaint($request)
                 ? fn (): array => $this->sharedShell($request)
                 : Inertia::optional(fn (): array => $this->sharedShell($request)),
         ];
+    }
+
+    /**
+     * `['clocked_in' => bool]` for a signed-in employee on the office clock, `null` otherwise.
+     *
+     * `$user->employee` is the relation `sharedUser()` already loaded, so nobody but an office
+     * employee pays a query for this.
+     *
+     * @return array{clocked_in: bool}|null
+     */
+    private function sharedClock(Request $request): ?array
+    {
+        $user = $request->user();
+
+        if (! $user instanceof User) {
+            return null;
+        }
+
+        $attendance = app(AttendanceService::class);
+        $employee = $user->employee;
+
+        if ($employee === null || ! $attendance->clocks($employee)) {
+            return null;
+        }
+
+        return ['clocked_in' => $attendance->isClockedIn($employee)];
     }
 
     /**

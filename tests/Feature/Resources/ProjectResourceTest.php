@@ -47,6 +47,8 @@ const RESTRICTED_PROJECT_KEYS = [
     'price',
     'recurring_amount',
     'billing_type',
+    'recurrence_frequency',
+    'recurrence_frequency_label',
     'contract_value',
     'contract_terms',
     'profitability_snapshot',
@@ -68,7 +70,7 @@ beforeEach(function () {
         'name' => 'Acme SEO',
         'domain' => 'acme.test',
         'project_type' => ProjectType::Seo,
-        'billing_type' => BillingType::MonthlyRecurring,
+        'billing_type' => BillingType::Recurring,
         'status' => ProjectStatus::Active,
         'priority' => Priority::High,
         'pm_id' => $this->manager->employee->id,
@@ -124,13 +126,15 @@ it('gives an admin the public, commercial and finance keys', function () {
         'internal_notes',
         'billing_type',
         'billing_type_label',
+        'recurrence_frequency',
+        'recurrence_frequency_label',
         'finance',
     ]));
 
     expect($payload['client'])->toBe(['id' => $this->client->id, 'name' => 'Acme Ltd'])
         ->and($payload['internal_notes'])->toBe('Pays late, chase on the 5th.')
-        ->and($payload['billing_type'])->toBe('monthly_recurring')
-        ->and($payload['billing_type_label'])->toBe('Monthly Recurring')
+        ->and($payload['billing_type'])->toBe('recurring')
+        ->and($payload['billing_type_label'])->toBe('Recurring')
         ->and($payload['finance']['price'])->toBe('1500.00')
         ->and($payload['finance']['recurring_amount'])->toBe('250.00')
         ->and($payload['finance']['billing_frequency_label'])->toBe('Monthly')
@@ -147,7 +151,7 @@ it('gives an assigned manager the commercial keys but no money', function () {
         'internal_notes',
     ]));
 
-    foreach (['billing_type', 'finance', 'price', 'contract_value'] as $key) {
+    foreach (['billing_type', 'recurrence_frequency', 'recurrence_frequency_label', 'finance', 'price', 'contract_value'] as $key) {
         expect($payload)->not->toHaveKey($key);
     }
 })->group('phase1');
@@ -234,11 +238,14 @@ it('opens the finance keys for the project a per-project grant names, and no oth
     expect($granted)->toHaveKey('finance')
         ->and($granted['finance']['price'])->toBe('1500.00')
         ->and($granted)->toHaveKey('billing_type')
+        ->and($granted)->toHaveKey('recurrence_frequency')
         ->and($granted)->not->toHaveKey('client')
         ->and($granted)->not->toHaveKey('internal_notes');
 
     $this->assertArrayNotHasKey('finance', $ungranted);
     $this->assertArrayNotHasKey('billing_type', $ungranted);
+    $this->assertArrayNotHasKey('recurrence_frequency', $ungranted);
+    $this->assertArrayNotHasKey('recurrence_frequency_label', $ungranted);
 })->group('phase1');
 
 it('reports null finance for a project with no finance row', function () {

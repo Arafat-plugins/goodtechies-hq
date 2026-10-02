@@ -32,7 +32,9 @@ return [
     |
     */
 
-    'lifetime' => (int) env('SESSION_LIFETIME', 120),
+    // Two days of inactivity (sliding: every request renews it); closing the tab does not sign
+    // out. Decision 12-84.
+    'lifetime' => (int) env('SESSION_LIFETIME', 2880),
 
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
 

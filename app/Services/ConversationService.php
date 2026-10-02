@@ -56,6 +56,9 @@ class ConversationService
         'attachments.uploader',
         'mentions',
         'reactions.user',
+        // 12-82: the quoted original of a reply, so the thread stays a constant query count.
+        'replyTo.author',
+        'replyTo.attachments',
     ];
 
     /**

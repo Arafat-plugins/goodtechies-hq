@@ -96,7 +96,7 @@ it('sends the grouped envelope the List view loops over', function () {
         'employees',
         // The shared props every page gets from HandleInertiaRequests. `shell` is one of them
         // on a full document load (slow-loading slice 6); an Inertia navigation still omits it.
-        'auth', 'flash', 'errors', 'app', 'shell',
+        'auth', 'flash', 'errors', 'app', 'shell', 'clock',
     ])
         ->and(array_keys($props['tasks']))->toEqualCanonicalizing(['group_by', 'groups', 'total', 'overdue_count'])
         ->and(array_keys($props['tasks']['groups'][0]))->toEqualCanonicalizing(['key', 'label', 'tone', 'count', 'tasks'])

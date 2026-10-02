@@ -41,6 +41,10 @@ return [
         'web' => [
             'driver' => 'session',
             'provider' => 'users',
+            // "Remember me" may not outlive the session: both end after 2 days of inactivity
+            // (minutes, same value as config/session.php `lifetime`). Decision 12-84. Read by
+            // AuthManager when it builds the guard, so nothing resolves the guard at boot.
+            'remember' => (int) env('SESSION_LIFETIME', 2880),
         ],
     ],
 

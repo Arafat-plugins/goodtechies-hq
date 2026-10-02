@@ -78,7 +78,7 @@ it('gives each dashboard exactly its documented props', function (string $email,
     // `shell` is shared too, and a full document load now carries it (slow-loading slice 6), so
     // the first paint does not spend a second request asking. It is asserted in
     // `Surfaces/ShellPropTest.php` and `Performance/FirstPaintTest.php`, not as a dashboard prop.
-    $shared = ['errors', 'auth', 'flash', 'app', 'shell'];
+    $shared = ['errors', 'auth', 'flash', 'app', 'shell', 'clock'];
 
     expect(array_values(array_diff($pageProps, $shared)))->toEqualCanonicalizing($props);
 })->with([

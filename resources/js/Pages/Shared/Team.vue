@@ -55,7 +55,7 @@ defineProps<{
 <template>
     <Head title="Team" />
 
-    <PageShell title="Team" :description="today.label" :breadcrumb="[{ label: 'Work' }, { label: 'Team' }]">
+    <PageShell title="Team" :description="today.label">
         <div class="flex min-w-0 flex-col gap-4">
             <Card v-if="!members.length" class="p-6">
                 <EmptyState

@@ -53,11 +53,10 @@ class StoreMessageRequest extends FormRequest
     /**
      * The longest a single message may be.
      *
-     * Four thousand characters. Long enough for a full brief pasted into a task; short enough
-     * that a message is still a message and not a document, which is what the Files panel and
-     * the task description are for.
+     * Twenty thousand characters (12-82). The composer no longer counts characters; this stays
+     * only as an abuse guard against a hand-built request posting megabytes of text.
      */
-    public const MAX_BODY = 4000;
+    public const MAX_BODY = 20000;
 
     /**
      * The most people one message may name.
@@ -89,7 +88,8 @@ class StoreMessageRequest extends FormRequest
                 'required_if:kind,'.AttachmentKind::Voice->value,
                 'bail',
                 'file',
-                'max:'.FileService::maxKilobytes(),
+                // No `max:` here: messages carry no application size cap (12-82); the
+                // transport limit in nginx/PHP is what bounds them.
                 $this->acceptable(),
             ],
 
@@ -117,6 +117,11 @@ class StoreMessageRequest extends FormRequest
             // question no endpoint in this application answers.
             'mentions' => ['sometimes', 'array', 'max:'.self::MAX_MENTIONS],
             'mentions.*' => ['integer'],
+
+            // The message this one replies to (12-82). Only its shape is checked here: "exists,
+            // in this conversation, not deleted" is MessageService::post()'s rule, so a job or a
+            // test is refused the same way.
+            'reply_to_id' => ['nullable', 'integer'],
         ];
     }
 
@@ -130,8 +135,6 @@ class StoreMessageRequest extends FormRequest
             'file.required_without' => 'Write something, or attach a file.',
             'body.max' => 'That message is too long. The limit is '.self::MAX_BODY.' characters.',
             'mentions.max' => 'That is more people than one message can name.',
-            'file.max' => 'That file is too large. The limit is '
-                .round(FileService::MAX_BYTES / 1048576).' MB.',
             'file.required_if' => 'A voice note needs its recording.',
             'kind.in' => 'That is not a kind of attachment this endpoint accepts.',
             'duration.prohibited_unless' => 'A length belongs to a voice note. Leave it off an ordinary attachment.',
@@ -164,6 +167,14 @@ class StoreMessageRequest extends FormRequest
         }
 
         return array_values(array_unique(array_filter(array_map('intval', $ids))));
+    }
+
+    /** The message this one replies to, or null. MessageService checks it belongs here. */
+    public function replyToId(): ?int
+    {
+        $id = $this->validated('reply_to_id');
+
+        return is_numeric($id) ? (int) $id : null;
     }
 
     public function upload(): ?UploadedFile
@@ -233,6 +244,7 @@ class StoreMessageRequest extends FormRequest
                 FileService::assertAcceptable(
                     $value,
                     is_string($claimed) ? AttachmentKind::tryFrom($claimed) : null,
+                    forMessage: true,
                 );
             } catch (FileStateException $exception) {
                 $fail($exception->getMessage());

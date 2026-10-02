@@ -61,6 +61,8 @@ class ProjectResource extends JsonResource
         if ($user !== null && Gate::forUser($user)->allows('viewFinance', $this->resource)) {
             $data['billing_type'] = $this->billing_type?->value;
             $data['billing_type_label'] = $this->billing_type?->label();
+            $data['recurrence_frequency'] = $this->recurrence_frequency?->value;
+            $data['recurrence_frequency_label'] = $this->recurrence_frequency?->label();
             $data['finance'] = $this->finance();
         }
 

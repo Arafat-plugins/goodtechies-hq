@@ -69,6 +69,8 @@ export interface Project {
     internal_notes?: string | null;
     billing_type?: string | null;
     billing_type_label?: string | null;
+    recurrence_frequency?: string | null;
+    recurrence_frequency_label?: string | null;
     finance?: ProjectFinance | null;
 }
 
@@ -76,6 +78,9 @@ export interface Project {
 export const INTERNAL = 'internal';
 export const NO_PM = 'none';
 export const NO_FREQUENCY = 'none';
+
+/** The billing type whose deadline the server computes from the start date and frequency. */
+export const RECURRING = 'recurring';
 
 /** A money value for an `<input type="number">`: decimal strings pass through, null becomes ''. */
 export function moneyInputValue(amount: string | number | null | undefined): string {
@@ -85,7 +90,9 @@ export function moneyInputValue(amount: string | number | null | undefined): str
 
 <script setup lang="ts">
 import { Link, useForm } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { CircleAlert, Loader2 } from '@lucide/vue';
+import { computed, watch } from 'vue';
+import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
 import { Checkbox } from '@/Components/ui/checkbox';
@@ -93,6 +100,7 @@ import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { Textarea } from '@/Components/ui/textarea';
+import { recurringDeadline } from '@/lib/recurrence';
 
 const props = defineProps<{
     /** Absent on Create. */
@@ -104,6 +112,7 @@ const props = defineProps<{
     statuses: Option[];
     priorities: Option[];
     billingTypes: Option[];
+    recurrenceFrequencies: Option[];
     billingFrequencies: Option[];
     submitLabel: string;
 }>();
@@ -116,6 +125,7 @@ const form = useForm({
     domain: props.project?.domain ?? '',
     project_type: props.project?.project_type ?? (props.projectTypes[0]?.value ?? ''),
     billing_type: props.project?.billing_type ?? (props.billingTypes[0]?.value ?? ''),
+    recurrence_frequency: props.project?.recurrence_frequency ?? '',
     priority: props.project?.priority ?? (props.priorities[1]?.value ?? props.priorities[0]?.value ?? ''),
     start_date: props.project?.start_date ?? '',
     deadline: props.project?.deadline ?? '',
@@ -134,6 +144,23 @@ const form = useForm({
     },
 });
 
+const isRecurring = computed(() => form.billing_type === RECURRING);
+
+// A Recurring project's deadline is the start date plus one period. The server computes the
+// stored value; this keeps the read-only field showing the same date as the inputs change.
+watch(
+    () => [form.billing_type, form.start_date, form.recurrence_frequency] as const,
+    ([billingType, start, frequency]) => {
+        if (billingType !== RECURRING) {
+            form.recurrence_frequency = '';
+
+            return;
+        }
+
+        form.deadline = recurringDeadline(start ?? '', frequency) ?? '';
+    },
+);
+
 // `useForm` types `errors` by top-level field, but Laravel also sends `finance.price` keys.
 const errors = computed(() => form.errors as unknown as Record<string, string | undefined>);
 
@@ -147,9 +174,18 @@ function toggleMember(employeeId: number, checked: boolean): void {
         : form.members.filter((id) => id !== employeeId);
 }
 
-/** Blank strings are "not set"; the server wants null, not ''. */
-function blankToNull(value: string): string | null {
-    return value.trim() === '' ? null : value;
+/**
+ * Blank values are "not set"; the server wants null, not ''. A `type="number"` v-model yields a
+ * number, so the value is stringified before trimming.
+ */
+function blankToNull(value: string | number | null | undefined): string | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    const text = String(value).trim();
+
+    return text === '' ? null : text;
 }
 
 function submit(): void {
@@ -166,6 +202,8 @@ function submit(): void {
             domain: blankToNull(data.domain),
             project_type: data.project_type,
             billing_type: data.billing_type,
+            recurrence_frequency:
+                data.billing_type === RECURRING && data.recurrence_frequency !== '' ? data.recurrence_frequency : null,
             priority: data.priority,
             start_date: blankToNull(data.start_date),
             deadline: blankToNull(data.deadline),
@@ -196,12 +234,70 @@ function submit(): void {
     });
 
     if (project) {
-        form.put(`/admin/projects/${project.id}`, { preserveScroll: true });
+        form.put(`/admin/projects/${project.id}`, { preserveScroll: true, onError: focusFirstInvalid });
 
         return;
     }
 
-    form.post('/admin/projects', { preserveScroll: true });
+    form.post('/admin/projects', { preserveScroll: true, onError: focusFirstInvalid });
+}
+
+/** Error keys → the control that shows them, in on-screen order. */
+const FIELD_IDS: Record<string, string> = {
+    client_id: 'project-client',
+    name: 'project-name',
+    domain: 'project-domain',
+    project_type: 'project-type',
+    billing_type: 'project-billing-type',
+    recurrence_frequency: 'project-recurrence-frequency',
+    priority: 'project-priority',
+    pm_id: 'project-pm',
+    start_date: 'project-start-date',
+    deadline: 'project-deadline',
+    internal_notes: 'project-internal-notes',
+    employee_notes: 'project-employee-notes',
+    members: 'project-members',
+    'finance.price': 'project-price',
+    'finance.recurring_amount': 'project-recurring-amount',
+    'finance.billing_frequency': 'project-billing-frequency',
+    'finance.contract_value': 'project-contract-value',
+    'finance.profitability_snapshot': 'project-profitability-snapshot',
+    'finance.contract_terms': 'project-contract-terms',
+};
+
+/** Keys whose control is not rendered on this form (Edit has no members or finance cards). */
+function isOffScreen(key: string): boolean {
+    if (!(key in FIELD_IDS)) {
+        return true;
+    }
+
+    return isEdit.value && (key === 'members' || key.startsWith('finance.'));
+}
+
+/**
+ * The messages that need the summary above the buttons: every finance error (that card sits far
+ * below the details) and any error whose field is not on screen.
+ */
+const summaryErrors = computed(() =>
+    Object.entries(errors.value)
+        .filter(([key, message]) => message && (key.startsWith('finance.') || isOffScreen(key)))
+        .map(([, message]) => message as string),
+);
+
+function focusFirstInvalid(): void {
+    const first = Object.keys(FIELD_IDS).find((key) => errors.value[key] && !isOffScreen(key));
+
+    if (!first) {
+        return;
+    }
+
+    window.setTimeout(() => {
+        const element = document.getElementById(FIELD_IDS[first]);
+        const target = element?.matches('input, textarea, button, select')
+            ? element
+            : element?.querySelector<HTMLElement>('input, textarea, button, select');
+        target?.focus();
+    }, 0);
 }
 
 const cancelHref = computed(() =>
@@ -318,6 +414,33 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
                     <p v-if="errors.billing_type" class="text-xs text-destructive">{{ errors.billing_type }}</p>
                 </div>
 
+                <div v-if="isRecurring" class="flex min-w-0 flex-col gap-2">
+                    <Label for="project-recurrence-frequency">
+                        Frequency <span class="text-destructive" aria-hidden="true">*</span>
+                    </Label>
+                    <Select v-model="form.recurrence_frequency" required :disabled="form.processing">
+                        <SelectTrigger
+                            id="project-recurrence-frequency"
+                            class="w-full"
+                            :aria-invalid="errors.recurrence_frequency ? true : undefined"
+                        >
+                            <SelectValue placeholder="How often it recurs" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem
+                                v-for="frequency in recurrenceFrequencies"
+                                :key="frequency.value"
+                                :value="frequency.value"
+                            >
+                                {{ frequency.label }}
+                            </SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <p v-if="errors.recurrence_frequency" class="text-xs text-destructive">
+                        {{ errors.recurrence_frequency }}
+                    </p>
+                </div>
+
                 <div class="flex min-w-0 flex-col gap-2">
                     <Label for="project-priority">
                         Priority <span class="text-destructive" aria-hidden="true">*</span>
@@ -360,12 +483,16 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
                 </div>
 
                 <div class="flex min-w-0 flex-col gap-2">
-                    <Label for="project-start-date">Start date</Label>
+                    <Label for="project-start-date">
+                        Start date
+                        <span v-if="isRecurring" class="text-destructive" aria-hidden="true">*</span>
+                    </Label>
                     <Input
                         id="project-start-date"
                         v-model="form.start_date"
                         type="date"
                         name="start_date"
+                        :required="isRecurring"
                         :disabled="form.processing"
                         :aria-invalid="errors.start_date ? true : undefined"
                     />
@@ -379,9 +506,15 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
                         v-model="form.deadline"
                         type="date"
                         name="deadline"
+                        :readonly="isRecurring"
+                        :class="isRecurring ? 'bg-muted text-muted-foreground' : undefined"
                         :disabled="form.processing"
                         :aria-invalid="errors.deadline ? true : undefined"
+                        :aria-describedby="isRecurring ? 'project-deadline-help' : undefined"
                     />
+                    <p v-if="isRecurring" id="project-deadline-help" class="text-xs text-muted-foreground">
+                        Set automatically from the start date and frequency.
+                    </p>
                     <p v-if="errors.deadline" class="text-xs text-destructive">{{ errors.deadline }}</p>
                 </div>
 
@@ -442,7 +575,7 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
                 </CardDescription>
             </CardHeader>
             <CardContent>
-                <ul class="grid gap-2 sm:grid-cols-2">
+                <ul id="project-members" class="grid gap-2 sm:grid-cols-2">
                     <li v-for="employee in assignableEmployees" :key="employee.id" class="flex items-center gap-2">
                         <Checkbox
                             :id="`project-member-${employee.id}`"
@@ -574,9 +707,24 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
             </CardContent>
         </Card>
 
+        <Alert v-if="summaryErrors.length > 0" variant="destructive" role="alert">
+            <CircleAlert aria-hidden="true" />
+            <AlertTitle>Some fields need attention.</AlertTitle>
+            <AlertDescription>
+                <ul class="list-disc pl-4">
+                    <li v-for="(message, index) in summaryErrors" :key="index">{{ message }}</li>
+                </ul>
+            </AlertDescription>
+        </Alert>
+
         <div class="flex flex-wrap items-center gap-2">
-            <Button type="submit" :disabled="form.processing">
-                {{ form.processing ? 'Saving…' : submitLabel }}
+            <Button type="submit" :disabled="form.processing" :aria-busy="form.processing ? true : undefined">
+                <Loader2
+                    v-if="form.processing"
+                    class="size-4 animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                />
+                {{ form.processing ? (isEdit ? 'Saving…' : 'Creating…') : submitLabel }}
             </Button>
             <Button as-child type="button" variant="outline">
                 <Link :href="cancelHref">Cancel</Link>

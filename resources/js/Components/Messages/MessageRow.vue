@@ -8,6 +8,7 @@ import { rememberEmoji } from '@/Components/Messages/emoji';
 import MessageActions from '@/Components/Messages/MessageActions.vue';
 import MessageBody from '@/Components/Messages/MessageBody.vue';
 import ReactionBar from '@/Components/Messages/ReactionBar.vue';
+import ReplyQuote from '@/Components/Messages/ReplyQuote.vue';
 import type { ThreadLayout, ThreadMessage } from '@/Components/Messages/messages';
 import {
     MESSAGE_MAX_BODY,
@@ -62,7 +63,7 @@ import { cn } from '@/lib/utils';
  *
  * ## The message menu (brief 010)
  *
- * Copy, Edit, Delete and quick reactions live in `MessageActions` — a `MoreHorizontal` button
+ * Reply (brief 013), Copy, Edit, Delete and quick reactions live in `MessageActions` — a `MoreHorizontal` button
  * revealed by `group-hover` and `group-focus-within` (always on for a touch screen), or a
  * right-click / long-press on the bubble. Edit and Delete exist only where the server said
  * `can_edit` / `can_delete`. A pending, failed or deleted message has no menu at all.
@@ -86,8 +87,10 @@ const props = withDefaults(
         layout?: ThreadLayout;
         /** The conversation the message is in — the edit / delete / reaction endpoints hang off it. */
         conversationId?: number | null;
+        /** Brief 013: the thread has a composer, so the menu offers Reply. */
+        canReply?: boolean;
     }>(),
-    { layout: 'stacked', conversationId: null },
+    { layout: 'stacked', conversationId: null, canReply: false },
 );
 
 /** Spoken by the thread's one live region — a row does not get a live region of its own. */
@@ -97,9 +100,14 @@ const emit = defineEmits<{
     retry: [];
     /** Brief 010: the server's (or an optimistic) new version of this message. */
     replace: [message: ThreadMessage];
+    /** Brief 013: Reply was chosen from this message's menu. */
+    reply: [message: ThreadMessage];
+    /** Brief 013: the quoted original was clicked — scroll to message `id`. */
+    jump: [id: number];
 }>();
 
 const page = usePage();
+const viewerId = computed(() => page.props.auth.user?.id ?? null);
 
 const sided = computed(() => props.layout === 'sided');
 const mine = computed(() => props.message.is_mine);
@@ -445,6 +453,14 @@ async function react(emoji: string): Promise<void> {
                         -->
                         <span v-if="mentionsMe" :class="mentionChipClass">Mentions you</span>
 
+                        <ReplyQuote
+                            v-if="message.reply_to"
+                            :reply="message.reply_to"
+                            :on-accent="onAccent"
+                            :viewer-id="viewerId"
+                            @jump="emit('jump', $event)"
+                        />
+
                         <div
                             v-if="inlineStamp"
                             class="relative w-fit max-w-full min-w-0 text-sm break-words whitespace-pre-line"
@@ -512,6 +528,8 @@ async function react(emoji: string): Promise<void> {
                     class="mb-1"
                     :message="message"
                     :align="mine ? 'end' : 'start'"
+                    :can-reply="canReply"
+                    @reply="emit('reply', message)"
                     @copy="copy"
                     @edit="startEdit"
                     @delete="remove"
@@ -605,6 +623,14 @@ async function react(emoji: string): Promise<void> {
             </div>
 
             <template v-else>
+                <ReplyQuote
+                    v-if="message.reply_to"
+                    :reply="message.reply_to"
+                    :viewer-id="viewerId"
+                    class="self-start"
+                    @jump="emit('jump', $event)"
+                />
+
                 <div
                     v-if="inlineStamp"
                     class="relative w-fit max-w-full min-w-0 text-sm break-words whitespace-pre-line"
@@ -660,6 +686,8 @@ async function react(emoji: string): Promise<void> {
                 ref="actionsEl"
                 :message="message"
                 align="end"
+                :can-reply="canReply"
+                @reply="emit('reply', message)"
                 @copy="copy"
                 @edit="startEdit"
                 @delete="remove"

@@ -71,8 +71,15 @@ const form = useForm({
     profitability_snapshot: moneyInputValue(finance.value?.profitability_snapshot),
 });
 
-function blankToNull(value: string): string | null {
-    return value.trim() === '' ? null : value;
+/** A `type="number"` v-model yields a number, so the value is stringified before trimming. */
+function blankToNull(value: string | number | null | undefined): string | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    const text = String(value).trim();
+
+    return text === '' ? null : text;
 }
 
 function startEditing(): void {

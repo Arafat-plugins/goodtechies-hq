@@ -3,6 +3,7 @@ import { usePage } from '@inertiajs/vue3';
 import {
     ChevronUp,
     CircleAlert,
+    ImagePlus,
     Loader2,
     MessagesSquare,
     Megaphone,
@@ -14,11 +15,11 @@ import {
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import { DRAWER_FOOTER_INSET } from '@/Components/drawerFooter';
 import EmptyState from '@/Components/EmptyState.vue';
-import { FILE_ACCEPT, FILE_MAX_LABEL, rejectionFor } from '@/Components/Files/files';
 import EmojiPicker from '@/Components/Messages/EmojiPicker.vue';
 import { rememberEmoji } from '@/Components/Messages/emoji';
 import MentionPicker from '@/Components/Messages/MentionPicker.vue';
 import MessageRow from '@/Components/Messages/MessageRow.vue';
+import ReplyQuote from '@/Components/Messages/ReplyQuote.vue';
 import VoiceRecorder from '@/Components/Messages/VoiceRecorder.vue';
 import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
 import {
@@ -34,20 +35,25 @@ import {
 import type {
     MessagePerson,
     ThreadMessage,
+    ThreadReplyTo,
     ThreadPayload,
     ThreadRoutes,
 } from '@/Components/Messages/messages';
 import {
-    MESSAGE_MAX_BODY,
+    MESSAGE_FILE_ACCEPT,
+    clipboardImage,
     mergeThreadMessages,
+    messageFileRejection,
+    pastedFileName,
     refusalText,
+    replyReference,
     renderThread,
     sendMessage,
     threadLayout,
     useMentions,
 } from '@/Components/Messages/messages';
 import type { VoiceClip } from '@/Components/Messages/voice';
-import { VOICE_MAX_LABEL, clipFile } from '@/Components/Messages/voice';
+import { clipFile } from '@/Components/Messages/voice';
 import { Button } from '@/Components/ui/button';
 import { Label } from '@/Components/ui/label';
 import { Progress } from '@/Components/ui/progress';
@@ -59,6 +65,7 @@ import { backoff, fetchWithTimeout, reportNetworkFailure, reportNetworkSuccess, 
 import { playMessageSent } from '@/lib/sound';
 import { isSessionLive, reportResponse, sessionState } from '@/lib/session';
 import { useUnsavedGuard } from '@/lib/unsavedGuard';
+import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 
 /**
@@ -104,9 +111,9 @@ import { cn } from '@/lib/utils';
  * ## Enter sends — and it does so on all three screens
  *
  * `Enter` posts, `Shift + Enter` starts a new line, `Ctrl`/`⌘ + Enter` also posts. That is a
- * change from "only Ctrl/⌘ + Enter", it applies to the task discussion too, and the hint under
- * the composer says all three out loud rather than leaving somebody to discover it by losing a
- * paragraph.
+ * change from "only Ctrl/⌘ + Enter", and it applies to the task discussion too. Brief 013 took
+ * the helper line under the composer away (the client asked for it gone), with the size and
+ * character counts it carried.
  *
  * ## A message is text, a file, or a voice note — and never two of the last two
  *
@@ -170,8 +177,7 @@ const props = withDefaults(
         placeholder?: string | null;
         /**
          * Opt-in (brief 016): `footer` pins the composer to the bottom of the `DetailDrawer` it
-         * sits in, as one compact row — icon-only Attach and Mentions, no placeholder, the helper
-         * line kept for screen readers only and the character count shown only near the limit.
+         * sits in, as one compact row — icon-only Attach and Mentions, no placeholder.
          * Outside a drawer it falls back to `inline`, which is what every other mount is.
          */
         composerPlacement?: 'inline' | 'footer';
@@ -188,7 +194,6 @@ const emit = defineEmits<{
 const uid = useId();
 const bodyId = `${uid}-body`;
 const pickerId = `${uid}-file`;
-const hintId = `${uid}-hint`;
 const errorId = `${uid}-error`;
 const progressId = `${uid}-progress`;
 
@@ -266,6 +271,8 @@ const pickedError = ref<string | null>(null);
 const serverError = ref<string | null>(null);
 const posting = ref(false);
 const pickerEl = ref<HTMLInputElement | null>(null);
+/** Brief 013: the message being answered, quoted above the composer until it is sent or cancelled. */
+const replyingTo = ref<ThreadMessage | null>(null);
 
 /**
  * Reliability slice 2b. How far an attachment or a voice note has got (0-100) while it is
@@ -284,7 +291,6 @@ const SEND_FAILED_TEXT = {
 const mentions = useMentions(body);
 
 const fieldError = computed(() => pickedError.value ?? serverError.value);
-const remaining = computed(() => MESSAGE_MAX_BODY - body.value.length);
 
 /**
  * One attachment per message, so the two ways of making one are exclusive.
@@ -308,8 +314,6 @@ const reportInset = inject(DRAWER_FOOTER_INSET, null);
 /** Pinned only when asked for AND inside a drawer that can make room for it. */
 const composerPinned = computed(() => props.composerPlacement === 'footer' && reportInset !== null);
 const composerEl = ref<HTMLFormElement | null>(null);
-/** Brief 016: the count comes back only when it is worth reading. */
-const COUNT_SHOWN_BELOW = 200;
 let insetObserver: ResizeObserver | null = null;
 
 watch(
@@ -375,6 +379,7 @@ function resetComposer(): void {
     voiceClip.value = null;
     voiceActive.value = false;
     sendFailed.value = null;
+    replyingTo.value = null;
 
     void nextTick(grow);
 }
@@ -485,31 +490,115 @@ function adoptFile(file: File | null): void {
     picked.value = file;
     serverError.value = null;
     sendFailed.value = null;
-    pickedError.value = file === null ? null : rejectionFor(file);
+    pickedError.value = file === null ? null : messageFileRejection(file);
 }
 
-function pad2(value: number): string {
-    return String(value).padStart(2, '0');
-}
+/** Can a file be taken in right now — by paste or by drop? The paperclip's own conditions. */
+const canAdopt = computed(() => thread.value.can_post && !posting.value && !attachBlocked.value);
 
 /**
- * Ctrl/⌘ + V of an image attaches it, the way Telegram does. A text paste is left alone. A
- * clipboard image arrives as `image.png` (or nameless), so it is renamed to when it was pasted.
+ * Brief 013: Ctrl/⌘ + V of an image attaches it, the way Telegram does. Bound once, on the
+ * composer FORM in the capturing phase, so both composer variants share it whichever control in
+ * the form has focus. The image comes from `clipboardData.items` (what a screenshot or a copied
+ * picture puts there), else `clipboardData.files[0]`; it is renamed to when it was pasted and
+ * goes through `adoptFile()`, so it shows the same preview a picked file does. A text-only
+ * clipboard is left entirely alone — no `preventDefault()`, so the text lands in the field.
  */
 function onPaste(event: ClipboardEvent): void {
-    const image = Array.from(event.clipboardData?.files ?? []).find((file) => file.type.startsWith('image/'));
+    if (!canAdopt.value) {
+        return;
+    }
 
-    if (image === undefined || posting.value || attachBlocked.value) {
+    const image = clipboardImage(event.clipboardData);
+
+    if (image === null) {
         return;
     }
 
     event.preventDefault();
 
     const at = new Date();
-    const stamp = `${at.getFullYear()}${pad2(at.getMonth() + 1)}${pad2(at.getDate())}-${pad2(at.getHours())}${pad2(at.getMinutes())}${pad2(at.getSeconds())}`;
-    const ext = (image.type.split('/')[1] ?? 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'png';
+    const type = image.type !== '' ? image.type : 'image/png';
 
-    adoptFile(new File([image], `pasted-${stamp}.${ext}`, { type: image.type, lastModified: at.getTime() }));
+    adoptFile(new File([image], pastedFileName(type, at), { type, lastModified: at.getTime() }));
+}
+
+/**
+ * A paste anywhere else in the thread panel — the list, a button, the panel itself. One inside
+ * the form was already handled by the form's own listener above, so it is not read twice.
+ */
+function onPanelPaste(event: ClipboardEvent): void {
+    const target = event.target as Node | null;
+
+    if (event.defaultPrevented || (target !== null && composerEl.value?.contains(target))) {
+        return;
+    }
+
+    onPaste(event);
+}
+
+/* ------------------------------------------------------------------ drag and drop (brief 013) */
+
+/** The "Drop to attach" overlay is up. */
+const dragging = ref(false);
+/** `dragenter`/`dragleave` fire for every child crossed; the depth keeps the overlay steady. */
+let dragDepth = 0;
+
+function carriesFiles(event: DragEvent): boolean {
+    return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+function onDragEnter(event: DragEvent): void {
+    if (!carriesFiles(event) || !canAdopt.value) {
+        return;
+    }
+
+    event.preventDefault();
+    dragDepth += 1;
+    dragging.value = true;
+}
+
+function onDragOver(event: DragEvent): void {
+    if (!carriesFiles(event) || !canAdopt.value) {
+        return;
+    }
+
+    event.preventDefault();
+
+    if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'copy';
+    }
+
+    dragging.value = true;
+}
+
+function onDragLeave(event: DragEvent): void {
+    if (!dragging.value || !carriesFiles(event)) {
+        return;
+    }
+
+    dragDepth = Math.max(0, dragDepth - 1);
+
+    if (dragDepth === 0) {
+        dragging.value = false;
+    }
+}
+
+function onDrop(event: DragEvent): void {
+    dragDepth = 0;
+    dragging.value = false;
+
+    if (!carriesFiles(event) || !canAdopt.value) {
+        return;
+    }
+
+    event.preventDefault();
+
+    const file = event.dataTransfer?.files?.[0] ?? null;
+
+    if (file !== null) {
+        adoptFile(file);
+    }
 }
 
 // A clip discarded or re-recorded is not the one that failed.
@@ -560,6 +649,120 @@ function insertEmoji(emoji: string): void {
         grow();
     });
 }
+
+/* ------------------------------------------------------------------ replying (brief 013) */
+
+/** The viewer's name, for quoting their own message before the server has. */
+const viewerName = computed(
+    () => (page.props.auth as { user?: { name?: string } | null } | undefined)?.user?.name ?? null,
+);
+
+/** The composer's quote: the message being answered, in the shape the server will send back. */
+const replyQuote = computed<ThreadReplyTo | null>(() =>
+    replyingTo.value === null ? null : replyReference(replyingTo.value, viewerName.value),
+);
+
+/** Reply was chosen on a message: quote it above the composer and put the caret in the field. */
+function startReply(message: ThreadMessage): void {
+    if (!thread.value.can_post || message.id < 1 || message.is_deleted) {
+        return;
+    }
+
+    replyingTo.value = message;
+
+    void nextTick(() => {
+        const el = field();
+
+        el?.focus();
+        el?.setSelectionRange?.(body.value.length, body.value.length);
+    });
+}
+
+function cancelReply(): void {
+    replyingTo.value = null;
+    void nextTick(() => field()?.focus());
+}
+
+/** Esc in an empty composer drops the reply; with text in it, Esc does nothing here. */
+function onComposerEscape(event: KeyboardEvent): void {
+    if (replyingTo.value === null || body.value !== '') {
+        return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    cancelReply();
+}
+
+/** The message a quote points at was highlighted, for ~1.5 s. */
+const highlightedId = ref<number | null>(null);
+let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+/** How many older pages a jump may load looking for the original. */
+const JUMP_MAX_PAGES = 5;
+let jumping = false;
+
+function rowFor(id: number): HTMLElement | null {
+    return listEl.value?.querySelector<HTMLElement>(`[data-message-id="${id}"]`) ?? null;
+}
+
+/**
+ * A quote was clicked: scroll its original into view and highlight it. Not loaded yet, so
+ * "Load earlier messages" is pressed for the reader, up to five pages; still not there, a toast
+ * says so.
+ */
+async function jumpTo(id: number): Promise<void> {
+    if (jumping) {
+        return;
+    }
+
+    jumping = true;
+
+    try {
+        let row = rowFor(id);
+        let pages = 0;
+
+        while (row === null && pages < JUMP_MAX_PAGES && thread.value.has_more) {
+            const oldest = thread.value.messages.find((message) => message.id > 0)?.id ?? null;
+
+            if (oldest === null) {
+                break;
+            }
+
+            pages += 1;
+            await load(oldest);
+            await nextTick();
+            row = rowFor(id);
+        }
+
+        if (row === null) {
+            toast.info('That message is too far back.');
+
+            return;
+        }
+
+        pinned = false;
+        viewingStreak = false;
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+
+        if (highlightTimer !== null) {
+            clearTimeout(highlightTimer);
+        }
+
+        highlightedId.value = id;
+        highlightTimer = setTimeout(() => {
+            highlightedId.value = null;
+            highlightTimer = null;
+        }, 1500);
+    } finally {
+        jumping = false;
+    }
+}
+
+onBeforeUnmount(() => {
+    if (highlightTimer !== null) {
+        clearTimeout(highlightTimer);
+    }
+});
 
 /**
  * Enter sends; Shift + Enter is a newline.
@@ -1300,10 +1503,11 @@ function post(): void {
     const clip = voiceClip.value;
     const carrying: Outgoing['carrying'] = clip !== null ? 'voice' : file !== null ? 'file' : null;
     const text = body.value;
+    const replyTo = replyingTo.value;
 
     // Nothing at all: let the server say its own sentence, as before, but without a ghost row.
     if (carrying === null && text.trim() === '') {
-        void send({ tempId: null, text, people: [...mentions.picked.value], named: mentions.ids(), carrying, file, clip });
+        void send({ tempId: null, text, people: [...mentions.picked.value], named: mentions.ids(), carrying, file, clip, replyTo });
 
         return;
     }
@@ -1316,6 +1520,7 @@ function post(): void {
         carrying,
         file,
         clip,
+        replyTo,
     };
 
     appendLocal(optimistic(outgoing));
@@ -1339,6 +1544,8 @@ interface Outgoing {
     carrying: 'voice' | 'file' | null;
     file: File | null;
     clip: VoiceClip | null;
+    /** Brief 013: the message this one answers (`reply_to_id`), or `null`. */
+    replyTo: ThreadMessage | null;
 }
 
 /** Negative, so a local row can never collide with a server id. */
@@ -1364,6 +1571,7 @@ function optimistic(outgoing: Outgoing): ThreadMessage {
         can_delete: false,
         reactions: [],
         seen: null,
+        reply_to: outgoing.replyTo === null ? null : replyReference(outgoing.replyTo, viewerName.value),
         pending: true,
     };
 }
@@ -1434,6 +1642,10 @@ async function send(outgoing: Outgoing): Promise<void> {
 
     data.append('body', outgoing.text);
     outgoing.named.forEach((id, index) => data.append(`mentions[${index}]`, String(id)));
+
+    if (outgoing.replyTo !== null) {
+        data.append('reply_to_id', String(outgoing.replyTo.id));
+    }
 
     // A recording wins only because the two cannot both exist: `micBlocked` and `attachBlocked`
     // are what make that true, and this order is the safety net rather than the rule.
@@ -1534,6 +1746,11 @@ async function send(outgoing: Outgoing): Promise<void> {
 
         if (result.status === 413) {
             serverError.value = TOO_LARGE_TEXT;
+        } else if (result.status === 422 && replyRefusal(result.json) !== null) {
+            // The original went (deleted, or not in this conversation): say so, drop the quote.
+            serverError.value = replyRefusal(result.json);
+            outgoing.replyTo = null;
+            replyingTo.value = null;
         } else if (result.status === 422) {
             serverError.value = refusalText(result.json);
         } else if (result.status >= 500 && carrying !== null) {
@@ -1565,13 +1782,22 @@ async function send(outgoing: Outgoing): Promise<void> {
     }
 }
 
-/** A refused text-only send: its words (and who it named) go back into an empty composer. */
+/** The 422 sentence about `reply_to_id`, when that is what was refused. */
+function replyRefusal(json: unknown): string | null {
+    const value = (json as { errors?: Record<string, unknown> } | null)?.errors?.reply_to_id;
+    const text = Array.isArray(value) ? value[0] : value;
+
+    return typeof text === 'string' && text !== '' ? text : null;
+}
+
+/** A refused text-only send: its words, who it named and what it answered go back into an empty composer. */
 function restoreText(outgoing: Outgoing): void {
     if (outgoing.carrying !== null || body.value.trim() !== '' || outgoing.text.trim() === '') {
         return;
     }
 
     body.value = outgoing.text;
+    replyingTo.value = outgoing.replyTo;
     outgoing.people.forEach((person) => {
         if (!mentions.picked.value.some((held) => held.id === person.id)) {
             mentions.picked.value = [...mentions.picked.value, person];
@@ -1594,9 +1820,29 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 // ceiling so the thread cannot become the whole page. A parent with a definite
                 // height (the Messages page) lifts it with `lg:max-h-none` from outside.
                 scroll && 'max-h-[min(68svh,40rem)]',
+                // The drop overlay is placed against this panel — except when the composer is
+                // pinned, which positions itself against the drawer and must keep doing so.
+                !composerPinned && 'relative',
             )
         "
+        data-testid="message-thread"
+        @paste="onPanelPaste"
+        @dragenter="onDragEnter"
+        @dragover="onDragOver"
+        @dragleave="onDragLeave"
+        @drop="onDrop"
     >
+        <!-- Brief 013: a file dragged over the thread. Nothing at all where it cannot be taken. -->
+        <div
+            v-if="dragging"
+            class="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-primary bg-background/80 text-sm font-medium text-foreground"
+            data-testid="drop-overlay"
+            aria-hidden="true"
+        >
+            <ImagePlus class="size-8 text-primary" aria-hidden="true" />
+            Drop to attach
+        </div>
+
         <div v-if="heading !== null" class="flex min-w-0 flex-wrap items-start justify-between gap-2">
             <div class="min-w-0">
                 <h2 class="text-sm font-medium break-words">{{ heading }}</h2>
@@ -1748,16 +1994,27 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                             <span class="h-px flex-1 bg-primary" aria-hidden="true" />
                         </li>
 
-                        <li class="min-w-0">
+                        <li
+                            :class="
+                                cn(
+                                    'min-w-0 rounded-md transition-colors duration-700 motion-reduce:transition-none',
+                                    highlightedId === entry.message.id && 'bg-primary/10',
+                                )
+                            "
+                            :data-message-id="entry.message.id"
+                        >
                             <MessageRow
                                 :message="entry.message"
                                 :starts-run="entry.startsRun"
                                 :links-stale="linksStale"
                                 :layout="layout"
                                 :conversation-id="thread.conversation_id"
+                                :can-reply="thread.can_post"
                                 @announce="actionStatus = $event"
                                 @retry="retry(entry.message.id)"
                                 @replace="replaceMessage"
+                                @reply="startReply"
+                                @jump="jumpTo"
                             />
                         </li>
                     </template>
@@ -1800,6 +2057,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 :data-composer-pinned="composerPinned || undefined"
                 novalidate
                 @submit.prevent="post"
+                @paste.capture="onPaste"
             >
                 <Label :for="bodyId" class="sr-only">
                     {{ isAnnouncements ? 'Write an announcement' : 'Write a message' }}
@@ -1815,9 +2073,8 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     :id="pickerId"
                     ref="pickerEl"
                     type="file"
-                    :accept="FILE_ACCEPT"
+                    :accept="MESSAGE_FILE_ACCEPT"
                     :disabled="posting || attachBlocked"
-                    :aria-describedby="hintId"
                     class="sr-only"
                     @change="choose"
                 >
@@ -1903,6 +2160,15 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     tooltip, Send the one `--primary` disc. No placeholder: the caret shows focus,
                     and (decision 12-72) the pill paints no focus border.
                 -->
+                <!-- Brief 013: what this message answers, until it is sent or cancelled. -->
+                <ReplyQuote
+                    v-if="replyQuote"
+                    :reply="replyQuote"
+                    variant="composer"
+                    :viewer-id="userId"
+                    @cancel="cancelReply"
+                />
+
                 <div
                     v-if="composerPinned"
                     data-testid="composer-pill"
@@ -1944,13 +2210,13 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         ref="bodyEl"
                         v-model="body"
                         :disabled="posting"
-                        :aria-describedby="fieldError ? `${errorId} ${hintId}` : hintId"
+                        :aria-describedby="fieldError ? errorId : undefined"
                         :aria-invalid="fieldError ? true : undefined"
                         rows="1"
                         class="max-h-29 min-h-8 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-1.5 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
                         @input="grow"
                         @keydown.enter="onEnter"
-                        @paste="onPaste"
+                        @keydown.esc="onComposerEscape"
                     />
 
                     <EmojiPicker :disabled="posting" @pick="insertEmoji" />
@@ -2037,14 +2303,14 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                             ref="bodyEl"
                             v-model="body"
                             :disabled="posting"
-                            :aria-describedby="fieldError ? `${errorId} ${hintId}` : hintId"
+                            :aria-describedby="fieldError ? errorId : undefined"
                             :aria-invalid="fieldError ? true : undefined"
                             rows="1"
                             :placeholder="(placeholder ?? (isAnnouncements ? 'Tell everybody.' : 'Say something.')) || undefined"
                             class="max-h-40 min-h-9 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-2 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
                             @input="grow"
                             @keydown.enter="onEnter"
-                            @paste="onPaste"
+                            @keydown.esc="onComposerEscape"
                         />
 
                         <!--
@@ -2084,31 +2350,6 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     </Button>
                 </div>
 
-                <!--
-                    The shortcut is stated rather than discovered — shorter since the pill, but
-                    still said out loud: Enter sending applies to the task discussion too.
-                -->
-                <!--
-                    Brief 016: pinned, the line is still the field's description for a screen
-                    reader, and off screen; the count alone comes back near the limit.
-                -->
-                <p
-                    v-if="composerPinned && remaining < COUNT_SHOWN_BELOW"
-                    class="-mt-1 min-w-0 px-3 text-right text-xs text-muted-foreground"
-                    aria-hidden="true"
-                    data-composer-count
-                >
-                    <span :class="remaining < 0 ? 'text-destructive' : undefined">
-                        <span class="tabular-nums">{{ remaining }}</span> characters left
-                    </span>
-                </p>
-                <p :id="hintId" :class="composerPinned ? 'sr-only' : 'min-w-0 text-xs text-muted-foreground'">
-                    Enter sends · Shift + Enter for a new line · up to {{ FILE_MAX_LABEL }} per file ·
-                    voice up to {{ VOICE_MAX_LABEL }} ·
-                    <span :class="remaining < 0 ? 'text-destructive' : undefined">
-                        <span class="tabular-nums">{{ remaining }}</span> characters left
-                    </span>
-                </p>
             </form>
         </template>
     </div>

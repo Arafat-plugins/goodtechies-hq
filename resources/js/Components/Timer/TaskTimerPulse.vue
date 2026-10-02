@@ -75,8 +75,10 @@ function anotherTabAlive(): boolean {
 </script>
 
 <script setup lang="ts">
-import { usePage } from '@inertiajs/vue3';
+import { router, usePage } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, watch } from 'vue';
+import ClockOutOnLeaveDialog from '@/Components/Attendance/ClockOutOnLeaveDialog.vue';
+import { clockedIn, leaveAllowed, openClockOutDialog, syncClockFromPage } from '@/Components/Attendance/clockState';
 import { beatTaskTimer, taskTimerRoutes, useTaskTimer } from '@/Components/Timer/taskTimer';
 import { remoteTimerRunning, timerRoutes } from '@/Components/Timer/timer';
 
@@ -138,6 +140,17 @@ watch(() => actions.pulseWanted.value, sync);
 const taskTimerOpen = computed(() => eligible.value && actions.pulseWanted.value);
 const anyRunning = computed(() => taskTimerOpen.value || remoteTimerRunning.value);
 
+/**
+ * Decision 12-84: somebody clocked in is asked too. The native prompt is all a closing tab may
+ * show; if they choose to stay, `ClockOutOnLeaveDialog` asks whether to clock out as well. If they
+ * leave, they stay clocked in — nothing about the clock is ever sent on the way out.
+ * "Leave Without Clocking Out" stands the clock half down for this page view.
+ */
+const askAboutClock = computed(() => clockedIn.value && !leaveAllowed.value);
+const guardActive = computed(() => anyRunning.value || askAboutClock.value);
+
+syncClockFromPage(page);
+
 /** The session's CSRF token as a form field: a csrf meta if the page has one, else the XSRF cookie. */
 function formToken(): string {
     const meta = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content;
@@ -152,12 +165,17 @@ function formToken(): string {
 }
 
 function onBeforeUnload(event: BeforeUnloadEvent): void {
-    if (!anyRunning.value) {
+    if (!guardActive.value) {
         return;
     }
 
     event.preventDefault();
     event.returnValue = '';
+
+    if (askAboutClock.value) {
+        // Runs only if the page survived the prompt — the person chose to stay.
+        setTimeout(() => openClockOutDialog(), 0);
+    }
 }
 
 function onPageHide(): void {
@@ -201,9 +219,22 @@ function guard(running: boolean): void {
     }
 }
 
-watch(anyRunning, guard, { immediate: true });
+watch(guardActive, guard, { immediate: true });
+
+let lastPath = typeof window === 'undefined' ? '' : window.location.pathname;
+
+const stopSyncing = router.on('success', (event) => {
+    syncClockFromPage(event.detail.page);
+
+    // A new page view: "Leave Without Clocking Out" applied only to the one before.
+    if (window.location.pathname !== lastPath) {
+        lastPath = window.location.pathname;
+        leaveAllowed.value = false;
+    }
+});
 
 onUnmounted(() => {
+    stopSyncing();
     guard(false);
     closeTabChannel();
 });
@@ -229,4 +260,5 @@ onMounted(async () => {
 
 <template>
     <span hidden aria-hidden="true" />
+    <ClockOutOnLeaveDialog />
 </template>

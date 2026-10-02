@@ -45,14 +45,14 @@ it('casts client and project enums to enum instances', function () {
     $client = Client::factory()->create(['status' => ClientStatus::Inactive]);
     $project = Project::factory()->for($client)->create([
         'project_type' => ProjectType::Seo,
-        'billing_type' => BillingType::MonthlyRecurring,
+        'billing_type' => BillingType::Recurring,
         'status' => ProjectStatus::OnHold,
         'priority' => Priority::High,
     ]);
 
     expect($client->status)->toBe(ClientStatus::Inactive)
         ->and($project->project_type)->toBe(ProjectType::Seo)
-        ->and($project->billing_type)->toBe(BillingType::MonthlyRecurring)
+        ->and($project->billing_type)->toBe(BillingType::Recurring)
         ->and($project->status)->toBe(ProjectStatus::OnHold)
         ->and($project->priority)->toBe(Priority::High);
 })->group('phase1');

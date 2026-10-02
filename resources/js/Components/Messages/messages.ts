@@ -54,10 +54,78 @@ export interface ThreadMessage {
     reactions: MessageReaction[];
     /** A DM's tick: did the other person read it? `null` where it does not apply. */
     seen: boolean | null;
+    /** Brief 013: the message this one answers, as `MessageResource::replyTo()` quotes it. */
+    reply_to: ThreadReplyTo | null;
     /** Local only: an optimistic send still waiting for its answer. */
     pending?: boolean;
     /** Local only: an optimistic send that got no answer — tap to retry. */
     failed?: boolean;
+}
+
+/**
+ * The quoted original of a reply: who wrote it, what kind it is, and a short excerpt (the first
+ * 120 characters of its text, or "Voice message" / "Photo" / the file name; "" once deleted).
+ */
+export interface ThreadReplyTo {
+    id: number;
+    author: { id: number; name: string } | null;
+    excerpt: string;
+    kind: 'text' | 'voice' | 'image' | 'file';
+    is_deleted: boolean;
+}
+
+/**
+ * The same quote, built here from a message already on screen — what an optimistic reply carries
+ * until the server's own `reply_to` replaces it. Mirrors `MessageResource::replyTo()`.
+ */
+export function replyReference(message: ThreadMessage, viewerName: string | null = null): ThreadReplyTo {
+    const deleted = message.is_deleted === true;
+    const attachment = deleted ? undefined : message.attachments[0];
+    const kind: ThreadReplyTo['kind'] =
+        attachment === undefined
+            ? 'text'
+            : attachment.kind === 'voice'
+              ? 'voice'
+              : attachment.kind === 'image'
+                ? 'image'
+                : 'file';
+    const body = (message.body ?? '').trim();
+    let excerpt = '';
+
+    if (!deleted) {
+        if (body !== '') {
+            excerpt = Array.from(body).slice(0, 120).join('');
+        } else if (kind === 'voice') {
+            excerpt = 'Voice message';
+        } else if (kind === 'image') {
+            excerpt = 'Photo';
+        } else if (kind === 'file') {
+            excerpt = attachment?.name ?? '';
+        }
+    }
+
+    const name = message.author?.name ?? (message.is_mine ? viewerName : null);
+
+    return {
+        id: message.id,
+        author: message.author === null ? null : { id: message.author.id, name: name ?? '' },
+        excerpt,
+        kind,
+        is_deleted: deleted,
+    };
+}
+
+/** What a quote says on one line: the excerpt, or the kind in words when there is no text. */
+export function replyExcerpt(reply: ThreadReplyTo): string {
+    if (reply.is_deleted) {
+        return 'Deleted message';
+    }
+
+    if (reply.excerpt !== '') {
+        return reply.excerpt;
+    }
+
+    return reply.kind === 'voice' ? 'Voice message' : reply.kind === 'image' ? 'Photo' : 'Message';
 }
 
 export interface MessageReaction {
@@ -171,13 +239,103 @@ export interface AnnouncementBanner {
 }
 
 /**
- * `StoreMessageRequest::MAX_BODY`, restated so a composer can count down to it.
- *
- * A counter, not a second rule: the field is not capped at this and the submit is not blocked
- * by it. The server owns the refusal and says it in its own words, the same way the file limits
- * in `Files/files.ts` are a courtesy in front of `FileService`.
+ * `StoreMessageRequest::MAX_BODY` (20 000 since brief 012), restated for the edit field's
+ * `maxlength`. The composer neither counts down to it nor caps at it: the server owns the
+ * refusal and says it in its own words.
  */
-export const MESSAGE_MAX_BODY = 4000;
+export const MESSAGE_MAX_BODY = 20000;
+
+/* -------------------------------------------------------------------- attachments */
+
+/**
+ * What a MESSAGE attachment may be: `FileService::TYPES` plus `MESSAGE_EXTRA_TYPES` (12-82 —
+ * svg, mp3, mp4, apk; zip was already allowed). The task / project / client Files panels keep
+ * the shorter list in `Files/files.ts`. There is no size limit on a message attachment in the
+ * application, so none is checked here.
+ */
+export const MESSAGE_FILE_EXTENSIONS = [
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'webp',
+    'pdf',
+    'doc',
+    'docx',
+    'xls',
+    'xlsx',
+    'ppt',
+    'pptx',
+    'csv',
+    'txt',
+    'md',
+    'zip',
+    'svg',
+    'mp3',
+    'mp4',
+    'apk',
+] as const;
+
+/** The composer's `accept` attribute. */
+export const MESSAGE_FILE_ACCEPT = MESSAGE_FILE_EXTENSIONS.map((extension) => `.${extension}`).join(',');
+
+/** Why the server would refuse this file's TYPE, in its words — or null to send it. */
+export function messageFileRejection(file: { name: string }): string | null {
+    const extension = file.name.includes('.')
+        ? file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase()
+        : '';
+
+    if (!(MESSAGE_FILE_EXTENSIONS as readonly string[]).includes(extension)) {
+        return `${extension === '' ? 'Extensionless' : extension.toUpperCase()} files are not accepted. `
+            + `Allowed: ${MESSAGE_FILE_EXTENSIONS.join(', ')}.`;
+    }
+
+    return null;
+}
+
+function pad2(value: number): string {
+    return String(value).padStart(2, '0');
+}
+
+/**
+ * A pasted image's name: `pasted-<yyyyMMdd-HHmmss>.<ext>` from its MIME type (`png` when the
+ * type says nothing usable). A clipboard image arrives as `image.png` or nameless.
+ */
+export function pastedFileName(type: string, at: Date): string {
+    const stamp = `${at.getFullYear()}${pad2(at.getMonth() + 1)}${pad2(at.getDate())}-${pad2(at.getHours())}${pad2(at.getMinutes())}${pad2(at.getSeconds())}`;
+    const subtype = type.startsWith('image/') ? (type.slice(6).split(/[+;]/)[0] ?? '') : '';
+    const ext = subtype.replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'png';
+
+    return `pasted-${stamp}.${ext}`;
+}
+
+/** The parts of `DataTransfer` the paste reader looks at, so it can be tested without a DOM. */
+export interface ClipboardLike {
+    items?: ArrayLike<{ kind: string; type: string; getAsFile(): File | null }> | null;
+    files?: ArrayLike<File> | null;
+}
+
+/**
+ * The image on a clipboard: the first `items` entry of kind `file` with an `image/*` type, else
+ * `files[0]` (the composer's type check then speaks for it). `null` for a text-only clipboard.
+ */
+export function clipboardImage(data: ClipboardLike | null | undefined): File | null {
+    if (data === null || data === undefined) {
+        return null;
+    }
+
+    for (const item of Array.from(data.items ?? [])) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+
+            if (file !== null) {
+                return file;
+            }
+        }
+    }
+
+    return data.files?.[0] ?? null;
+}
 
 /** The order the plan draws the rail in: Team, Announcements, Projects, Groups, Direct. */
 export const CONVERSATION_GROUPS = ['Team', 'Announcements', 'Projects', 'Groups', 'Direct'] as const;

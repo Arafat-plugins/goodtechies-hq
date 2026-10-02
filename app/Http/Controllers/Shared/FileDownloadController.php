@@ -42,12 +42,29 @@ class FileDownloadController extends Controller
         );
 
         try {
-            return $this->files->download($file);
+            $response = $this->files->download($file);
         } catch (FileStateException) {
             // The row says there are bytes and the disk disagrees. That is a 404 about the
             // file, not a 500 about us — and it is what a download of a row whose blob was
             // already removed looks like.
             abort(404);
         }
+
+        // An SVG is an XML document that could carry script (12-82). It was refused at upload if
+        // it did; this is the second wall: no script source, no network, a sandboxed origin, no
+        // sniffing — and served as exactly what it is.
+        if (self::isSvg($file)) {
+            $response->headers->set('Content-Type', 'image/svg+xml');
+            $response->headers->set('Content-Security-Policy', "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox");
+            $response->headers->set('X-Content-Type-Options', 'nosniff');
+        }
+
+        return $response;
+    }
+
+    private static function isSvg(File $file): bool
+    {
+        return strtolower((string) $file->mime_type) === 'image/svg+xml'
+            || strtolower((string) $file->extension) === 'svg';
     }
 }

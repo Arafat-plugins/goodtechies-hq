@@ -4,6 +4,7 @@ import { CircleAlert, LogIn, LogOut, RotateCw } from '@lucide/vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { AttendanceDay } from '@/Components/Attendance/attendance';
 import { attendanceRoutes, formatMinutes, noStatusLabel } from '@/Components/Attendance/attendance';
+import { setClockedIn } from '@/Components/Attendance/clockState';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
@@ -150,8 +151,11 @@ function clock(url: string): void {
             ...inlineUploadFailure(() => {
                 failed.value = { url, text };
             }),
-            onSuccess: () => {
+            onSuccess: (page) => {
                 failed.value = null;
+                // The tab-close guard's state (decision 12-84). A refused write comes back as a
+                // flash error with the state unchanged, so the server's own answer wins.
+                setClockedIn(page.props.clock?.clocked_in ?? url === attendanceRoutes.clockIn);
             },
             onFinish: () => {
                 busy.value = false;

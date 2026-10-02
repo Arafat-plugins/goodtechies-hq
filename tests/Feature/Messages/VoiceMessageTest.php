@@ -345,7 +345,7 @@ it('refuses a duration sent without kind=voice', function () {
         ->toBe('A length belongs to a voice note. Leave it off an ordinary attachment.');
 });
 
-it('refuses a recording over the twenty-five megabyte limit', function () {
+it('takes a recording over twenty-five megabytes: messages have no application size cap (12-82)', function () {
     $this->actingAs($this->tapu)
         ->from(VOICE_MESSAGE_URL)
         ->post(voice_message_path($this->team->id), [
@@ -355,9 +355,7 @@ it('refuses a recording over the twenty-five megabyte limit', function () {
             'kind' => 'voice',
             'duration' => 60,
         ])
-        ->assertSessionHasErrors('file');
-
-    expect(session('errors')->first('file'))->toContain('25 MB');
+        ->assertSessionHasNoErrors();
 });
 
 /*

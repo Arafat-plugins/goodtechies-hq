@@ -1,5 +1,4 @@
 import { ref, type Ref } from 'vue';
-import { FILE_MAX_BYTES, FILE_MAX_LABEL } from '@/Components/Files/files';
 
 /**
  * Recording a voice message: the browser APIs, kept out of the component.
@@ -32,11 +31,6 @@ import { FILE_MAX_BYTES, FILE_MAX_LABEL } from '@/Components/Files/files';
 export const VOICE_MAX_SECONDS = 300;
 
 export const VOICE_MAX_LABEL = '5 minutes';
-
-/** The same 25 MB the file pipeline enforces; a voice note reuses it rather than inventing one. */
-export const VOICE_MAX_BYTES = FILE_MAX_BYTES;
-
-export const VOICE_MAX_SIZE_LABEL = FILE_MAX_LABEL;
 
 export interface VoiceContainer {
     /** What `MediaRecorder` is asked for. */
@@ -535,14 +529,6 @@ export function useVoiceRecorder(): VoiceRecorderHandle {
 
             if (blob.size === 0) {
                 error.value = 'Nothing was recorded.';
-                state.value = 'idle';
-                seconds.value = 0;
-
-                return;
-            }
-
-            if (blob.size > VOICE_MAX_BYTES) {
-                error.value = `That recording is larger than the ${VOICE_MAX_SIZE_LABEL} limit.`;
                 state.value = 'idle';
                 seconds.value = 0;
 

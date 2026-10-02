@@ -132,9 +132,9 @@ it('answers each heavy surface within its ceiling', function (string $actor, str
     'Tasks board (admin)' => ['perfAdmin', '/admin/tasks/board', 32],          // 22 (was 57)
     'Tasks calendar (admin)' => ['perfAdmin', '/admin/tasks/calendar', 34],    // 23 (was 49)
     'Tasks Gantt (admin)' => ['perfAdmin', '/admin/tasks/gantt', 35],          // 24 (was 49)
-    'Tasks list (employee)' => ['perfYaseen', '/employee/tasks', 55],          // 40 (was 51)
-    'Tasks board (employee)' => ['perfYaseen', '/employee/tasks/board', 55],   // 40 (was 51)
-    'Tasks Gantt (employee)' => ['perfYaseen', '/employee/tasks/gantt', 55],   // 40 (was 50)
+    'Tasks list (employee)' => ['perfYaseen', '/employee/tasks', 56],          // 40 (was 51); +1 shared `clock` prop (12-84)
+    'Tasks board (employee)' => ['perfYaseen', '/employee/tasks/board', 56],   // 40 (was 51); +1 `clock` (12-84)
+    'Tasks Gantt (employee)' => ['perfYaseen', '/employee/tasks/gantt', 56],   // 40 (was 50); +1 `clock` (12-84)
     'My tasks (admin)' => ['perfAdmin', '/admin/tasks?scope=mine&bucket=open', 34], // was /admin/my-tasks, now a 302 here
     'Admin dashboard' => ['perfAdmin', '/admin/dashboard', 95],                // 64
     'Employee dashboard' => ['perfYaseen', '/employee/dashboard', 40],         // 22
@@ -143,7 +143,7 @@ it('answers each heavy surface within its ceiling', function (string $actor, str
     'Employees list' => ['perfAdmin', '/admin/employees', 20],                 // 9
     'Users & roles view' => ['perfAdmin', '/admin/employees?view=access', 20], // 9
     'Workload' => ['perfAdmin', '/admin/workload', 40],                        // 23
-    'Reports catalogue' => ['perfAdmin', '/admin/reports', 10],                // 3
+    'Reports catalogue' => ['perfAdmin', '/admin/reports', 11],                // 3; +1 `clock` (12-84)
     'Global search' => ['perfAdmin', '/search?q=seo', 25],                     // 16
 ]);
 

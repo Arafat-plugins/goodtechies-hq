@@ -140,6 +140,8 @@ it('sends exactly the documented thread keys', function () {
             'id', 'body', 'author', 'is_mine', 'created_at', 'attachments',
             'mentions', 'mentions_me',
             'edited_at', 'is_deleted', 'can_edit', 'can_delete', 'reactions', 'seen',
+            // 12-82: the quoted original of a reply (null here).
+            'reply_to',
         ])
         // The picker's options never include the reader themselves, and never the Accountant.
         ->and(array_column($payload['mentionable'], 'id'))

@@ -13,6 +13,7 @@ use App\Services\ProjectService;
 use App\Support\BillingType;
 use App\Support\NotificationType;
 use App\Support\Priority;
+use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
 use App\Support\ProjectType;
 use App\Support\RoleName;
@@ -61,7 +62,9 @@ function projectAttributes(Client $client): array
         'name' => 'Acme SEO',
         'domain' => 'acme.test',
         'project_type' => ProjectType::Seo,
-        'billing_type' => BillingType::MonthlyRecurring,
+        'billing_type' => BillingType::Recurring,
+        'recurrence_frequency' => ProjectRecurrenceFrequency::Monthly,
+        'start_date' => '2026-10-05',
         'status' => ProjectStatus::Active,
         'priority' => Priority::High,
     ];

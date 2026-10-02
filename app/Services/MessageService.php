@@ -229,6 +229,9 @@ class MessageService
      *                              `voiceSeconds()` below clamps whatever survives, so no caller
      *                              — job, command or test — can write a row that says a bubble
      *                              is nine thousand seconds long
+     * @param  int|null  $replyToId  the message this one replies to (12-82): it must exist, be in
+     *                               THIS conversation and not be deleted, or a ValidationException
+     *                               on `reply_to_id`
      *
      * @throws AuthorizationException
      * @throws ConversationStateException
@@ -242,6 +245,7 @@ class MessageService
         array $mentionIds = [],
         ?AttachmentKind $kind = null,
         ?int $duration = null,
+        ?int $replyToId = null,
     ): Message {
         if (! Gate::forUser($actor)->allows('post', $conversation)) {
             throw new AuthorizationException('You are not allowed to post in this discussion.');
@@ -261,7 +265,11 @@ class MessageService
         // FileService::VOICE_TYPES and an ordinary attachment against FileService::TYPES, which
         // has no audio in it and gains none. See VOICE_TYPES for why that is two lists.
         if ($upload !== null) {
-            FileService::assertAcceptable($upload, $kind);
+            FileService::assertAcceptable($upload, $kind, forMessage: true);
+        }
+
+        if ($replyToId !== null) {
+            $this->assertRepliable($conversation, $replyToId);
         }
 
         $mentioned = $this->resolveMentions($conversation, $actor, $body, $mentionIds);
@@ -274,11 +282,13 @@ class MessageService
             $mentioned,
             $kind,
             $duration,
+            $replyToId,
         ): Message {
             $message = Message::create([
                 'conversation_id' => $conversation->getKey(),
                 'author_id' => $actor->getKey(),
                 'body' => $body,
+                'reply_to_id' => $replyToId,
             ]);
 
             if ($upload !== null) {
@@ -322,6 +332,27 @@ class MessageService
 
             return $message->load(ConversationService::MESSAGE_RELATIONS);
         });
+    }
+
+    /**
+     * A reply must answer a live message in the same conversation (12-82). One error for every
+     * way it can fail, so the answer never tells a caller which ids exist elsewhere.
+     *
+     * @throws ValidationException
+     */
+    private function assertRepliable(Conversation $conversation, int $replyToId): void
+    {
+        $ok = Message::query()
+            ->whereKey($replyToId)
+            ->where('conversation_id', $conversation->getKey())
+            ->whereNull('deleted_at')
+            ->exists();
+
+        if (! $ok) {
+            throw ValidationException::withMessages([
+                'reply_to_id' => 'You can only reply to a message in this conversation.',
+            ]);
+        }
     }
 
     /**

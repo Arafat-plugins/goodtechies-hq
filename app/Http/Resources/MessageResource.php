@@ -60,6 +60,11 @@ class MessageResource extends JsonResource
             'created_at' => UnreadLine::iso($this->created_at),
             'attachments' => $deleted ? [] : $this->attachments($request),
 
+            // 12-82: the message this one answers, as a one-line quote. Read from the eager
+            // `replyTo.author` / `replyTo.attachments` (ConversationService::MESSAGE_RELATIONS),
+            // so a thread of replies costs no extra query per message.
+            'reply_to' => $this->replyTo(),
+
             // Who this message named. The thread highlights them, and `mentions_me` is
             // resolved here for the same reason `is_mine` is: it is presentation, it depends on
             // who is asking, and a screen comparing ids to decide whether a line is addressed
@@ -214,6 +219,53 @@ class MessageResource extends JsonResource
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * The quoted original: who wrote it, what kind it is, and a short excerpt — the first 120
+     * characters of its text, or "Voice message" / "Photo" / the file name, or "" once deleted.
+     *
+     * @return array{id: int, author: array{id: int, name: string|null}|null, excerpt: string, kind: string, is_deleted: bool}|null
+     */
+    private function replyTo(): ?array
+    {
+        if ($this->reply_to_id === null) {
+            return null;
+        }
+
+        /** @var Message|null $original */
+        $original = $this->resource->replyTo;
+
+        if ($original === null) {
+            return null;
+        }
+
+        $deleted = $original->isDeleted();
+        $attachment = $deleted ? null : $original->attachments->first();
+        $kind = match ($attachment?->pivot?->kind) {
+            'voice' => 'voice',
+            'image' => 'image',
+            null => 'text',
+            default => 'file',
+        };
+        $body = trim((string) $original->body);
+
+        $excerpt = match (true) {
+            $deleted => '',
+            $body !== '' => mb_substr($body, 0, 120),
+            $kind === 'voice' => 'Voice message',
+            $kind === 'image' => 'Photo',
+            $kind === 'file' => (string) $attachment?->name,
+            default => '',
+        };
+
+        return [
+            'id' => (int) $original->getKey(),
+            'author' => $this->person($original->author),
+            'excerpt' => $excerpt,
+            'kind' => $kind,
+            'is_deleted' => $deleted,
+        ];
     }
 
     /**

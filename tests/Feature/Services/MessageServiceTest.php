@@ -338,7 +338,8 @@ it('gives a project its channel the moment it is created', function () {
         'client_id' => Project::query()->value('client_id'),
         'name' => 'A project born after Phase 6',
         'project_type' => $this->tapusProject->project_type,
-        'billing_type' => $this->tapusProject->billing_type,
+        // One-time, so the call needs no recurrence frequency or start date (12-83).
+        'billing_type' => \App\Support\BillingType::OneTime,
     ]);
 
     expect(Conversation::query()->forProject($project)->count())->toBe(1);

@@ -13,6 +13,7 @@ import { computed, ref } from 'vue';
 import { iconFor } from '@/Components/Files/files';
 import type { ThreadAttachment } from '@/Components/Messages/messages';
 import { formatDuration } from '@/Components/Messages/messages';
+import ImageLightbox from '@/Components/Messages/ImageLightbox.vue';
 import VoicePlayer from '@/Components/Messages/VoicePlayer.vue';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -65,6 +66,10 @@ const props = withDefaults(
 const rendersImage = computed(() => props.inline && !props.stale && props.file.kind === 'image');
 const rendersVoice = computed(() => props.inline && !props.stale && props.file.kind === 'voice');
 
+/** Brief 013: the image's lightbox, and the thumbnail focus returns to when it closes. */
+const lightboxOpen = ref(false);
+const thumbEl = ref<HTMLButtonElement | null>(null);
+
 /** Bumped when an image errors, so `imageUrl` reads the map again. */
 const imageEpoch = ref(0);
 
@@ -113,7 +118,7 @@ const meta = computed(() => {
         in the conversation the way a file sits in any chat, and the author line above stays
         the author line.
 
-        Only the card is a link. The image opens itself; a file card is ONE link (glyph, name,
+        Only the card is a link. The image opens a lightbox (brief 013); a file card is ONE link (glyph, name,
         size, the download arrow) that opens or downloads the file exactly as the old arrow did;
         a voice note is only its player (12-77: Telegram-style, no name, size or download row,
         no card around it). Nothing outside the card —
@@ -133,13 +138,16 @@ const meta = computed(() => {
             )
         "
     >
-        <a
+        <!-- Brief 013: the image opens in a lightbox on this page, never in a new tab. -->
+        <button
             v-if="rendersImage"
-            :href="file.url"
-            target="_blank"
-            rel="noopener noreferrer"
+            ref="thumbEl"
+            type="button"
             :aria-label="`Open ${file.name}`"
-            class="block w-fit max-w-full min-w-0 overflow-hidden rounded-md bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+            aria-haspopup="dialog"
+            class="block w-fit max-w-full min-w-0 cursor-zoom-in overflow-hidden rounded-md bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+            data-testid="attachment-image"
+            @click="lightboxOpen = true"
         >
             <img
                 :src="imageUrl"
@@ -148,8 +156,16 @@ const meta = computed(() => {
                 class="block h-auto max-h-64 w-auto max-w-full object-contain sm:max-w-xs"
                 @error="onImageError"
             >
-            <span class="sr-only">(opens in a new tab)</span>
-        </a>
+        </button>
+
+        <ImageLightbox
+            v-if="rendersImage"
+            v-model:open="lightboxOpen"
+            :src="imageUrl"
+            :name="file.name"
+            :href="file.url"
+            @closed="thumbEl?.focus()"
+        />
 
         <!--
             A voice note plays here rather than arriving as a download link nobody expected.

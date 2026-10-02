@@ -14,6 +14,7 @@ defineProps<{
     statuses: Option[];
     priorities: Option[];
     billingTypes: Option[];
+    recurrenceFrequencies: Option[];
     billingFrequencies: Option[];
 }>();
 </script>
@@ -29,6 +30,7 @@ defineProps<{
             :statuses="statuses"
             :priorities="priorities"
             :billing-types="billingTypes"
+            :recurrence-frequencies="recurrenceFrequencies"
             :billing-frequencies="billingFrequencies"
             submit-label="Create project"
         />

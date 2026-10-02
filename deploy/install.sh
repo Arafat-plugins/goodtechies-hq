@@ -435,10 +435,14 @@ fi
 apt_install "php$PHP_VERSION-fpm" "php$PHP_VERSION-cli" "php$PHP_VERSION-pgsql" "$PHP_REDIS_PACKAGE" \
     "php$PHP_VERSION-mbstring" "php$PHP_VERSION-xml" "php$PHP_VERSION-curl" "php$PHP_VERSION-zip" \
     "php$PHP_VERSION-intl" "php$PHP_VERSION-gd" "php$PHP_VERSION-bcmath"
-# Match nginx client_max_body_size.
+# Match nginx client_max_body_size (256M): messages have no application size cap (12-82), so
+# this is the transport limit. 256 MB keeps a 10 GB disk safe; post_max_size leaves room for the
+# multipart overhead and the other fields. Task/project/client files stay at 25 MB in the app.
 cat > "/etc/php/$PHP_VERSION/fpm/conf.d/99-goodtechies-hq.ini" <<'INI'
-upload_max_filesize = 50M
-post_max_size = 50M
+upload_max_filesize = 256M
+post_max_size = 260M
+max_execution_time = 300
+max_input_time = 300
 expose_php = Off
 ; Speed: compiled code stays in memory. validate_timestamps=0 is safe because deploy.sh
 ; reloads php-fpm after every release, which clears the cache.
@@ -697,6 +701,11 @@ if [ "$SCHEME" = "https" ]; then
 else
     env_set SESSION_SECURE_COOKIE "false"
 fi
+# A session lasts 2 days of inactivity and survives closing the tab (decision 12-84).
+case "$(env_get SESSION_LIFETIME)" in
+    "" | 120) env_set SESSION_LIFETIME "2880" ;;
+esac
+[ -n "$(env_get SESSION_EXPIRE_ON_CLOSE)" ] || env_set SESSION_EXPIRE_ON_CLOSE "false"
 env_set DB_DATABASE "$DB_NAME"
 env_set DB_PASSWORD "$DB_APP_PASSWORD"
 env_set DB_MIGRATOR_PASSWORD "$DB_MIGRATOR_PASSWORD"

@@ -8,6 +8,7 @@ use App\Models\Project;
 use App\Models\ProjectFinance;
 use App\Support\BillingType;
 use App\Support\Priority;
+use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
 use App\Support\ProjectType;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -32,6 +33,10 @@ class ProjectFactory extends Factory
             'domain' => fake()->domainWord().'.com',
             'project_type' => fake()->randomElement(ProjectType::cases()),
             'billing_type' => fake()->randomElement(BillingType::cases()),
+            // CHECK projects_recurrence_matches_billing: a frequency exactly when Recurring.
+            'recurrence_frequency' => fn (array $attributes): ?ProjectRecurrenceFrequency => BillingType::from(
+                $attributes['billing_type'] instanceof BillingType ? $attributes['billing_type']->value : (string) $attributes['billing_type'],
+            ) === BillingType::Recurring ? ProjectRecurrenceFrequency::Monthly : null,
             'start_date' => $start,
             'deadline' => fake()->dateTimeBetween($start, '+90 days'),
             'status' => ProjectStatus::Active,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Copy, MoreHorizontal, Pencil, SmilePlus, Trash2 } from '@lucide/vue';
+import { Copy, MoreHorizontal, Pencil, Reply, SmilePlus, Trash2 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import EmojiPicker from '@/Components/Messages/EmojiPicker.vue';
 import { QUICK_REACTIONS } from '@/Components/Messages/emoji';
@@ -23,7 +23,8 @@ import {
 import { useMenuDialog } from '@/lib/menuFocus';
 
 /**
- * Brief 010: one message's menu — Copy, Edit, Delete and a row of quick reactions.
+ * Brief 010: one message's menu — Copy, Edit, Delete and a row of quick reactions. Brief 013
+ * put Reply first, where the thread has a composer to reply in (`canReply`).
  *
  * Opened by the `MoreHorizontal` button beside the bubble (revealed on hover and on focus, always
  * visible on a touch screen) or by a right-click / long-press on the bubble, which `MessageRow`
@@ -40,11 +41,14 @@ const props = withDefaults(
         message: ThreadMessage;
         /** Which way the menu lines up: toward the bubble. */
         align?: 'start' | 'end';
+        /** Brief 013: the thread has a composer, so a reply can be written. */
+        canReply?: boolean;
     }>(),
-    { align: 'end' },
+    { align: 'end', canReply: false },
 );
 
 const emit = defineEmits<{
+    reply: [];
     copy: [];
     edit: [];
     delete: [];
@@ -82,6 +86,24 @@ function askDelete(): void {
 /** Edit swaps the bubble for a field that takes focus itself, so only the deferral is wanted. */
 function startEdit(): void {
     menu.openFromMenu(() => emit('edit'));
+}
+
+/**
+ * Reply puts the caret in the composer. The menu would hand focus back to `⋯` once its close
+ * animation ends — after the composer took it — so that one restore is skipped for a Reply.
+ */
+let replyChosen = false;
+
+function startReply(): void {
+    replyChosen = true;
+    menu.openFromMenu(() => emit('reply'));
+}
+
+function onMenuCloseAutoFocus(event: Event): void {
+    if (replyChosen) {
+        replyChosen = false;
+        event.preventDefault();
+    }
 }
 
 /** Every way out of either overlay — a pick, Esc, Keep, Delete — puts the keyboard back. */
@@ -125,7 +147,16 @@ function confirmDelete(): void {
             <DropdownMenuContent
                 :align="align"
                 class="w-60"
+                @close-auto-focus="onMenuCloseAutoFocus"
             >
+                <template v-if="canReply">
+                    <DropdownMenuItem @select="startReply">
+                        <Reply aria-hidden="true" />
+                        Reply
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                </template>
+
                 <div role="group" aria-label="React" class="flex items-center gap-0.5 p-0.5">
                     <DropdownMenuItem
                         v-for="emoji in QUICK_REACTIONS"

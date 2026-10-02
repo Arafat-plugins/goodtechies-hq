@@ -19,6 +19,7 @@ use App\Services\TaskTimerService;
 use App\Support\BillingFrequency;
 use App\Support\BillingType;
 use App\Support\Priority;
+use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
 use App\Support\ProjectType;
 use App\Support\RoleName;
@@ -291,18 +292,19 @@ class ProjectController extends Controller
             'statuses' => $this->options(ProjectStatus::cases()),
             'priorities' => $this->options(Priority::cases()),
             'billingTypes' => $this->options(BillingType::cases()),
+            'recurrenceFrequencies' => $this->options(ProjectRecurrenceFrequency::cases()),
             'billingFrequencies' => $this->options(BillingFrequency::cases()),
         ];
     }
 
     /**
-     * @param  list<ProjectType|ProjectStatus|Priority|BillingType|BillingFrequency>  $cases
+     * @param  list<ProjectType|ProjectStatus|Priority|BillingType|ProjectRecurrenceFrequency|BillingFrequency>  $cases
      * @return list<array{value: string, label: string}>
      */
     private function options(array $cases): array
     {
         return array_map(
-            fn (ProjectType|ProjectStatus|Priority|BillingType|BillingFrequency $case): array => [
+            fn (ProjectType|ProjectStatus|Priority|BillingType|ProjectRecurrenceFrequency|BillingFrequency $case): array => [
                 'value' => $case->value,
                 'label' => $case->label(),
             ],

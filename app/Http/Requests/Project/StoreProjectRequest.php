@@ -4,6 +4,7 @@ namespace App\Http\Requests\Project;
 
 use App\Support\BillingType;
 use App\Support\Priority;
+use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectType;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -66,12 +67,35 @@ class StoreProjectRequest extends FormRequest
             'domain' => ['nullable', 'string', 'max:255'],
             'project_type' => ['required', Rule::enum(ProjectType::class)],
             'billing_type' => ['required', Rule::enum(BillingType::class)],
+            'recurrence_frequency' => [
+                'required_if:billing_type,'.BillingType::Recurring->value,
+                'nullable',
+                Rule::enum(ProjectRecurrenceFrequency::class),
+            ],
             'priority' => ['required', Rule::enum(Priority::class)],
-            'start_date' => ['nullable', 'date'],
-            'deadline' => ['nullable', 'date', 'after_or_equal:start_date'],
+            'start_date' => ['required_if:billing_type,'.BillingType::Recurring->value, 'nullable', 'date'],
+            // A Recurring project's deadline is computed by ProjectService, so whatever the
+            // client sent for it is dropped rather than validated.
+            'deadline' => [
+                'exclude_if:billing_type,'.BillingType::Recurring->value,
+                'nullable',
+                'date',
+                'after_or_equal:start_date',
+            ],
             'pm_id' => ['nullable', 'exists:employees,id'],
             'internal_notes' => ['nullable', 'string', 'max:5000'],
             'employee_notes' => ['nullable', 'string', 'max:5000'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'recurrence_frequency.required_if' => 'Choose how often it recurs.',
+            'start_date.required_if' => 'A recurring project needs a start date.',
         ];
     }
 }

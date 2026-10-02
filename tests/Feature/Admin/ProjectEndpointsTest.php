@@ -11,6 +11,7 @@ use App\Support\AuditEvent;
 use App\Support\BillingFrequency;
 use App\Support\BillingType;
 use App\Support\Priority;
+use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
 use App\Support\ProjectType;
 use App\Support\RoleName;
@@ -193,7 +194,9 @@ it('updates a project', function () {
             'name' => 'abc.com — Care Plan',
             'domain' => 'abc.com',
             'project_type' => ProjectType::WebsiteMaintenance->value,
-            'billing_type' => BillingType::MonthlyRecurring->value,
+            'billing_type' => BillingType::Recurring->value,
+            'recurrence_frequency' => ProjectRecurrenceFrequency::Monthly->value,
+            'start_date' => '2026-10-05',
             'priority' => Priority::Urgent->value,
             'status' => ProjectStatus::Active->value,
             'pm_id' => $project->pm_id,
@@ -215,7 +218,9 @@ it('ignores a status sent to the update route', function () {
             'client_id' => $project->client_id,
             'name' => 'abc.com — Renamed, Not Cancelled',
             'project_type' => ProjectType::WebsiteMaintenance->value,
-            'billing_type' => BillingType::MonthlyRecurring->value,
+            'billing_type' => BillingType::Recurring->value,
+            'recurrence_frequency' => ProjectRecurrenceFrequency::Monthly->value,
+            'start_date' => '2026-10-05',
             'priority' => Priority::Low->value,
             'status' => ProjectStatus::Cancelled->value,
             'pm_id' => $project->pm_id,
@@ -401,7 +406,9 @@ it('refuses every write to an archived project with a flash error', function () 
         ->put(route('admin.projects.update', $project), [
             'name' => 'Should Not Land',
             'project_type' => ProjectType::WebsiteMaintenance->value,
-            'billing_type' => BillingType::MonthlyRecurring->value,
+            'billing_type' => BillingType::Recurring->value,
+            'recurrence_frequency' => ProjectRecurrenceFrequency::Monthly->value,
+            'start_date' => '2026-10-05',
             'priority' => Priority::Low->value,
             'status' => ProjectStatus::Active->value,
         ])

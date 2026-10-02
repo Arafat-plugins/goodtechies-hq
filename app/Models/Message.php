@@ -27,7 +27,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * ConversationService, the only writer. It cannot be a CHECK constraint, because half of the
  * answer lives in `message_attachments`.
  */
-#[Fillable(['conversation_id', 'author_id', 'body'])]
+#[Fillable(['conversation_id', 'author_id', 'body', 'reply_to_id'])]
 class Message extends Model
 {
     /** @use HasFactory<MessageFactory> */
@@ -55,6 +55,7 @@ class Message extends Model
         return [
             'edited_at' => 'datetime',
             'deleted_at' => 'datetime',
+            'reply_to_id' => 'integer',
         ];
     }
 
@@ -79,6 +80,17 @@ class Message extends Model
     public function conversation(): BelongsTo
     {
         return $this->belongsTo(Conversation::class);
+    }
+
+    /**
+     * The message this one replies to (12-82), always in the same conversation — MessageService
+     * refuses anything else.
+     *
+     * @return BelongsTo<Message, $this>
+     */
+    public function replyTo(): BelongsTo
+    {
+        return $this->belongsTo(Message::class, 'reply_to_id');
     }
 
     /**

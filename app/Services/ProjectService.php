@@ -8,8 +8,12 @@ use App\Models\Employee;
 use App\Models\Project;
 use App\Models\User;
 use App\Support\AuditEvent;
+use App\Support\BillingType;
+use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
 use App\Support\RoleName;
+use Carbon\Carbon;
+use DateTimeInterface;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -33,6 +37,7 @@ class ProjectService
         'domain',
         'project_type',
         'billing_type',
+        'recurrence_frequency',
         'start_date',
         'deadline',
         'priority',
@@ -95,8 +100,7 @@ class ProjectService
             // A project is born Active and is moved on by changeStatus(): the caller does not
             // get to pick the status it starts in.
             $project = Project::create(
-                array_intersect_key($attributes, array_flip(self::FIELDS))
-                    + ['status' => ProjectStatus::Active],
+                $this->withRecurrence($attributes) + ['status' => ProjectStatus::Active],
             );
 
             if ($memberIds !== []) {
@@ -145,7 +149,7 @@ class ProjectService
         $this->guardWritable($actor, $project, 'update', 'edited');
 
         return DB::transaction(function () use ($actor, $project, $attributes): Project {
-            $project->fill(array_intersect_key($attributes, array_flip(self::FIELDS)));
+            $project->fill($this->withRecurrence($attributes, $project));
 
             $changed = array_keys($project->getDirty());
 
@@ -423,6 +427,72 @@ class ProjectService
     }
 
     /**
+     * The writable attributes, with the server as the source of truth for recurrence: a
+     * Recurring project gets its frequency and a deadline computed from the start date
+     * (whatever deadline the caller sent is ignored); any other project has no frequency and
+     * keeps the deadline it was given. Keys the caller left out fall back to $project's values.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function withRecurrence(array $attributes, ?Project $project = null): array
+    {
+        $attributes = array_intersect_key($attributes, array_flip(self::FIELDS));
+
+        // An update that touches none of the inputs leaves the stored schedule as it is.
+        $inputs = ['billing_type', 'recurrence_frequency', 'start_date', 'deadline'];
+
+        if ($project !== null && array_intersect_key($attributes, array_flip($inputs)) === []) {
+            return $attributes;
+        }
+
+        $billing = array_key_exists('billing_type', $attributes)
+            ? $this->billingType($attributes['billing_type'])
+            : $project?->billing_type;
+
+        if ($billing !== BillingType::Recurring) {
+            $attributes['recurrence_frequency'] = null;
+
+            return $attributes;
+        }
+
+        $frequency = array_key_exists('recurrence_frequency', $attributes)
+            ? $this->frequency($attributes['recurrence_frequency'])
+            : $project?->recurrence_frequency;
+
+        $start = array_key_exists('start_date', $attributes) ? $attributes['start_date'] : $project?->start_date;
+
+        if ($frequency === null || $start === null || $start === '') {
+            throw new \InvalidArgumentException('A recurring project needs a frequency and a start date.');
+        }
+
+        $start = $start instanceof DateTimeInterface ? Carbon::instance($start) : Carbon::parse((string) $start);
+
+        $attributes['recurrence_frequency'] = $frequency;
+        $attributes['deadline'] = $frequency->deadlineFrom($start)->toDateString();
+
+        return $attributes;
+    }
+
+    private function billingType(mixed $value): ?BillingType
+    {
+        if ($value instanceof BillingType || $value === null) {
+            return $value;
+        }
+
+        return BillingType::from((string) $value);
+    }
+
+    private function frequency(mixed $value): ?ProjectRecurrenceFrequency
+    {
+        if ($value instanceof ProjectRecurrenceFrequency || $value === null || $value === '') {
+            return $value === '' ? null : $value;
+        }
+
+        return ProjectRecurrenceFrequency::from((string) $value);
+    }
+
+    /**
      * The project's own attributes for the audit trail. Finance is never included: a price
      * lands in audit_logs through ProjectPriceChanged only.
      *
@@ -436,6 +506,7 @@ class ProjectService
             'domain' => $project->domain,
             'project_type' => $project->project_type?->value,
             'billing_type' => $project->billing_type?->value,
+            'recurrence_frequency' => $project->recurrence_frequency?->value,
             'status' => $project->status?->value,
             'priority' => $project->priority?->value,
             'pm_id' => $project->pm_id,
