@@ -33,11 +33,12 @@ use Database\Factories\IncomeFactory;
 /** Every key `AccountantProjectResource` sends at the top level, and the whole of it. */
 const FINANCE_ENDPOINT_PROJECT_KEYS = ['id', 'name', 'domain', 'finance'];
 
-/** Every key inside `finance` — exactly the six money columns of `project_finance`. */
+/** Every key inside `finance` — exactly the seven money columns of `project_finance`. */
 const FINANCE_ENDPOINT_FINANCE_KEYS = [
     'price',
     'recurring_amount',
     'billing_frequency',
+    'hourly_rate',
     'contract_value',
     'contract_terms',
     'profitability_snapshot',

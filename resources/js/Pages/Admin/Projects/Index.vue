@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Archive, ArchiveRestore, FolderKanban, Pencil, Plus } from '@lucide/vue';
+import { Archive, ArchiveRestore, FolderKanban, Pencil, Plus, Trash2 } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { ColumnDef } from '@/Components/DataTable/types';
@@ -8,6 +8,7 @@ import type { FilterDef } from '@/Components/FilterBar.vue';
 import FilterBar from '@/Components/FilterBar.vue';
 import PageShell from '@/Components/PageShell.vue';
 import type { Paginated } from '@/Components/Pagination.vue';
+import DeleteProjectDialog, { canForceDelete } from '@/Components/Projects/DeleteProjectDialog.vue';
 import { moneyLine } from '@/Components/Projects/FinanceCard.vue';
 import type { NamedRef, Option, Project } from '@/Components/Projects/ProjectForm.vue';
 import ProjectWorkingNow from '@/Components/Projects/ProjectWorkingNow.vue';
@@ -15,7 +16,6 @@ import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
 import { workingNowPing, type WorkingNowRow } from '@/Components/Timer/taskTimer';
 import { Button } from '@/Components/ui/button';
-import { Checkbox } from '@/Components/ui/checkbox';
 import {
     Dialog,
     DialogContent,
@@ -25,7 +25,7 @@ import {
     DialogTitle,
 } from '@/Components/ui/dialog';
 import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
-import { Label } from '@/Components/ui/label';
+import { ToggleGroup, ToggleGroupItem } from '@/Components/ui/toggle-group';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useMenuDialog } from '@/lib/menuFocus';
 import { pushQuery, resetQuery } from '@/lib/tableState';
@@ -72,10 +72,20 @@ function workingOn(projectId: number): WorkingNowRow[] {
 /* ----------------------------------------------------------------- filters */
 
 /**
- * The chip bar reads and writes the query string itself, so the only filter this page
- * still owns is the archived toggle — a boolean, which has no chip shape, and so lives
- * in `#extra`.
+ * The chip bar reads and writes the query string itself. Active / Archived is not a chip: it
+ * is which list you are looking at (`archived=1` is the archive and nothing else), so it sits
+ * in front of the bar as a two-option segmented control, one click either way.
  */
+const view = computed(() => (props.filters.archived ? 'archived' : 'active'));
+
+function chooseView(value: unknown): void {
+    if (value !== 'active' && value !== 'archived') {
+        return;
+    }
+
+    pushQuery({ archived: value === 'archived' });
+}
+
 const filterDefs = computed<FilterDef[]>(() => [
     {
         key: 'client_id',
@@ -107,6 +117,19 @@ const hasFilters = computed(
 
 function clearFilters(): void {
     resetQuery();
+}
+
+/** The archive with nothing else narrowing it, and nothing in it. */
+const onlyArchived = computed(() => props.filters.archived && !hasFiltersBesidesView());
+
+function hasFiltersBesidesView(): boolean {
+    return (
+        Boolean(props.filters.search) ||
+        (props.filters.client_id !== null && props.filters.client_id !== '') ||
+        Boolean(props.filters.project_type) ||
+        Boolean(props.filters.status) ||
+        (props.filters.pm_id !== null && props.filters.pm_id !== '')
+    );
 }
 
 /* ----------------------------------------------------------------- columns */
@@ -202,6 +225,21 @@ function confirmArchiveToggle(): void {
         },
     );
 }
+
+/* -------------------------------------------------------- delete for good */
+
+const deletingProject = ref<Project | null>(null);
+
+function askToDelete(project: Project): void {
+    menu.openFromMenu(() => {
+        deletingProject.value = project;
+    });
+}
+
+function closeDelete(): void {
+    deletingProject.value = null;
+    menu.returnFocus();
+}
 </script>
 
 <template>
@@ -218,24 +256,30 @@ function confirmArchiveToggle(): void {
         </template>
 
         <div class="flex min-w-0 flex-col gap-4">
-            <FilterBar
-                :search="filters.search"
-                :filters="filterDefs"
-                :extra-active="filters.archived"
-                placeholder="Search projects…"
-                input-id="projects-search"
-            >
-                <template #extra>
-                    <div class="flex h-9 items-center gap-2">
-                        <Checkbox
-                            id="projects-archived"
-                            :model-value="filters.archived"
-                            @update:model-value="(checked) => pushQuery({ archived: checked === true })"
-                        />
-                        <Label for="projects-archived" class="font-normal whitespace-nowrap">Show archived</Label>
-                    </div>
-                </template>
-            </FilterBar>
+            <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
+                <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    class="shrink-0 self-start"
+                    :model-value="view"
+                    aria-label="Which projects"
+                    @update:model-value="chooseView"
+                >
+                    <ToggleGroupItem value="active" class="px-3">Active</ToggleGroupItem>
+                    <ToggleGroupItem value="archived" class="px-3">
+                        <Archive aria-hidden="true" />
+                        Archived
+                    </ToggleGroupItem>
+                </ToggleGroup>
+
+                <FilterBar
+                    class="min-w-0 flex-1"
+                    :search="filters.search"
+                    :filters="filterDefs"
+                    placeholder="Search projects…"
+                    input-id="projects-search"
+                />
+            </div>
 
             <DataTable
                 id="admin-projects"
@@ -250,8 +294,12 @@ function confirmArchiveToggle(): void {
                 :empty-icon="FolderKanban"
                 empty-title="No projects yet"
                 empty-description="Create the first project and the work can follow."
-                filtered-title="No projects match these filters"
-                filtered-description="Clear a filter, or widen the search."
+                :filtered-title="onlyArchived ? 'No archived projects' : 'No projects match these filters'"
+                :filtered-description="
+                    onlyArchived
+                        ? 'A project you archive shows up here.'
+                        : 'Clear a filter, or widen the search.'
+                "
                 @clear="clearFilters"
             >
                 <template #cell-name="{ row }">
@@ -332,6 +380,14 @@ function confirmArchiveToggle(): void {
                         <component :is="row.is_archived ? ArchiveRestore : Archive" aria-hidden="true" />
                         {{ row.is_archived ? 'Unarchive' : 'Archive' }}
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                        v-if="row.is_archived && canForceDelete(row)"
+                        variant="destructive"
+                        @select="askToDelete(row)"
+                    >
+                        <Trash2 aria-hidden="true" />
+                        Delete permanently…
+                    </DropdownMenuItem>
                 </template>
 
                 <template #empty-action>
@@ -378,4 +434,6 @@ function confirmArchiveToggle(): void {
             </DialogFooter>
         </DialogContent>
     </Dialog>
+
+    <DeleteProjectDialog :project="deletingProject" @close="closeDelete" />
 </template>

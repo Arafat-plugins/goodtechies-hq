@@ -3,6 +3,7 @@
 namespace App\Policies;
 
 use App\Models\File;
+use App\Models\Project;
 use App\Models\User;
 use App\Support\RoleName;
 use Illuminate\Support\Facades\Gate;
@@ -50,7 +51,18 @@ class FilePolicy extends Policy
 
         $owner = $file->owner();
 
-        return $owner !== null && Gate::forUser($user)->allows('view', $owner);
+        if ($owner === null || ! Gate::forUser($user)->allows('view', $owner)) {
+            return false;
+        }
+
+        // An attachment to a project's internal notes is exactly as visible as the internal
+        // notes themselves — `viewCommercial`, not merely `view`. Download, replace and delete
+        // all start here, so they follow.
+        if ($file->internal) {
+            return $owner instanceof Project && Gate::forUser($user)->allows('viewCommercial', $owner);
+        }
+
+        return true;
     }
 
     /**

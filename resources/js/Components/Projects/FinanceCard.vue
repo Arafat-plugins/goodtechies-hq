@@ -23,12 +23,50 @@ export function formatMoney(amount: string | number | null | undefined): string 
     return Number.isFinite(value) ? MONEY.format(value) : null;
 }
 
-/** Monthly retainer wins over a one-off price; absent finance renders nothing at all. */
+/** An hourly rate always shows its cents: "$40.00/hr", not "$40/hr". */
+const RATE = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+});
+
+export function formatRate(amount: string | number | null | undefined): string | null {
+    if (amount === null || amount === undefined || amount === '') {
+        return null;
+    }
+
+    const value = typeof amount === 'number' ? amount : Number(amount);
+
+    return Number.isFinite(value) ? RATE.format(value) : null;
+}
+
+/** The suffix a recurring amount carries; custom or no frequency keeps the historic `/mo`. */
+const RECURRING_SUFFIX: Record<string, string> = {
+    monthly: '/mo',
+    quarterly: '/qtr',
+    yearly: '/yr',
+};
+
+/**
+ * One line of money per project: an hourly rate, else the recurring amount per period, else the
+ * one-off price. Absent finance renders nothing at all.
+ */
 export function moneyLine(finance: ProjectFinance | null | undefined): string | null {
+    if (finance?.billing_frequency === 'hourly') {
+        const rate = formatRate(finance.hourly_rate);
+
+        if (rate) {
+            return `${rate}/hr`;
+        }
+    }
+
     const recurring = formatMoney(finance?.recurring_amount);
 
     if (recurring) {
-        return `${recurring}/mo`;
+        const suffix = RECURRING_SUFFIX[finance?.billing_frequency ?? ''] ?? '/mo';
+
+        return `${recurring}${suffix}`;
     }
 
     return formatMoney(finance?.price);
@@ -66,10 +104,14 @@ const form = useForm({
     price: moneyInputValue(finance.value?.price),
     recurring_amount: moneyInputValue(finance.value?.recurring_amount),
     billing_frequency: finance.value?.billing_frequency ?? NO_FREQUENCY,
+    hourly_rate: moneyInputValue(finance.value?.hourly_rate),
     contract_value: moneyInputValue(finance.value?.contract_value),
     contract_terms: finance.value?.contract_terms ?? '',
     profitability_snapshot: moneyInputValue(finance.value?.profitability_snapshot),
 });
+
+/** The rate is asked for only while the frequency is Hourly. */
+const isHourly = computed(() => form.billing_frequency === 'hourly');
 
 /** A `type="number"` v-model yields a number, so the value is stringified before trimming. */
 function blankToNull(value: string | number | null | undefined): string | null {
@@ -87,6 +129,7 @@ function startEditing(): void {
     form.price = moneyInputValue(finance.value?.price);
     form.recurring_amount = moneyInputValue(finance.value?.recurring_amount);
     form.billing_frequency = finance.value?.billing_frequency ?? NO_FREQUENCY;
+    form.hourly_rate = moneyInputValue(finance.value?.hourly_rate);
     form.contract_value = moneyInputValue(finance.value?.contract_value);
     form.contract_terms = finance.value?.contract_terms ?? '';
     form.profitability_snapshot = moneyInputValue(finance.value?.profitability_snapshot);
@@ -102,6 +145,7 @@ function submit(): void {
         price: blankToNull(data.price),
         recurring_amount: blankToNull(data.recurring_amount),
         billing_frequency: data.billing_frequency === NO_FREQUENCY ? null : data.billing_frequency,
+        hourly_rate: data.billing_frequency === 'hourly' ? blankToNull(data.hourly_rate) : null,
         contract_value: blankToNull(data.contract_value),
         contract_terms: blankToNull(data.contract_terms),
         profitability_snapshot: blankToNull(data.profitability_snapshot),
@@ -120,6 +164,9 @@ const rows = computed(() => [
     { label: 'Price', value: formatMoney(finance.value?.price) },
     { label: 'Recurring amount', value: formatMoney(finance.value?.recurring_amount) },
     { label: 'Billing frequency', value: finance.value?.billing_frequency_label ?? null },
+    ...(blankToNull(finance.value?.hourly_rate) === null
+        ? []
+        : [{ label: 'Hourly rate', value: formatRate(finance.value?.hourly_rate) }]),
     { label: 'Contract value', value: formatMoney(finance.value?.contract_value) },
     { label: 'Profitability snapshot', value: formatMoney(finance.value?.profitability_snapshot) },
 ]);
@@ -211,6 +258,24 @@ const rows = computed(() => [
                         </Select>
                         <p v-if="form.errors.billing_frequency" class="text-xs text-destructive">
                             {{ form.errors.billing_frequency }}
+                        </p>
+                    </div>
+
+                    <div v-if="isHourly" class="flex min-w-0 flex-col gap-2">
+                        <Label for="finance-hourly-rate">Hourly rate</Label>
+                        <Input
+                            id="finance-hourly-rate"
+                            v-model="form.hourly_rate"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            inputmode="decimal"
+                            required
+                            :disabled="form.processing"
+                            :aria-invalid="form.errors.hourly_rate ? true : undefined"
+                        />
+                        <p v-if="form.errors.hourly_rate" class="text-xs text-destructive">
+                            {{ form.errors.hourly_rate }}
                         </p>
                     </div>
 

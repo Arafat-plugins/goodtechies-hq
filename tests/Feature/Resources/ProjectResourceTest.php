@@ -46,6 +46,7 @@ const RESTRICTED_PROJECT_KEYS = [
     'internal_notes',
     'price',
     'recurring_amount',
+    'hourly_rate',
     'billing_type',
     'recurrence_frequency',
     'recurrence_frequency_label',
@@ -260,6 +261,7 @@ it('mirrors the policy in the permissions block', function () {
         'can_view_finance' => true,
         'can_manage_members' => true,
         'can_archive' => true,
+        'can_force_delete' => false,
     ]);
 
     expect(projectPayload($this->project, $this->manager)['permissions'])->toBe([
@@ -267,6 +269,7 @@ it('mirrors the policy in the permissions block', function () {
         'can_view_finance' => false,
         'can_manage_members' => true,
         'can_archive' => false,
+        'can_force_delete' => false,
     ]);
 
     expect(projectPayload($this->project, $this->employee)['permissions'])->toBe([
@@ -274,6 +277,7 @@ it('mirrors the policy in the permissions block', function () {
         'can_view_finance' => false,
         'can_manage_members' => false,
         'can_archive' => false,
+        'can_force_delete' => false,
     ]);
 
     $archived = Project::factory()->archived()->create();
@@ -283,6 +287,7 @@ it('mirrors the policy in the permissions block', function () {
         'can_view_finance' => true,
         'can_manage_members' => false,
         'can_archive' => true,
+        'can_force_delete' => true,
     ]);
 })->group('phase1');
 

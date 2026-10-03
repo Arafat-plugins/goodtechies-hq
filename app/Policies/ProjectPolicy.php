@@ -69,6 +69,17 @@ class ProjectPolicy extends Policy
         return $this->allows($user, Permission::ProjectsEdit) && $user->hasRole(RoleName::ADMIN);
     }
 
+    /**
+     * Deleting a project for good is an Admin move, and only once it has been archived: an
+     * active project has to be put away first, so nobody deletes live work by mistake.
+     */
+    public function forceDelete(User $user, Project $project): bool
+    {
+        return $this->allows($user, Permission::ProjectsEdit)
+            && $user->hasRole(RoleName::ADMIN)
+            && $project->isArchived();
+    }
+
     public function cancel(User $user, Project $project): bool
     {
         return $this->allows($user, Permission::ProjectsEdit) && $user->hasRole(RoleName::ADMIN);

@@ -27,6 +27,26 @@ class ProjectStateException extends RuntimeException
         return new self('This project is not archived.');
     }
 
+    public static function deleteNeedsArchive(): self
+    {
+        return new self('Archive the project before deleting it.');
+    }
+
+    public static function deleteNameMismatch(): self
+    {
+        return new self('Type the project name exactly to delete it.');
+    }
+
+    public static function deleteHasIncome(): self
+    {
+        return new self("Income is recorded against this project, so it can't be deleted. Keep it archived.");
+    }
+
+    public static function deleteHasPaidTime(): self
+    {
+        return new self("Paid time is recorded on this project, so it can't be deleted. Keep it archived.");
+    }
+
     public static function transition(ProjectStatus $from, ProjectStatus $to): self
     {
         return new self(sprintf(

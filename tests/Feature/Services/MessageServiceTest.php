@@ -9,6 +9,7 @@ use App\Services\ConversationService;
 use App\Services\FileService;
 use App\Services\MessageService;
 use App\Services\ProjectService;
+use App\Support\BillingType;
 use App\Support\ConversationType;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\UploadedFile;
@@ -339,7 +340,7 @@ it('gives a project its channel the moment it is created', function () {
         'name' => 'A project born after Phase 6',
         'project_type' => $this->tapusProject->project_type,
         // One-time, so the call needs no recurrence frequency or start date (12-83).
-        'billing_type' => \App\Support\BillingType::OneTime,
+        'billing_type' => BillingType::OneTime,
     ]);
 
     expect(Conversation::query()->forProject($project)->count())->toBe(1);

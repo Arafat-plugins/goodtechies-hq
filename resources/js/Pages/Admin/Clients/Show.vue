@@ -7,6 +7,8 @@ import EmptyState from '@/Components/EmptyState.vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
 import { fileRoutes } from '@/Components/Files/files';
 import PageShell from '@/Components/PageShell.vue';
+import { moneyLine } from '@/Components/Projects/FinanceCard.vue';
+import type { ProjectFinance } from '@/Components/Projects/ProjectForm.vue';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
@@ -37,10 +39,7 @@ interface ClientProject {
     priority_label?: string | null;
     deadline?: string | null;
     is_archived?: boolean;
-    finance?: {
-        price?: string | number | null;
-        recurring_amount?: string | number | null;
-    };
+    finance?: ProjectFinance | null;
 }
 
 const props = defineProps<{
@@ -51,38 +50,6 @@ const props = defineProps<{
 const client = computed(() => props.client.data);
 const projects = computed(() => client.value.projects ?? []);
 const contacts = computed(() => client.value.contacts ?? []);
-
-/**
- * There is no currency prop on this payload yet, so USD is hard-coded here — one helper,
- * on the one page that shows money. Move it to a shared place when a currency arrives.
- */
-const MONEY = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-});
-
-function formatMoney(amount: string | number | null | undefined): string | null {
-    if (amount === null || amount === undefined || amount === '') {
-        return null;
-    }
-
-    const value = typeof amount === 'number' ? amount : Number(amount);
-
-    return Number.isFinite(value) ? MONEY.format(value) : null;
-}
-
-/** Monthly retainer wins over a one-off price; absent finance renders nothing at all. */
-function moneyLine(project: ClientProject): string | null {
-    const recurring = formatMoney(project.finance?.recurring_amount);
-
-    if (recurring) {
-        return `${recurring}/mo`;
-    }
-
-    return formatMoney(project.finance?.price);
-}
 
 function formatDeadline(deadline: string | null | undefined): string {
     if (!deadline) {
@@ -244,10 +211,10 @@ function confirmDeactivate(): void {
                                             :tone="toneForProjectStatus(project.status)"
                                         />
                                         <span
-                                            v-if="moneyLine(project)"
+                                            v-if="moneyLine(project.finance)"
                                             class="text-sm font-medium whitespace-nowrap tabular-nums"
                                         >
-                                            {{ moneyLine(project) }}
+                                            {{ moneyLine(project.finance) }}
                                         </span>
                                     </div>
                                 </li>

@@ -142,10 +142,15 @@ Route::prefix('admin')
             Route::post('/{project}/status', [ProjectStatusController::class, 'update'])->name('status');
             Route::post('/{project}/archive', [ProjectStatusController::class, 'archive'])->name('archive');
             Route::post('/{project}/unarchive', [ProjectStatusController::class, 'unarchive'])->name('unarchive');
+            // Only an archived project, only an Admin, only with its name typed back.
+            Route::delete('/{project}', [ProjectStatusController::class, 'destroy'])->name('destroy');
 
             // The project detail page's Files tab (spec §7).
             Route::get('/{project}/files', [ProjectFileController::class, 'index'])->name('files.index');
             Route::post('/{project}/files', [ProjectFileController::class, 'store'])->name('files.store');
+            // Attachments on the internal notes: viewCommercial only, never in the Files tab.
+            Route::get('/{project}/internal-files', [ProjectFileController::class, 'internalIndex'])->name('internal-files.index');
+            Route::post('/{project}/internal-files', [ProjectFileController::class, 'internalStore'])->name('internal-files.store');
 
             // The project detail page's Recurring tab (Phase 3). The tab is a panel inside
             // Pages/Admin/Projects/Show.vue, so the list is JSON it fetches rather than a page

@@ -537,6 +537,9 @@ class SearchService
 
         $query = File::query()
             ->whereNull('files.superseded_at')
+            // Internal-notes attachments are visible to fewer people than their project is;
+            // search would need viewCommercial per row to show them, so it shows none.
+            ->where('files.internal', false)
             ->where(function (Builder $owned) use ($user, $clients): void {
                 $owned
                     ->whereIn('files.task_id', Task::query()->visibleTo($user)->select('tasks.id'))

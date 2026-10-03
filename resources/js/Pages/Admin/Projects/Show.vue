@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Archive, ArchiveRestore, ListTodo, Pencil } from '@lucide/vue';
+import { Archive, ArchiveRestore, ListTodo, Pencil, Trash2 } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
-import { fileRoutes } from '@/Components/Files/files';
+import { fileRoutes, internalFileRoutes } from '@/Components/Files/files';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
 import { conversationRoutes, emptyThread } from '@/Components/Messages/messages';
 import PageShell from '@/Components/PageShell.vue';
+import DeleteProjectDialog, { canForceDelete } from '@/Components/Projects/DeleteProjectDialog.vue';
 import FinanceCard from '@/Components/Projects/FinanceCard.vue';
 import MembersCard from '@/Components/Projects/MembersCard.vue';
 import type { EmployeeOption, Option, Project } from '@/Components/Projects/ProjectForm.vue';
@@ -61,6 +62,7 @@ const billingFrequencies: Option[] = [
     { value: 'quarterly', label: 'Quarterly' },
     { value: 'yearly', label: 'Yearly' },
     { value: 'custom', label: 'Custom' },
+    { value: 'hourly', label: 'Hourly' },
 ];
 
 /** Archived is not a transition — it has its own endpoint — so it is not offered here. */
@@ -107,6 +109,9 @@ const recentActivity = computed(() => props.activity.slice(0, 20));
  */
 const files = computed(() => fileRoutes('admin', 'projects', project.value.id));
 
+/** The internal notes' own attachments — listed only for whoever may see the notes. */
+const internalFiles = computed(() => internalFileRoutes(project.value.id));
+
 /**
  * Which tab is open, in the URL — decision 2-51.
  *
@@ -133,6 +138,9 @@ const tab = useUrlTab(
 
 const archiveOpen = ref(false);
 const archiving = ref(false);
+
+/** The project handed to the delete dialog while it is open; null closes it. */
+const deleteTarget = ref<Project | null>(null);
 
 function confirmArchiveToggle(): void {
     if (archiving.value) {
@@ -183,6 +191,16 @@ function confirmArchiveToggle(): void {
             >
                 <component :is="project.is_archived ? ArchiveRestore : Archive" aria-hidden="true" />
                 {{ project.is_archived ? 'Unarchive' : 'Archive' }}
+            </Button>
+            <Button
+                v-if="project.is_archived && canForceDelete(project)"
+                type="button"
+                variant="destructive"
+                size="sm"
+                @click="deleteTarget = project"
+            >
+                <Trash2 aria-hidden="true" />
+                Delete permanently…
             </Button>
         </template>
 
@@ -239,6 +257,13 @@ function confirmArchiveToggle(): void {
                                 class="text-sm break-words whitespace-pre-wrap"
                             >{{ project.internal_notes }}</p>
                             <p v-else class="text-sm text-muted-foreground">No internal notes yet.</p>
+                            <FilePanel
+                                class="mt-4"
+                                compact
+                                title="Attachments"
+                                :routes="internalFiles"
+                                :can-upload="permissions.can_update === true"
+                            />
                         </CardContent>
                     </Card>
                 </div>
@@ -396,4 +421,6 @@ function confirmArchiveToggle(): void {
             </DialogFooter>
         </DialogContent>
     </Dialog>
+
+    <DeleteProjectDialog :project="deleteTarget" @close="deleteTarget = null" />
 </template>

@@ -38,6 +38,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'uploaded_by',
     'version_of',
     'version',
+    'internal',
 ])]
 // Decision 10-18: `search_vector` is a STORED GENERATED tsvector of this row's own
 // searchable text. `select *` loads it (~282 B a row on `tasks`, measured with
@@ -99,6 +100,7 @@ class File extends Model
             'size' => 'integer',
             'version' => 'integer',
             'superseded_at' => 'datetime',
+            'internal' => 'boolean',
         ];
     }
 

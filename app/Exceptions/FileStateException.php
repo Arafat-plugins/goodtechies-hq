@@ -62,6 +62,11 @@ class FileStateException extends RuntimeException
         return new self(sprintf('%s cannot own files.', class_basename($class)));
     }
 
+    public static function internalNeedsProject(string $class): self
+    {
+        return new self(sprintf('Only a project has internal notes; a %s file cannot be internal.', strtolower(class_basename($class))));
+    }
+
     public static function upload(): self
     {
         return new self('That upload did not arrive intact. Try again.');

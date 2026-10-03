@@ -30,6 +30,7 @@ export interface ProjectFinance {
     recurring_amount?: string | number | null;
     billing_frequency?: string | null;
     billing_frequency_label?: string | null;
+    hourly_rate?: string | number | null;
     contract_value?: string | number | null;
     contract_terms?: string | null;
     profitability_snapshot?: string | number | null;
@@ -138,6 +139,7 @@ const form = useForm({
         price: '',
         recurring_amount: '',
         billing_frequency: NO_FREQUENCY,
+        hourly_rate: '',
         contract_value: '',
         contract_terms: '',
         profitability_snapshot: '',
@@ -145,6 +147,9 @@ const form = useForm({
 });
 
 const isRecurring = computed(() => form.billing_type === RECURRING);
+
+/** The hourly rate is asked for only while the finance frequency is Hourly. */
+const isHourly = computed(() => form.finance.billing_frequency === 'hourly');
 
 // A Recurring project's deadline is the start date plus one period. The server computes the
 // stored value; this keeps the read-only field showing the same date as the inputs change.
@@ -226,6 +231,8 @@ function submit(): void {
                 recurring_amount: blankToNull(data.finance.recurring_amount),
                 billing_frequency:
                     data.finance.billing_frequency === NO_FREQUENCY ? null : data.finance.billing_frequency,
+                hourly_rate:
+                    data.finance.billing_frequency === 'hourly' ? blankToNull(data.finance.hourly_rate) : null,
                 contract_value: blankToNull(data.finance.contract_value),
                 contract_terms: blankToNull(data.finance.contract_terms),
                 profitability_snapshot: blankToNull(data.finance.profitability_snapshot),
@@ -260,6 +267,7 @@ const FIELD_IDS: Record<string, string> = {
     'finance.price': 'project-price',
     'finance.recurring_amount': 'project-recurring-amount',
     'finance.billing_frequency': 'project-billing-frequency',
+    'finance.hourly_rate': 'project-hourly-rate',
     'finance.contract_value': 'project-contract-value',
     'finance.profitability_snapshot': 'project-profitability-snapshot',
     'finance.contract_terms': 'project-contract-terms',
@@ -546,6 +554,17 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
                         Admins only. Employees never see this.
                     </p>
                     <p v-if="errors.internal_notes" class="text-xs text-destructive">{{ errors.internal_notes }}</p>
+                    <!--
+                        Edit only: the page fills this with the internal notes' attachments. It
+                        sits inside this <form>, so a submit from the panel's own upload form is
+                        stopped here rather than bubbling up and saving the project as well.
+                    -->
+                    <div v-if="isEdit" class="min-w-0" @submit.stop>
+                        <slot name="internal-notes-extra" />
+                    </div>
+                    <p v-else class="text-xs text-muted-foreground">
+                        You can attach files once the project is created.
+                    </p>
                 </div>
 
                 <div class="flex min-w-0 flex-col gap-2">
@@ -655,6 +674,24 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
                     </Select>
                     <p v-if="errors['finance.billing_frequency']" class="text-xs text-destructive">
                         {{ errors['finance.billing_frequency'] }}
+                    </p>
+                </div>
+
+                <div v-if="isHourly" class="flex min-w-0 flex-col gap-2">
+                    <Label for="project-hourly-rate">Hourly rate</Label>
+                    <Input
+                        id="project-hourly-rate"
+                        v-model="form.finance.hourly_rate"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        inputmode="decimal"
+                        required
+                        :disabled="form.processing"
+                        :aria-invalid="errors['finance.hourly_rate'] ? true : undefined"
+                    />
+                    <p v-if="errors['finance.hourly_rate']" class="text-xs text-destructive">
+                        {{ errors['finance.hourly_rate'] }}
                     </p>
                 </div>
 

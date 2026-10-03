@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Exceptions\ProjectStateException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Project\ChangeProjectStatusRequest;
+use App\Http\Requests\Project\ForceDeleteProjectRequest;
 use App\Models\Project;
 use App\Services\ProjectService;
 use App\Support\ProjectStatus;
@@ -66,5 +67,24 @@ class ProjectStatusController extends Controller
         }
 
         return back()->with('success', 'Project unarchived.');
+    }
+
+    /**
+     * Delete an archived project for good. "Not archived" is the project's state refusing, so
+     * it is checked before the policy (which also requires it) and answers as a flash error.
+     */
+    public function destroy(ForceDeleteProjectRequest $request, Project $project): RedirectResponse
+    {
+        if ($project->isArchived()) {
+            Gate::authorize('forceDelete', $project);
+        }
+
+        try {
+            $this->projects->forceDelete($request->user(), $project, $request->confirmName());
+        } catch (ProjectStateException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        return redirect('/admin/projects?archived=1')->with('success', 'Project deleted permanently.');
     }
 }

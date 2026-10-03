@@ -255,6 +255,12 @@ class ConversationService
             ->with(['project', 'dmOne', 'dmTwo', 'groupMembers'])
             ->withCount('groupMembers')
             ->inboxCandidatesFor($user)
+            // An archived project's channel is put away with its project: out of the rail and
+            // so out of the shell's unread total, which is summed over this same list. It stays
+            // readable where the project is (its Messages tab, `GET /messages/{id}`), and
+            // unarchiving the project brings it back here. Non-project rows have no project and
+            // pass untouched.
+            ->whereDoesntHave('project', fn ($project) => $project->whereNotNull('archived_at'))
             ->get();
 
         return $candidates

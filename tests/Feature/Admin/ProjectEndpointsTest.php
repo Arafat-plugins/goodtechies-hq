@@ -76,7 +76,7 @@ it('filters the project list by search, client, type, status and pm', function (
         ->and($filtered(['pm_id' => $this->shahadat->id]))->toHaveCount(4);
 })->group('phase1');
 
-it('leaves archived projects out of the list unless they are asked for', function () {
+it('leaves archived projects out of the list, and lists only them when they are asked for', function () {
     $archived = Project::factory()->archived()->create(['name' => 'Retired Retainer']);
 
     $this->actingAs($this->admin)
@@ -91,7 +91,8 @@ it('leaves archived projects out of the list unless they are asked for', functio
         ->get(route('admin.projects.index', ['archived' => 1]))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->has('projects.data', 8)
+            ->has('projects.data', 1)
+            ->where('projects.data.0.name', 'Retired Retainer')
             ->where('filters.archived', true),
         );
 

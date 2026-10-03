@@ -70,7 +70,12 @@ class ProjectController extends Controller
             ->when($filters['project_type'], fn (Builder $query, string $type) => $query->where('project_type', $type))
             ->when($filters['status'], fn (Builder $query, string $status) => $query->where('status', $status))
             ->when($filters['pm_id'], fn (Builder $query, int $pmId) => $query->where('pm_id', $pmId))
-            ->unless($filters['archived'], fn (Builder $query) => $query->notArchived())
+            // Two views, not a widening switch: `archived=1` is the archive and nothing else.
+            ->when(
+                $filters['archived'],
+                fn (Builder $query) => $query->whereNotNull('archived_at'),
+                fn (Builder $query) => $query->notArchived(),
+            )
             ->orderBy('name')
             ->paginate(self::PER_PAGE)
             ->withQueryString();

@@ -710,9 +710,13 @@ function permissionMatrix(): array
         ['POST', 'admin/projects/{project}/status', $adminAction],
         ['POST', 'admin/projects/{project}/archive', $adminAction],
         ['POST', 'admin/projects/{project}/unarchive', $adminAction],
+        // Body-less, so it stops at the validation redirect and deletes nothing.
+        ['DELETE', 'admin/projects/{project}', $adminAction],
         // The project Files tab (spec §7), the same FileService as the client tab above.
         ['GET', 'admin/projects/{project}/files', $admin],
         ['POST', 'admin/projects/{project}/files', $adminAction],
+        ['GET', 'admin/projects/{project}/internal-files', $admin],
+        ['POST', 'admin/projects/{project}/internal-files', $adminAction],
 
         // Admin surface — the project detail page's Recurring tab (Phase 3). A retainer template
         // is an Admin object: the plan scopes these screens to this surface, and

@@ -316,17 +316,26 @@ class FileService
      * says. A voice note is an ordinary file row on an ordinary message — the pivot is what
      * remembers it was recorded, and that is MessageService's business, not this class's.
      *
+     * `$internal` files the upload under a project's INTERNAL NOTES instead of its Files tab:
+     * only a project may take one, and the row is then visible only to whoever may see the
+     * internal notes (FilePolicy::view) and is never listed by `for()` — see `internalFor()`.
+     *
      * @throws AuthorizationException
      * @throws FileStateException
      */
-    public function store(User $actor, Model $owner, UploadedFile $upload, ?AttachmentKind $kind = null): File
+    public function store(User $actor, Model $owner, UploadedFile $upload, ?AttachmentKind $kind = null, bool $internal = false): File
     {
         $this->guardOwner($owner);
+
+        if ($internal && ! $owner instanceof Project) {
+            throw FileStateException::internalNeedsProject($owner::class);
+        }
+
         $this->guardMayAttach($actor, $owner);
         self::assertAcceptable($upload, $kind, forMessage: $owner instanceof Message);
 
-        return DB::transaction(function () use ($actor, $owner, $upload): File {
-            $file = $this->write($owner, $upload, $actor, null, 1);
+        return DB::transaction(function () use ($actor, $owner, $upload, $internal): File {
+            $file = $this->write($owner, $upload, $actor, null, 1, $internal);
 
             $this->activity->record($owner, 'File attached: '.$file->name, $actor);
 
@@ -384,6 +393,8 @@ class FileService
                 $actor,
                 $file->chainId(),
                 (int) $file->version + 1,
+                // A new version stays where the old one was filed: internal notes or Files tab.
+                (bool) $file->internal,
             );
 
             $this->activity->record($owner, sprintf(
@@ -461,8 +472,30 @@ class FileService
      */
     public function for(Model $owner): Collection
     {
+        // Never the internal-notes attachments: they are not part of the record's Files tab
+        // and are visible to fewer people than the record is. See internalFor().
         return File::query()
             ->ownedBy($owner)
+            ->where('internal', false)
+            ->current()
+            ->with('uploader')
+            ->orderByDesc('id')
+            ->get();
+    }
+
+    /**
+     * The current version of everything attached to a project's INTERNAL NOTES, newest first.
+     *
+     * As with for(), the caller has established the requester may see them — here that is
+     * `viewCommercial` on the project, not merely `view`.
+     *
+     * @return Collection<int, File>
+     */
+    public function internalFor(Project $project): Collection
+    {
+        return File::query()
+            ->ownedBy($project)
+            ->where('internal', true)
             ->current()
             ->with('uploader')
             ->orderByDesc('id')
@@ -645,6 +678,7 @@ class FileService
         User $actor,
         ?int $versionOf,
         int $version,
+        bool $internal = false,
     ): File {
         $disk = config('filesystems.default');
         $extension = strtolower($upload->getClientOriginalExtension());
@@ -676,6 +710,7 @@ class FileService
             'uploaded_by' => $actor->getKey(),
             'version_of' => $versionOf,
             'version' => $version,
+            'internal' => $internal,
         ]);
     }
 

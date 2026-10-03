@@ -64,7 +64,7 @@ it('creates the first row on an existing project and audits it as a price change
         ->and($audit->target_id)->toBe($this->project->id)
         ->and($audit->actor_id)->toBe($this->admin->id)
         ->and($audit->old_value)->toBeNull()
-        ->and($audit->new_value)->toBe(['price' => '1200.00', 'recurring_amount' => null])
+        ->and($audit->new_value)->toBe(['price' => '1200.00', 'hourly_rate' => null, 'recurring_amount' => null])
         ->and(ActivityLog::where('object_id', $this->project->id)->sole()->description)
         ->toBe('Project finance updated');
 })->group('phase1');
@@ -131,7 +131,7 @@ it('audits a removed finance row as a price change to null', function () {
     $audit = AuditLog::where('event', 'project.price_changed')->sole();
 
     expect(ProjectFinance::where('project_id', $this->project->id)->exists())->toBeFalse()
-        ->and($audit->old_value)->toBe(['price' => '500.00', 'recurring_amount' => null])
+        ->and($audit->old_value)->toBe(['price' => '500.00', 'hourly_rate' => null, 'recurring_amount' => null])
         ->and($audit->new_value)->toBeNull();
 })->group('phase1');
 

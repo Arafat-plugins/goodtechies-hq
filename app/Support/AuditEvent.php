@@ -46,6 +46,9 @@ enum AuditEvent: string
     case PasswordResetByEmail = 'user.password_reset_by_email';
     case ProjectCreated = 'project.created';
     case ProjectPriceChanged = 'project.price_changed';
+    // An archived project deleted for good. The row and its activity timeline go with it, so
+    // this is the only record left that it ever existed.
+    case ProjectDeleted = 'project.deleted';
     case TaskAssigned = 'task.assigned';
     case TaskReassigned = 'task.reassigned';
     case TaskDeleted = 'task.deleted';
@@ -251,6 +254,7 @@ enum AuditEvent: string
 
             self::ProjectCreated => 'Project created',
             self::ProjectPriceChanged => 'Project price changed',
+            self::ProjectDeleted => 'Project deleted',
 
             self::TaskAssigned => 'Task assigned',
             self::TaskReassigned => 'Task reassigned',
@@ -318,7 +322,8 @@ enum AuditEvent: string
             self::ScheduleChanged => self::GROUP_PEOPLE,
 
             self::ProjectCreated,
-            self::ProjectPriceChanged => self::GROUP_PROJECTS,
+            self::ProjectPriceChanged,
+            self::ProjectDeleted => self::GROUP_PROJECTS,
 
             self::TaskAssigned,
             self::TaskReassigned,

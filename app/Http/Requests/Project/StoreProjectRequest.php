@@ -96,6 +96,7 @@ class StoreProjectRequest extends FormRequest
         return [
             'recurrence_frequency.required_if' => 'Choose how often it recurs.',
             'start_date.required_if' => 'A recurring project needs a start date.',
+            ...UpdateProjectFinanceRequest::financeMessages('finance.'),
         ];
     }
 }

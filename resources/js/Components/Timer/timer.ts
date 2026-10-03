@@ -400,6 +400,16 @@ let replayOwed = false;
 /** `auth.user.id` of the page this store runs on — the owner written into the buffer. */
 let currentUserId: number | null = null;
 
+/**
+ * Does this page's person run the persistent (remote) timer — `auth.user.canTrackTime`?
+ * Every endpoint in `timerRoutes` lives on the Employee surface. An Admin's or an office
+ * employee's page also mounts `useTimer()` (the task drawer's `TimerWidget` reads it), and its
+ * heartbeat used to go out anyway: an Admin's beat met `surface:employee`, whose 403
+ * (`reason: "surface"`) locked the page with "Your access has changed" a minute after a task
+ * was opened (decision 12-85). Nobody else's page may send, poll or schedule anything here.
+ */
+let remoteTimerEnabled = false;
+
 /** A buffer that names another owner is not this person's to replay. Unowned (legacy) ones are. */
 function ownedHere(buffered: BufferedSession): boolean {
     return buffered.userId === null || buffered.userId === undefined || buffered.userId === currentUserId;
@@ -416,6 +426,10 @@ function ownedHere(buffered: BufferedSession): boolean {
 let beatGate: ReturnType<typeof backoff> | null = null;
 
 async function beat(): Promise<void> {
+    if (!remoteTimerEnabled) {
+        return;
+    }
+
     const at = isoNow();
 
     // Signed out: keep the tracked time (the beat goes into the local buffer exactly as an
@@ -551,7 +565,7 @@ async function beat(): Promise<void> {
 }
 
 async function refresh(): Promise<void> {
-    if (!isSessionLive()) {
+    if (!remoteTimerEnabled || !isSessionLive()) {
         return;
     }
 
@@ -871,7 +885,10 @@ function stop(): void {
 let store: TimerStore | null = null;
 
 export function useTimer(): TimerStore {
-    currentUserId = usePage().props.auth.user?.id ?? currentUserId;
+    const user = usePage().props.auth.user;
+
+    currentUserId = user?.id ?? currentUserId;
+    remoteTimerEnabled = user?.canTrackTime === true;
 
     if (store === null) {
         // A Stop held before a reload is still owed, and still shown as stopped.
@@ -884,7 +901,9 @@ export function useTimer(): TimerStore {
     }
 
     if (store !== null) {
-        startLoops();
+        if (remoteTimerEnabled) {
+            startLoops();
+        }
 
         return store;
     }
@@ -943,7 +962,9 @@ export function useTimer(): TimerStore {
         stop,
     };
 
-    startLoops();
+    if (remoteTimerEnabled) {
+        startLoops();
+    }
 
     return store;
 }

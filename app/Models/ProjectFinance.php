@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'price',
     'recurring_amount',
     'billing_frequency',
+    'hourly_rate',
     'contract_value',
     'contract_terms',
     'profitability_snapshot',
@@ -38,6 +39,7 @@ class ProjectFinance extends Model
         return [
             'price' => 'decimal:2',
             'recurring_amount' => 'decimal:2',
+            'hourly_rate' => 'decimal:2',
             'contract_value' => 'decimal:2',
             'profitability_snapshot' => 'decimal:2',
         ];

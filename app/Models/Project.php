@@ -101,12 +101,13 @@ class Project extends Model
 
     /**
      * The project's Files tab (spec §7) — current versions only, newest first, like a task's.
+     * Never the internal-notes attachments (`files.internal`), which are Admin-only.
      *
      * @return HasMany<File, $this>
      */
     public function files(): HasMany
     {
-        return $this->hasMany(File::class)->whereNull('superseded_at')->orderByDesc('id');
+        return $this->hasMany(File::class)->where('internal', false)->whereNull('superseded_at')->orderByDesc('id');
     }
 
     /**

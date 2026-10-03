@@ -27,6 +27,14 @@ class UpdateProjectFinanceRequest extends FormRequest
     }
 
     /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return self::financeMessages();
+    }
+
+    /**
      * The same rules, optionally under a prefix, so creating a project can carry its finance
      * in one request without the two definitions drifting apart.
      *
@@ -41,8 +49,27 @@ class UpdateProjectFinanceRequest extends FormRequest
             $prefix.'recurring_amount' => $money,
             $prefix.'contract_value' => $money,
             $prefix.'billing_frequency' => ['nullable', Rule::enum(BillingFrequency::class)],
+            $prefix.'hourly_rate' => [
+                'nullable',
+                'required_if:'.$prefix.'billing_frequency,'.BillingFrequency::Hourly->value,
+                'numeric',
+                'min:0',
+                'max:99999999.99',
+            ],
             $prefix.'contract_terms' => ['nullable', 'string', 'max:5000'],
             $prefix.'profitability_snapshot' => ['nullable', 'numeric'],
+        ];
+    }
+
+    /**
+     * Messages for financeRules(), under the same prefix.
+     *
+     * @return array<string, string>
+     */
+    public static function financeMessages(string $prefix = ''): array
+    {
+        return [
+            $prefix.'hourly_rate.required_if' => 'Enter the hourly rate.',
         ];
     }
 }

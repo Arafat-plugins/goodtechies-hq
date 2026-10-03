@@ -129,6 +129,7 @@ class ProjectResource extends JsonResource
             'recurring_amount' => $finance->recurring_amount,
             'billing_frequency' => $finance->billing_frequency,
             'billing_frequency_label' => $frequency?->label(),
+            'hourly_rate' => $finance->hourly_rate,
             'contract_value' => $finance->contract_value,
             'contract_terms' => $finance->contract_terms,
             'profitability_snapshot' => $finance->profitability_snapshot,
@@ -149,6 +150,7 @@ class ProjectResource extends JsonResource
                 'can_view_finance' => false,
                 'can_manage_members' => false,
                 'can_archive' => false,
+                'can_force_delete' => false,
             ];
         }
 
@@ -159,6 +161,7 @@ class ProjectResource extends JsonResource
             'can_view_finance' => $gate->allows('viewFinance', $this->resource),
             'can_manage_members' => $gate->allows('manageMembers', $this->resource),
             'can_archive' => $gate->allows('archive', $this->resource),
+            'can_force_delete' => $gate->allows('forceDelete', $this->resource),
         ];
     }
 }

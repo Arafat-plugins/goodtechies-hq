@@ -22,13 +22,14 @@ use Illuminate\Support\Facades\Gate;
 class ProjectFinanceService
 {
     /** The money fields whose movement is audited. */
-    private const AUDITED_FIELDS = ['price', 'recurring_amount'];
+    private const AUDITED_FIELDS = ['price', 'recurring_amount', 'hourly_rate'];
 
     /** Everything a caller may write here. */
     private const FIELDS = [
         'price',
         'recurring_amount',
         'billing_frequency',
+        'hourly_rate',
         'contract_value',
         'contract_terms',
         'profitability_snapshot',

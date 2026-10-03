@@ -8,6 +8,7 @@ enum BillingFrequency: string
     case Quarterly = 'quarterly';
     case Yearly = 'yearly';
     case Custom = 'custom';
+    case Hourly = 'hourly';
 
     public function label(): string
     {
@@ -16,6 +17,7 @@ enum BillingFrequency: string
             self::Quarterly => 'Quarterly',
             self::Yearly => 'Yearly',
             self::Custom => 'Custom',
+            self::Hourly => 'Hourly',
         };
     }
 }

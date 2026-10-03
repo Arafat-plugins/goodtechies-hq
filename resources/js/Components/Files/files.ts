@@ -126,6 +126,21 @@ export function fileRoutes(surface: FileSurface, owner: FileOwnerKind, ownerId: 
     };
 }
 
+/**
+ * The endpoints for a project's INTERNAL NOTES attachments (Admins only — the server answers
+ * `viewCommercial`). Listing and uploading have their own collection; replace, history and
+ * delete are the ordinary per-file routes, which `FilePolicy::view` already guards.
+ */
+export function internalFileRoutes(projectId: number): FileRoutes {
+    const collection = `/admin/projects/${projectId}/internal-files`;
+
+    return {
+        ...fileRoutes('admin', 'projects', projectId),
+        index: collection,
+        store: collection,
+    };
+}
+
 /* ------------------------------------------------------------------- the limits */
 
 /**

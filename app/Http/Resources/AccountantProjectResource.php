@@ -84,7 +84,7 @@ class AccountantProjectResource extends JsonResource
     }
 
     /**
-     * The six columns of `project_finance`, and nothing else from that table.
+     * The seven columns of `project_finance`, and nothing else from that table.
      *
      * Its own `id`, its `project_id` and its timestamps are row bookkeeping rather than money:
      * `project_id` is already `id` above, and a finance row's own id is a handle on a record
@@ -110,6 +110,7 @@ class AccountantProjectResource extends JsonResource
             'price' => $finance->price,
             'recurring_amount' => $finance->recurring_amount,
             'billing_frequency' => $finance->billing_frequency,
+            'hourly_rate' => $finance->hourly_rate,
             'contract_value' => $finance->contract_value,
             'contract_terms' => $finance->contract_terms,
             'profitability_snapshot' => $finance->profitability_snapshot,

@@ -4,8 +4,12 @@ namespace App\Services;
 
 use App\Events\ProjectCancelled;
 use App\Exceptions\ProjectStateException;
+use App\Models\Conversation;
 use App\Models\Employee;
+use App\Models\File;
+use App\Models\Message;
 use App\Models\Project;
+use App\Models\Task;
 use App\Models\User;
 use App\Support\AuditEvent;
 use App\Support\BillingType;
@@ -17,6 +21,8 @@ use DateTimeInterface;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * Creating and running a project: members, status lifecycle, archiving.
@@ -296,6 +302,106 @@ class ProjectService
 
             return $project->refresh();
         });
+    }
+
+    /**
+     * Delete an archived project for good: its tasks, files, time, members, finance and
+     * channels go with it through the database's cascades, and the bytes of every file those
+     * cascades take are removed from disk once the delete has committed.
+     *
+     * Refused while money or paid time hangs off the project — income RESTRICTS the delete at
+     * the database anyway, and paid time is what payroll was computed from, so both are kept by
+     * keeping the project archived instead.
+     *
+     * @throws AuthorizationException
+     * @throws ProjectStateException
+     */
+    public function forceDelete(User $actor, Project $project, string $confirmName): void
+    {
+        if (! $project->isArchived()) {
+            throw ProjectStateException::deleteNeedsArchive();
+        }
+
+        if (trim($confirmName) !== $project->name) {
+            throw ProjectStateException::deleteNameMismatch();
+        }
+
+        if (DB::table('income')->where('project_id', $project->getKey())->exists()) {
+            throw ProjectStateException::deleteHasIncome();
+        }
+
+        if (DB::table('time_entries')
+            ->where('project_id', $project->getKey())
+            ->where('counts_toward_hours', true)
+            ->exists()) {
+            throw ProjectStateException::deleteHasPaidTime();
+        }
+
+        if (! Gate::forUser($actor)->allows('forceDelete', $project)) {
+            throw new AuthorizationException('You are not allowed to delete this project.');
+        }
+
+        /** @var list<array{disk: string, path: string}> $blobs */
+        $blobs = DB::transaction(function () use ($actor, $project): array {
+            $taskIds = Task::withTrashed()
+                ->where('project_id', $project->getKey())
+                ->pluck('id')
+                ->all();
+
+            $conversationIds = Conversation::query()
+                ->where('linked_project_id', $project->getKey())
+                ->when($taskIds !== [], fn ($query) => $query->orWhereIn('linked_task_id', $taskIds))
+                ->pluck('id')
+                ->all();
+
+            $files = File::withTrashed()
+                ->where(function ($query) use ($project, $taskIds, $conversationIds): void {
+                    $query->where('project_id', $project->getKey());
+
+                    if ($taskIds !== []) {
+                        $query->orWhereIn('task_id', $taskIds);
+                    }
+
+                    if ($conversationIds !== []) {
+                        $query->orWhereIn('message_id', Message::query()
+                            ->whereIn('conversation_id', $conversationIds)
+                            ->select('id'));
+                    }
+                })
+                ->get(['id', 'disk', 'path']);
+
+            $this->audit->record(
+                AuditEvent::ProjectDeleted,
+                $project,
+                [
+                    'id' => $project->getKey(),
+                    'name' => $project->name,
+                    'client' => $project->client?->name,
+                    'tasks' => count($taskIds),
+                    'files' => $files->count(),
+                ],
+                null,
+                $actor,
+            );
+
+            $project->delete();
+
+            return $files
+                ->filter(fn (File $file): bool => $file->disk !== null && $file->path !== null)
+                ->map(fn (File $file): array => ['disk' => (string) $file->disk, 'path' => (string) $file->path])
+                ->values()
+                ->all();
+        });
+
+        // After the commit: a delete that rolled back must not have lost any bytes. A blob that
+        // is already gone (a file deleted earlier) is not an error.
+        foreach ($blobs as $blob) {
+            try {
+                Storage::disk($blob['disk'])->delete($blob['path']);
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
     }
 
     /**
