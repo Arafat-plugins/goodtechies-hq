@@ -92,11 +92,10 @@ const summary = computed(() => {
         description="Every month of payroll and where it has got to. A month is drafted on the 1st from everybody's current salary, calculated against approved unpaid leave, then reviewed, approved, locked and paid."
         :breadcrumb="[{ label: 'Finance' }, { label: 'Payroll' }]"
     >
-        <template #actions>
-            <PayrollDraftControl v-if="mayDraft && periods.length > 0" :month="current_month" />
-        </template>
 
         <div class="flex min-w-0 flex-col gap-4">
+            <PayrollDraftControl v-if="mayDraft && periods.length > 0" :month="current_month" />
+
             <p class="text-sm text-muted-foreground">{{ summary }}</p>
 
             <PayrollPeriodTable v-if="periods.length > 0" :periods="periods" :currency="currency" />

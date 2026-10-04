@@ -11,7 +11,9 @@ import {
     Rows3,
 } from '@lucide/vue';
 import type { Component } from 'vue';
-import { computed, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
+import { createReusableTemplate } from '@vueuse/core';
+import { PAGE_TABLE_TOOLS } from '@/lib/pageActions';
 import DataTableBulkBar from '@/Components/DataTable/DataTableBulkBar.vue';
 import DataTableColumnMenu from '@/Components/DataTable/DataTableColumnMenu.vue';
 import type { ColumnDef, Density, SortState, TableGroup } from '@/Components/DataTable/types';
@@ -466,13 +468,73 @@ function onRowClick(row: T, event: MouseEvent): void {
     emit('row-click', row);
 }
 
-const toolbarVisible = computed(() => props.viewOptions || props.showPerPage || 'toolbar' in slots);
+/**
+ * Polish 013: when the page's first toolbar row has a table-tools host and this table has
+ * nothing else on its own toolbar row, its density / Columns controls are drawn up there.
+ * The first such table on a page takes the place; any other keeps its own row.
+ */
+const tableTools = inject(PAGE_TABLE_TOOLS, null);
+const [DefineViewOptions, ReuseViewOptions] = createReusableTemplate();
+const toolsToken = Symbol('table-tools');
+
+const toolsUp = computed(() => {
+    if (!tableTools || tableTools.host.value === null || !props.viewOptions || props.showPerPage || 'toolbar' in slots) {
+        return false;
+    }
+
+    if (tableTools.owner.value === null) {
+        tableTools.owner.value = toolsToken;
+    }
+
+    return tableTools.owner.value === toolsToken;
+});
+
+onBeforeUnmount(() => {
+    if (tableTools && tableTools.owner.value === toolsToken) {
+        tableTools.owner.value = null;
+    }
+});
+
+const toolbarVisible = computed(
+    () => (props.viewOptions && !toolsUp.value) || props.showPerPage || 'toolbar' in slots,
+);
 const headerClass = 'text-xs font-medium uppercase text-muted-foreground';
 const stickyClass = 'sticky top-0 z-10 bg-card';
 </script>
 
 <template>
     <div class="flex min-w-0 flex-col gap-4">
+        <DefineViewOptions>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <ToggleGroup
+                            type="single"
+                            variant="outline"
+                            size="sm"
+                            :model-value="density"
+                            aria-label="Row density"
+                            @update:model-value="setDensity"
+                        >
+                            <ToggleGroupItem value="comfortable" aria-label="Comfortable rows">
+                                <Rows2 aria-hidden="true" />
+                            </ToggleGroupItem>
+                            <ToggleGroupItem value="compact" aria-label="Compact rows">
+                                <Rows3 aria-hidden="true" />
+                            </ToggleGroupItem>
+                        </ToggleGroup>
+
+                        <DataTableColumnMenu
+                            :columns="allColumns"
+                            :hidden="hidden"
+                            @toggle="toggleColumn"
+                        />
+                    </div>
+        </DefineViewOptions>
+
+        <!-- Polish 013: up on the page's first toolbar row when there is a place for it. -->
+        <Teleport v-if="viewOptions && toolsUp && tableTools?.host.value" :to="tableTools.host.value">
+            <ReuseViewOptions />
+        </Teleport>
+
         <div v-if="toolbarVisible" class="flex min-w-0 flex-wrap items-center justify-between gap-2">
             <div class="flex min-w-0 flex-wrap items-center gap-2">
                 <slot name="toolbar" />
@@ -495,29 +557,7 @@ const stickyClass = 'sticky top-0 z-10 bg-card';
                     </Select>
                 </div>
 
-                <template v-if="viewOptions">
-                    <ToggleGroup
-                        type="single"
-                        variant="outline"
-                        size="sm"
-                        :model-value="density"
-                        aria-label="Row density"
-                        @update:model-value="setDensity"
-                    >
-                        <ToggleGroupItem value="comfortable" aria-label="Comfortable rows">
-                            <Rows2 aria-hidden="true" />
-                        </ToggleGroupItem>
-                        <ToggleGroupItem value="compact" aria-label="Compact rows">
-                            <Rows3 aria-hidden="true" />
-                        </ToggleGroupItem>
-                    </ToggleGroup>
-
-                    <DataTableColumnMenu
-                        :columns="allColumns"
-                        :hidden="hidden"
-                        @toggle="toggleColumn"
-                    />
-                </template>
+                <ReuseViewOptions v-if="viewOptions && !toolsUp" />
             </div>
         </div>
 

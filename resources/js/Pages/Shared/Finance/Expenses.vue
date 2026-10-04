@@ -9,12 +9,13 @@ import type {
     LedgerRecord,
     RollupSide,
 } from '@/Components/Finance/finance';
-import { financeRoutes, formatMoney } from '@/Components/Finance/finance';
+import { financeRoutes } from '@/Components/Finance/finance';
 import FinanceMonthNav from '@/Components/Finance/FinanceMonthNav.vue';
 import LedgerDeleteDialog from '@/Components/Finance/LedgerDeleteDialog.vue';
 import LedgerFormDialog from '@/Components/Finance/LedgerFormDialog.vue';
 import LedgerTable from '@/Components/Finance/LedgerTable.vue';
 import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
+import PageActionsHost from '@/Components/PageActionsHost.vue';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
@@ -69,18 +70,6 @@ const ADD_BUTTON_ID = 'finance-expenses-add';
 const menu = useMenuDialog(ADD_BUTTON_ID);
 
 const indexHref = computed(() => financeRoutes.expenses.index(props.month.value));
-
-const summary = computed(() => {
-    const count = props.records.length;
-
-    if (count === 0) {
-        return `Nothing recorded in ${props.month.label}.`;
-    }
-
-    const noun = count === 1 ? 'payment' : 'payments';
-
-    return `${count} ${noun} in ${props.month.label}, ${formatMoney(props.totals.total, props.currency)} in all.`;
-});
 
 /* ------------------------------------------------------------------ the form */
 
@@ -180,9 +169,10 @@ function confirmRemove(): void {
         </template>
 
         <div class="flex min-w-0 flex-col gap-4">
-            <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <!-- Polish 013: month, the table's controls and the page's actions on one row. -->
+            <div class="flex min-w-0 flex-wrap items-center gap-3">
                 <FinanceMonthNav :month="month" :href="(value) => financeRoutes.expenses.index(value)" />
-                <p class="text-sm text-muted-foreground">{{ summary }}</p>
+                <PageActionsHost />
             </div>
 
             <!--

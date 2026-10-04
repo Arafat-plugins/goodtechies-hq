@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, provide, shallowRef } from 'vue';
-import { PAGE_ACTIONS } from '@/lib/pageActions';
+import { PAGE_ACTIONS, PAGE_TABLE_TOOLS } from '@/lib/pageActions';
 import { cn } from '@/lib/utils';
 
 export interface Crumb {
@@ -61,6 +61,29 @@ void props.breadcrumb;
 /** Where the actions render: a claimed toolbar host, else this shell's own row. */
 const actionsHost = shallowRef<HTMLElement | null>(null);
 const actionsHome = shallowRef<HTMLElement | null>(null);
+
+/** Polish 013: the first table's view options go to the same toolbar row. */
+const toolsHost = shallowRef<HTMLElement | null>(null);
+const toolsOwner = shallowRef<symbol | null>(null);
+
+provide(PAGE_TABLE_TOOLS, {
+    host: toolsHost,
+    owner: toolsOwner,
+    claimHost: (el) => {
+        if (toolsHost.value !== null) {
+            return false;
+        }
+
+        toolsHost.value = el;
+
+        return true;
+    },
+    releaseHost: (el) => {
+        if (toolsHost.value === el) {
+            toolsHost.value = null;
+        }
+    },
+});
 
 provide(PAGE_ACTIONS, {
     host: actionsHost,

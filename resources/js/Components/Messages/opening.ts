@@ -53,6 +53,18 @@ const KEEP_CHATS = 40;
 /** This tab's memory of the chats it has shown, newest use last. Never stored anywhere. */
 const remembered = new Map<number, PreviewMessage[]>();
 
+/**
+ * Polish 014: the last full thread each chat showed in this tab (memory only, never stored).
+ * Its signed file links may have lapsed by the time it is shown again; the thread re-reads, and
+ * the server's fresh answer replaces it within the same tap (`MessageThread` merges same-id).
+ */
+const payloads = new Map<number, ThreadPayload>();
+
+/** The chat as it last looked in this tab, ready to draw at once — or `null` if never shown. */
+export function cachedThread(id: number): ThreadPayload | null {
+    return payloads.get(id) ?? null;
+}
+
 export function rememberThread(payload: Pick<ThreadPayload, 'conversation_id' | 'messages'> | null | undefined): void {
     if (payload == null || payload.conversation_id <= 0) {
         return;
@@ -75,6 +87,25 @@ export function rememberThread(payload: Pick<ThreadPayload, 'conversation_id' | 
 
     remembered.delete(payload.conversation_id);
     remembered.set(payload.conversation_id, messages);
+
+    // Polish 014: the whole thread too, so reopening it draws the REAL chat at once (Telegram's
+    // stale-while-revalidate) instead of a preview that shimmers. Only full payloads are kept.
+    if ('can_post' in payload) {
+        const full = payload as ThreadPayload;
+
+        payloads.delete(full.conversation_id);
+        payloads.set(full.conversation_id, { ...full, messages: full.messages.filter((m) => m.id > 0 && !m.pending && !m.failed) });
+
+        while (payloads.size > KEEP_CHATS) {
+            const oldest = payloads.keys().next().value;
+
+            if (oldest === undefined) {
+                break;
+            }
+
+            payloads.delete(oldest);
+        }
+    }
 
     while (remembered.size > KEEP_CHATS) {
         const oldest = remembered.keys().next().value;

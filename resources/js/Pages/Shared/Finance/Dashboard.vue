@@ -8,6 +8,7 @@ import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
 import type { FinanceMonth, MonthlyRollup } from '@/Components/Finance/finance';
 import { financeRoutes, formatMoney } from '@/Components/Finance/finance';
 import { moneyValue } from '@/Components/Finance/financeReport';
+import PageActionsHost from '@/Components/PageActionsHost.vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatCard from '@/Components/StatCard.vue';
 import { Button } from '@/Components/ui/button';
@@ -100,7 +101,7 @@ const isEmptyMonth = computed(
         </template>
 
         <section aria-labelledby="finance-month" class="flex min-w-0 flex-col gap-4">
-            <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-3">
                 <div class="flex min-w-0 flex-col gap-0.5">
                     <h2 id="finance-month" class="text-lg font-semibold tracking-tight">{{ month.label }}</h2>
                     <!--
@@ -112,7 +113,11 @@ const isEmptyMonth = computed(
                     </p>
                 </div>
 
-                <FinanceMonthNav :month="month" :href="financeRoutes.dashboard" />
+                <!-- Polish 013: the month stepper and the page actions share the heading row. -->
+
+                <div class="ml-auto"><FinanceMonthNav :month="month" :href="financeRoutes.dashboard" /></div>
+
+                <PageActionsHost inline />
             </div>
 
             <!-- The three figures Part D §13 names, in the order it names them. -->

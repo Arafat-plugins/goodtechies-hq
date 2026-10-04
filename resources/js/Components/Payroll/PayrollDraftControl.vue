@@ -58,7 +58,7 @@ function submit(): void {
 </script>
 
 <template>
-    <form class="flex min-w-0 flex-col gap-1" @submit.prevent="submit">
+    <form class="flex w-full min-w-0 flex-col gap-1" @submit.prevent="submit">
         <div class="flex min-w-0 flex-wrap items-center gap-2">
             <label :for="inputId" class="text-sm text-muted-foreground">Payroll for</label>
             <Input
@@ -70,7 +70,13 @@ function submit(): void {
                 class="w-44"
                 :aria-invalid="taken || error !== null ? 'true' : undefined"
             />
-            <Button type="submit" :variant="variant ?? 'default'" :disabled="drafting || taken || chosen === ''">
+            <!-- Polish 013: the month on the left, the Draft button at the end of the row. -->
+            <Button
+                type="submit"
+                class="ml-auto"
+                :variant="variant ?? 'default'"
+                :disabled="drafting || taken || chosen === ''"
+            >
                 <Plus aria-hidden="true" />
                 {{ drafting ? 'Drafting…' : `Draft ${label}` }}
             </Button>

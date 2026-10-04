@@ -124,6 +124,7 @@ function setRange(key: 'from' | 'to', value: string): void {
 <template>
     <div v-if="anything" class="min-w-0">
         <FilterBar
+            page-actions
             :search="null"
             :searchable="false"
             :filters="filterDefs"

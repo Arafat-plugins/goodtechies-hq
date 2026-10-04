@@ -65,6 +65,7 @@ function clearFilters(): void {
     <PageShell title="Projects" description="The projects you are assigned to.">
         <div class="flex min-w-0 flex-col gap-4">
             <FilterBar
+                page-actions
                 :search="filters.search"
                 :active="hasFilters"
                 placeholder="Search projects…"

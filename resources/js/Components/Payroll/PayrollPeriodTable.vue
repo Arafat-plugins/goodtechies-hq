@@ -83,10 +83,7 @@ function nextFor(period: PayrollPeriod): string {
         <!-- ── md and up: the table ────────────────────────────────────────────────── -->
         <div class="hidden min-w-0 rounded-lg border border-border bg-card shadow-raised md:block">
             <table class="w-full text-sm">
-                <caption class="px-4 pt-4 text-left text-xs text-muted-foreground">
-                    Every month of payroll, newest first. The net total is the sum of that month’s lines,
-                    worked out by the database.
-                </caption>
+                <caption class="sr-only">Every month of payroll, newest first.</caption>
                 <thead>
                     <tr class="border-b border-border">
                         <th scope="col" class="px-4 py-3 text-left font-medium text-muted-foreground">Month</th>

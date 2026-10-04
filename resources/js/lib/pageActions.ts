@@ -15,3 +15,20 @@ export interface PageActionsSlot {
 }
 
 export const PAGE_ACTIONS: InjectionKey<PageActionsSlot> = Symbol('page-actions');
+
+/**
+ * Polish 013: the same idea for a table's own controls (row density, Columns). The first
+ * `DataTable` that asks for the host claimed by the page's `PageActionsHost` draws its view
+ * options there — on the page's first row, just before the page actions — instead of on a row
+ * of their own above the table.
+ */
+export interface TableToolsSlot {
+    host: ShallowRef<HTMLElement | null>;
+    /** Claimed by the toolbar row (PageActionsHost). */
+    claimHost: (el: HTMLElement) => boolean;
+    releaseHost: (el: HTMLElement) => void;
+    /** Claimed by the one DataTable whose controls go there. */
+    owner: ShallowRef<symbol | null>;
+}
+
+export const PAGE_TABLE_TOOLS: InjectionKey<TableToolsSlot> = Symbol('page-table-tools');

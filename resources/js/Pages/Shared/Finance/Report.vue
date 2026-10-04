@@ -10,6 +10,7 @@ import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
 import type { FinanceMonth, MonthlyRollup } from '@/Components/Finance/finance';
 import { financeRoutes, formatMoney } from '@/Components/Finance/finance';
 import { financeTrendHref, moneyValue, type FinanceProjectCut, type FinanceTrend } from '@/Components/Finance/financeReport';
+import PageActionsHost from '@/Components/PageActionsHost.vue';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
@@ -116,7 +117,7 @@ const trendRange = computed(() => {
         </template>
 
         <section aria-labelledby="report-month" class="flex min-w-0 flex-col gap-4">
-            <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-3">
                 <div class="flex min-w-0 flex-col gap-0.5">
                     <h2 id="report-month" class="text-lg font-semibold tracking-tight">{{ month.label }}</h2>
                     <p class="text-xs text-muted-foreground">
@@ -124,7 +125,11 @@ const trendRange = computed(() => {
                     </p>
                 </div>
 
-                <FinanceMonthNav :month="month" :href="monthHref" />
+                <!-- Polish 013: the month stepper and the page actions share the heading row. -->
+
+                <div class="ml-auto"><FinanceMonthNav :month="month" :href="monthHref" /></div>
+
+                <PageActionsHost inline />
             </div>
 
             <div class="grid min-w-0 gap-4 sm:grid-cols-3">

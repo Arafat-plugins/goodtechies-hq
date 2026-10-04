@@ -43,7 +43,11 @@ const props = defineProps<{
 const visible = computed(() => props.meta.last_page > 1);
 
 /** Laravel puts "« Previous" and "Next »" in `meta.links` too; only the numbered ones belong here. */
-const pages = computed(() => props.meta.links.filter((link) => link.page !== null));
+// Polish 013: newer Laravel gives the "Next »" link a page number too, so it leaked through as
+// a literal "Next &raquo;" — keep only the links whose label IS a number.
+const pages = computed(() =>
+    props.meta.links.filter((link) => link.page !== null && /^\d+$/.test(link.label.trim())),
+);
 
 const summary = computed(() => {
     const from = props.meta.from ?? 0;

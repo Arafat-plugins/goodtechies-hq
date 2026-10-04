@@ -169,7 +169,8 @@ export function playChime(): void {
  * `public/sounds/`, each played through ONE lazily created `HTMLAudioElement` that is reused —
  * rewound to the start each time, so two quick sends replay rather than stack up.
  */
-const MESSAGE_SOUND_VOLUME = 0.6;
+// Polish 013: the sent sound is quieter than the arrival sound — it confirms your own action.
+const MESSAGE_SOUND_VOLUME: Record<'received' | 'sent', number> = { received: 0.6, sent: 0.25 };
 const players: Partial<Record<'received' | 'sent', HTMLAudioElement>> = {};
 
 function playFile(which: 'received' | 'sent'): void {
@@ -183,7 +184,7 @@ function playFile(which: 'received' | 'sent'): void {
         if (player === undefined) {
             player = new Audio(`/sounds/message-${which}.mp3`);
             player.preload = 'auto';
-            player.volume = MESSAGE_SOUND_VOLUME;
+            player.volume = MESSAGE_SOUND_VOLUME[which];
             players[which] = player;
         }
 

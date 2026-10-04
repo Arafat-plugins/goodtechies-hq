@@ -159,7 +159,7 @@ const selected = ref<AuditEntry | null>(props.entry);
         :breadcrumb="[{ label: 'Admin' }, { label: 'Audit log' }]"
     >
         <div class="flex min-w-0 flex-col gap-4">
-            <FilterBar :filters="filterDefs" :searchable="false" @clear="clearFilters" />
+            <FilterBar page-actions :filters="filterDefs" :searchable="false" @clear="clearFilters" />
 
             <DataTable
                 id="admin-audit-log"

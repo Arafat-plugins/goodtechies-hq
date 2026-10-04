@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3';
+import { Link, usePage } from '@inertiajs/vue3';
 import { ChevronDown, FolderKanban, Hash, Megaphone, MessageSquare, Users, UsersRound } from '@lucide/vue';
 import { computed, ref, useId, watch } from 'vue';
 import ConversationAvatar from '@/Components/Messages/ConversationAvatar.vue';
@@ -11,7 +11,7 @@ import {
     formatListTime,
     messagesHref,
 } from '@/Components/Messages/messages';
-import { OPEN_PROPS, finishOpening, startOpening } from '@/Components/Messages/opening';
+import { OPEN_PROPS, cachedThread, finishOpening, startOpening } from '@/Components/Messages/opening';
 import { personTone } from '@/Components/Messages/people';
 import { isOnline } from '@/Components/Messages/presence';
 import { isViewingConversation } from '@/Components/Realtime/shell';
@@ -108,6 +108,26 @@ function preview(row: ConversationSummary): string {
 function folderPreview(rows: ConversationSummary[]): string {
     return rows.length > 0 ? `${rows[0].label}: ${preview(rows[0])}` : '';
 }
+
+/**
+ * Polish 014 — open a chat the way Telegram does. A chat this tab has shown before is drawn
+ * from memory the moment it is tapped (no preview, no shimmer for pictures already loaded),
+ * and the server's answer to the same tap quietly brings it up to date. A chat never shown
+ * yet keeps the opening preview until its thread arrives.
+ */
+const page = usePage();
+
+function openChat(id: number): void {
+    const cached = cachedThread(id);
+
+    const current = (page.props as { active?: { conversation_id?: number } | null }).active;
+
+    if (cached !== null && current?.conversation_id !== id) {
+        (page.props as Record<string, unknown>).active = cached;
+    }
+
+    startOpening(id);
+}
 </script>
 
 <template>
@@ -124,7 +144,7 @@ function folderPreview(rows: ConversationSummary[]): string {
                     preserve-scroll
                     preserve-state
                     :only="OPEN_PROPS"
-                    @start="startOpening(entry.row.id)"
+                    @start="openChat(entry.row.id)"
                     @finish="finishOpening(entry.row.id)"
                     :aria-current="entry.row.id === activeId ? 'page' : undefined"
                     :class="
@@ -225,7 +245,7 @@ function folderPreview(rows: ConversationSummary[]): string {
                                 preserve-scroll
                                 preserve-state
                                 :only="OPEN_PROPS"
-                                @start="startOpening(row.id)"
+                                @start="openChat(row.id)"
                                 @finish="finishOpening(row.id)"
                                 :aria-current="row.id === activeId ? 'page' : undefined"
                                 :class="
