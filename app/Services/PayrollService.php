@@ -163,6 +163,30 @@ class PayrollService
         });
     }
 
+    /**
+     * Remove one salary row entered by mistake (polish 002).
+     *
+     * A hard delete, audited as `salary.deleted` with the whole row as `old`, in one
+     * transaction. Payroll items already drafted copied their figures when they were drafted,
+     * so no past month changes; the next draft reads whichever row is now in force.
+     */
+    public function deleteSalary(User $actor, EmployeeSalary $salary): void
+    {
+        if (! Gate::forUser($actor)->allows('delete', $salary)) {
+            throw new AuthorizationException('You are not allowed to delete salaries.');
+        }
+
+        DB::transaction(function () use ($actor, $salary): void {
+            $old = $salary->loadMissing('employee.user')->auditValues();
+            $id = (int) $salary->getKey();
+            $type = $salary->getMorphClass();
+
+            $salary->delete();
+
+            $this->audit->recordFor(AuditEvent::SalaryDeleted, $type, $id, $old, null, $actor);
+        });
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Drafting a month
@@ -750,6 +774,22 @@ class PayrollService
      */
     public function markPaid(User $actor, PayrollPeriod $period): PayrollPeriod
     {
+        // Polish 002: the client dropped Lock as a separate step. An Approved month is paid in
+        // one press — it passes through `locked` inside the same transaction, so the machine,
+        // `locked_at` and the finance close are exactly what two presses would have left.
+        if ($period->status === PayrollStatus::Approved) {
+            if (! Gate::forUser($actor)->allows('markPaid', $period)) {
+                throw new AuthorizationException('You are not allowed to mark paid payroll.');
+            }
+
+            return DB::transaction(function () use ($period): PayrollPeriod {
+                $period->applyTransition(PayrollStatus::Locked)->save();
+                $period->applyTransition(PayrollStatus::Paid)->save();
+
+                return $period->refresh();
+            });
+        }
+
         return $this->move($actor, $period, 'markPaid', PayrollStatus::Paid);
     }
 

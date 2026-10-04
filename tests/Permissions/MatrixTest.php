@@ -3,6 +3,7 @@
 use App\Models\Client;
 use App\Models\Conversation;
 use App\Models\Employee;
+use App\Models\EmployeeSalary;
 use App\Models\Expense;
 use App\Models\File;
 use App\Models\FinanceCategory;
@@ -220,6 +221,12 @@ function matrixParameters(): array
         // ACCOUNTANT hold `payroll.view_others` and see every line.
         '{item}' => (string) PayrollItem::query()
             ->whereHas('employee.user', fn ($query) => $query->where('email', 'yaseen@goodtechies.test'))
+            ->orderBy('id')
+            ->firstOrFail()->id,
+
+        // Polish 002: one of Tapu's salary rows, consumed by the ADMIN cell of the delete row.
+        '{salary}' => (string) EmployeeSalary::query()
+            ->whereHas('employee.user', fn ($query) => $query->where('email', 'tapu@goodtechies.test'))
             ->orderBy('id')
             ->firstOrFail()->id,
 
@@ -1198,6 +1205,7 @@ function permissionMatrix(): array
 
         ['GET', 'salaries', $payrollAdmin(200)],
         ['PUT', 'salaries/{employee}', $payrollAdmin(302)],
+        ['DELETE', 'salaries/rows/{salary}', $payrollAdmin(302)],
 
         // The Admin side. Each consumes the state it arrives in, so the ACCOUNTANT cell that
         // follows the ADMIN one is refused for two reasons at once — no key, and the wrong

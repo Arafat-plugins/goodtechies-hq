@@ -155,6 +155,11 @@ export function salaryUpdateRoute(employeeId: number): string {
     return `/salaries/${employeeId}`;
 }
 
+/** Delete one salary row (polish 002). */
+export function salaryDeleteRoute(salaryId: number): string {
+    return `/salaries/rows/${salaryId}`;
+}
+
 /**
  * `2026-09-01` → `1 September 2026`.
  *

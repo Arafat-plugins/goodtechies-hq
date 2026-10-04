@@ -44,6 +44,7 @@ it('pushes a DM to the other person as a Message, titled with the sender, never 
         && $job->category === PushCategory::Messages
         && $job->message['title'] === $this->admin->name
         && $job->message['body'] === 'Hello Tapu'
+        && $job->message['sender'] === $this->admin->name
         && str_contains($job->message['url'], '/messages?conversation='.$this->dm->id)
         && $job->messageId === (int) $message->getKey());
 
@@ -61,8 +62,13 @@ it('does not also push a DM as an Alert', function () {
 it('pushes a team channel line to every other active messaging user', function () {
     $this->messages->post($this->admin, $this->team, 'Morning, team');
 
+    // Telegram's form for a group chat (client reference, 2026-10-04): the chat as the title,
+    // "Sender: text" as the body, and the sender for the avatar.
     Queue::assertPushed(SendWebPush::class, fn (SendWebPush $job): bool => $job->userId === $this->tapu->id
-        && $job->category === PushCategory::Messages);
+        && $job->category === PushCategory::Messages
+        && $job->message['title'] === $this->team->labelFor($this->tapu)
+        && $job->message['body'] === $this->admin->name.': Morning, team'
+        && $job->message['sender'] === $this->admin->name);
 
     Queue::assertNotPushed(SendWebPush::class, fn (SendWebPush $job): bool => $job->userId === $this->admin->id);
 });

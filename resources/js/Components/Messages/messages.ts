@@ -190,21 +190,20 @@ export type ConversationTypeKey = 'team' | 'project' | 'task' | 'dm' | 'announce
 /**
  * Which of the two chat treatments a conversation gets.
  *
- * - `sided` — a DM. Two people, so the SIDE says who spoke and the name is redundant; the
- *   viewer's own messages sit right in a solid brand bubble and the other person's sit left.
- * - `stacked` — every channel: team, announcements, a project channel, a task discussion. "Who
- *   said this" is the fact worth carrying, so every message stays left with its avatar and its
- *   author line, and the viewer's own gain a tint rather than a side.
+ * - `sided` — Telegram-style: the viewer's own messages sit right in a solid brand bubble and
+ *   everybody else's sit left, two sides of bubbles.
+ * - `stacked` — every message left with its avatar and its author line, the viewer's own with a
+ *   tint rather than a side.
  *
- * The 24 Sep redesign gave all five types `stacked`, which is right for four of them and wrong
- * for the fifth (POLISH-BACKLOG §B). A `null` type — the project Discussion tab mounts through
- * `emptyThread()` before its first fetch — is `stacked`, because a channel is what it turns out
- * to be and a thread must not flip layout when the payload lands.
+ * Every conversation on the Messages page is drawn Telegram-style (`sided`): DMs, groups, team,
+ * announcements and project channels alike. Only a task's discussion (inside the task drawer)
+ * keeps the stacked layout (2026-10-04, client asked for the Telegram reference). A `null`
+ * type — the project Discussion tab before its first fetch — is `sided` too.
  */
 export type ThreadLayout = 'sided' | 'stacked';
 
 export function threadLayout(type: ConversationTypeKey | null): ThreadLayout {
-    return type === 'dm' ? 'sided' : 'stacked';
+    return type === 'task' ? 'stacked' : 'sided';
 }
 
 /** One row of the Messages page's left rail. */
@@ -227,6 +226,84 @@ export interface ConversationSummary {
         excerpt: string;
         created_at: string | null;
     } | null;
+}
+
+/**
+ * One row of the Telegram-style chat list (2026-10-04): a conversation, or the single
+ * "Projects" folder that holds every project channel which has at least one message.
+ */
+export type ChatListEntry =
+    | { kind: 'chat'; row: ConversationSummary }
+    | { kind: 'projects'; rows: ConversationSummary[]; unread: number; latestAt: string | null };
+
+function activityOf(row: ConversationSummary): number {
+    const at = row.last_message?.created_at ? Date.parse(row.last_message.created_at) : Number.NaN;
+
+    return Number.isNaN(at) ? Number.NEGATIVE_INFINITY : at;
+}
+
+/**
+ * The chat list, newest activity first. Project channels leave the main list and go into one
+ * folder entry — only those with a message; a project nobody has written in is not shown at
+ * all. The folder sits where its newest project message puts it, and carries the projects'
+ * unread total. Rows that have never had a message keep their server order, after the rest.
+ */
+export function chatListEntries(conversations: ConversationSummary[]): ChatListEntry[] {
+    const projects = conversations
+        .filter((row) => row.type === 'project' && row.last_message !== null)
+        .map((row, index) => ({ row, index }))
+        .sort((a, b) => activityOf(b.row) - activityOf(a.row) || a.index - b.index)
+        .map(({ row }) => row);
+
+    const entries: { entry: ChatListEntry; at: number; index: number }[] = conversations
+        .filter((row) => row.type !== 'project' && row.type !== 'task')
+        .map((row, index) => ({ entry: { kind: 'chat', row } as ChatListEntry, at: activityOf(row), index }));
+
+    if (projects.length > 0) {
+        entries.push({
+            entry: {
+                kind: 'projects',
+                rows: projects,
+                unread: projects.reduce((sum, row) => sum + row.unread_count, 0),
+                latestAt: projects[0].last_message?.created_at ?? null,
+            },
+            at: activityOf(projects[0]),
+            index: entries.length,
+        });
+    }
+
+    return entries.sort((a, b) => b.at - a.at || a.index - b.index).map(({ entry }) => entry);
+}
+
+/**
+ * The time on a chat-list row, as Telegram writes it: the clock for today, the weekday within
+ * the last 6 days, else the day and month ("1 Oct"), with the year when it is not this year.
+ */
+export function formatListTime(value: string | null | undefined, now: Date = new Date()): string {
+    if (!value) {
+        return '';
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    if (date.getTime() >= startOfToday) {
+        return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(date);
+    }
+
+    if (date.getTime() >= startOfToday - 6 * dayMs) {
+        return new Intl.DateTimeFormat('en-GB', { weekday: 'short' }).format(date);
+    }
+
+    return new Intl.DateTimeFormat('en-GB', date.getFullYear() === now.getFullYear()
+        ? { day: 'numeric', month: 'short' }
+        : { day: 'numeric', month: 'short', year: 'numeric' }).format(date);
 }
 
 /** The banner the plan asks an announcement to raise. */

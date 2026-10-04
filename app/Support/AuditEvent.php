@@ -114,6 +114,9 @@ enum AuditEvent: string
     // approval would be the log recording that the software worked.
     case LeaveBalanceAdjusted = 'leave.balance_adjusted';
     case SalaryChanged = 'salary.changed';
+    // Polish 002: an Admin removes a salary row entered by mistake. A hard delete, so the
+    // audit row's `old` value is the whole of what the row said.
+    case SalaryDeleted = 'salary.deleted';
     case PayrollApproved = 'payroll.approved';
     case PayrollLockReversed = 'payroll.lock_reversed';
     case ExpenseCreated = 'expense.created';
@@ -279,6 +282,7 @@ enum AuditEvent: string
             self::LeaveBalanceAdjusted => 'Leave balance adjusted',
 
             self::SalaryChanged => 'Salary changed',
+            self::SalaryDeleted => 'Salary deleted',
             self::PayrollApproved => 'Payroll approved',
             self::PayrollLockReversed => 'Payroll lock reversed',
             self::ExpenseCreated => 'Expense recorded',
@@ -348,6 +352,7 @@ enum AuditEvent: string
             self::LeaveBalanceAdjusted => self::GROUP_LEAVE,
 
             self::SalaryChanged,
+            self::SalaryDeleted,
             self::PayrollApproved,
             self::PayrollLockReversed,
             self::ExpenseCreated,

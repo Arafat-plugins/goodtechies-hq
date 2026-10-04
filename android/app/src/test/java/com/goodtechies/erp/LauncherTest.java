@@ -192,4 +192,25 @@ public class LauncherTest {
         assertNotNull("still nothing on screen after the timeout", next);
         assertEquals(WebViewFallbackActivity.class.getName(), next.getComponent().getClassName());
     }
+
+    @Test
+    public void theAppWritesItsCookiesOutWhenAScreenGoesToTheBackground() {
+        // GoodErpApplication is what keeps the login after the app is swiped away (WebView mode).
+        assertTrue(ApplicationProvider.getApplicationContext() instanceof GoodErpApplication);
+    }
+
+    @Test
+    @Config(sdk = 35)
+    public void theWebViewScreenStaysBelowTheStatusBarOnAndroid15() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        ActivityInfo info = context.getPackageManager().getActivityInfo(
+                new ComponentName(context, WebViewFallbackActivity.class), 0);
+        android.content.res.TypedArray a = context.getTheme().obtainStyledAttributes(
+                info.theme, new int[] {android.R.attr.windowOptOutEdgeToEdgeEnforcement});
+        try {
+            assertTrue("the WebView screen is drawn under the status bar", a.getBoolean(0, false));
+        } finally {
+            a.recycle();
+        }
+    }
 }

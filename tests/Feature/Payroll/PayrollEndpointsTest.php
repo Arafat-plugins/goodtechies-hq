@@ -234,9 +234,9 @@ it('renders the payroll period detail for the admin and for the accountant', fun
             ->has('leave')
             // The six rungs of the ladder, resolved on the server so no Vue file holds a
             // second copy of the transition map.
-            ->has('statuses', 6)
+            ->has('statuses', 5)
             ->where('statuses.0.value', 'draft')
-            ->where('statuses.5.value', 'paid'));
+            ->where('statuses.4.value', 'paid'));
 })->with(['admin', 'accountant'])->group('phase9', 'payroll');
 
 it('refuses every payroll route to a role holding no payroll.draft key', function (string $role) {
@@ -654,4 +654,26 @@ it('blocks a September finance write once the month is locked, and unblocks it w
     $income = $finance->recordIncome($accountant, payrollEndpointsIncomeBody());
 
     expect($income->date->toDateString())->toBe(PAYROLL_ENDPOINTS_MONTH_DAY);
+})->group('phase9', 'payroll');
+
+it('pays an approved month in one press, closing it on the way (polish 002)', function () {
+    $period = payrollEndpointsWalkTo(PayrollStatus::Approved);
+
+    $this->actingAs($this->admin)->get("/payroll/{$period->id}")
+        ->assertInertia(fn ($page) => $page->where('period.available_transitions', ['locked', 'paid']));
+
+    $this->actingAs($this->admin)->from("/payroll/{$period->id}")->post("/payroll/{$period->id}/paid")
+        ->assertSessionHas('success');
+
+    $fresh = $period->fresh();
+    expect($fresh->status)->toBe(PayrollStatus::Paid)
+        ->and($fresh->locked_at)->not->toBeNull();
+})->group('phase9', 'payroll');
+
+it('still refuses paid to the accountant on an approved month (polish 002)', function () {
+    $period = payrollEndpointsWalkTo(PayrollStatus::Approved);
+
+    $this->actingAs($this->accountant)->post("/payroll/{$period->id}/paid")->assertForbidden();
+
+    expect($period->fresh()->status)->toBe(PayrollStatus::Approved);
 })->group('phase9', 'payroll');

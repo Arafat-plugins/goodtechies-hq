@@ -217,7 +217,11 @@ class PayrollController extends Controller
                     'label' => $status->label(),
                     'state' => $status->tone(),
                 ],
-                PayrollStatus::cases(),
+                // Polish 002: Locked is no longer a step anybody presses, so the spine skips it.
+                array_values(array_filter(
+                    PayrollStatus::cases(),
+                    fn (PayrollStatus $status): bool => $status !== PayrollStatus::Locked,
+                )),
             ),
 
             'currency' => (string) $this->settings->get('currency'),

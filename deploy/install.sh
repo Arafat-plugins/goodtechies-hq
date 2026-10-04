@@ -849,6 +849,8 @@ elif [ "$SKIP_CERTBOT" != "1" ] && { [ -n "$CERTBOT_EMAIL" ] || [ -d "/etc/letse
     certbot_args=(--nginx --non-interactive --agree-tos --keep-until-expiring --redirect -d "$DOMAIN")
     [ -z "$CERTBOT_EMAIL" ] || certbot_args+=(-m "$CERTBOT_EMAIL")
     certbot "${certbot_args[@]}"
+    # Certbot's https block has no http2; one connection per phone instead of six (2026-10-04).
+    bash "$DEPLOY_DIR/http2.sh" "/etc/nginx/sites-available/$SITE_NAME" || true
 else
     echo "CERTBOT_EMAIL not set or SKIP_CERTBOT=1, skipping; run later:"
     echo "  certbot --nginx --redirect -m you@example.com -d $DOMAIN"

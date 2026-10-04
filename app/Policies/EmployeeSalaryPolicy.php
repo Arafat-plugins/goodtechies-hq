@@ -69,4 +69,13 @@ class EmployeeSalaryPolicy extends Policy
     {
         return $this->allows($user, Permission::PayrollApprove);
     }
+
+    /**
+     * Remove one salary row (polish 002) — the Admin who may set salaries may also take back a
+     * row entered by mistake. Months already drafted keep their own copied figures.
+     */
+    public function delete(User $user, EmployeeSalary $salary): bool
+    {
+        return $this->allows($user, Permission::PayrollApprove);
+    }
 }

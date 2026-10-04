@@ -17,6 +17,14 @@ export function pushSupported(): boolean {
     return typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 
+/**
+ * Whether this page runs in the Android app's own WebView — the backup the app opens when
+ * Chrome cannot take over. WebView has no push service, so notifications need Chrome mode.
+ */
+export function inAppWebView(): boolean {
+    return typeof navigator !== 'undefined' && /; wv\)/.test(navigator.userAgent);
+}
+
 export async function deviceState(): Promise<PushDeviceState> {
     if (!pushSupported()) {
         return 'unsupported';

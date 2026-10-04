@@ -3,7 +3,8 @@ import { useForm } from '@inertiajs/vue3';
 import { computed, useId, watch } from 'vue';
 import type { PayrollItem, PayrollLeaveBreakdown } from '@/Components/Payroll/payroll';
 import {
-    PAYROLL_ADJUSTABLE,
+    PAYROLL_ADJUSTABLE_ALL,
+    payrollAdjustableFor,
     PAYROLL_FIELD_LONG_LABELS,
     formatMoney,
     leaveImpactSentence,
@@ -82,6 +83,9 @@ const form = useForm<Record<string, string>>({
     admin_notes: '',
 });
 
+// Polish 002: allowance is offered only on a line that still carries one, so it can be zeroed.
+const adjustable = computed(() => payrollAdjustableFor(props.item ? [props.item] : []));
+
 const employeeName = computed(() => props.item?.employee?.name ?? 'this line');
 
 /** May the Admin write the personal note? The server answered; this only renders it. */
@@ -108,7 +112,7 @@ const leaveSentence = computed(() =>
 const fieldIdBase = useId();
 const fieldIds: Record<string, string> = {};
 
-for (const field of PAYROLL_ADJUSTABLE) {
+for (const field of PAYROLL_ADJUSTABLE_ALL) {
     fieldIds[field] = `${fieldIdBase}-${field}`;
 }
 
@@ -126,7 +130,7 @@ function submit(): void {
         const payload: Record<string, unknown> = {};
 
         if (props.figuresEditable && item.permissions.can_update) {
-            for (const field of PAYROLL_ADJUSTABLE) {
+            for (const field of adjustable.value) {
                 payload[field] = data[field];
             }
         }
@@ -171,7 +175,7 @@ watch(
             return;
         }
 
-        for (const field of PAYROLL_ADJUSTABLE) {
+        for (const field of adjustable.value) {
             form[field] = item[field];
         }
 
@@ -188,9 +192,9 @@ watch(
                 <DialogTitle>{{ employeeName }} — {{ monthLabel }}</DialogTitle>
                 <DialogDescription>
                     <template v-if="figuresEditable && item?.permissions.can_update">
-                        Base, allowance, bonus, deduction and advance are yours to set. Leave impact and the net
+                        Base, bonus, deduction and advance are yours to set. Leave impact and the net
                         are not: one comes from approved unpaid leave when Calculate runs, the other is worked
-                        out by the database from the five figures above it.
+                        out by the database from the figures above it.
                     </template>
                     <template v-else-if="canAnnotate">
                         The figures on this line are settled and can no longer be changed. The personal note can.
@@ -206,7 +210,7 @@ watch(
                     v-if="figuresEditable && item.permissions.can_update"
                     class="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2"
                 >
-                    <div v-for="field in PAYROLL_ADJUSTABLE" :key="field" class="flex min-w-0 flex-col gap-2">
+                    <div v-for="field in adjustable" :key="field" class="flex min-w-0 flex-col gap-2">
                         <Label :for="fieldIds[field]">{{ PAYROLL_FIELD_LONG_LABELS[field] }}</Label>
                         <Input
                             :id="fieldIds[field]"
@@ -235,7 +239,7 @@ watch(
                         {{ employeeName }}’s figures for {{ monthLabel }}, which can no longer be changed.
                     </caption>
                     <tbody>
-                        <tr v-for="field in PAYROLL_ADJUSTABLE" :key="field" class="border-b border-border/60">
+                        <tr v-for="field in adjustable" :key="field" class="border-b border-border/60">
                             <th scope="row" class="py-2 pr-3 text-left font-normal text-muted-foreground">
                                 {{ PAYROLL_FIELD_LONG_LABELS[field] }}
                             </th>
@@ -264,7 +268,7 @@ watch(
                         </span>
                     </div>
                     <p class="text-xs text-muted-foreground">
-                        Worked out by the database: base plus allowance plus bonus, less deduction, advance and
+                        Worked out by the database: base plus bonus, less deduction, advance and
                         leave impact. It updates when you save, not while you type.
                     </p>
                 </div>

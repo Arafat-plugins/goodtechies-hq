@@ -62,7 +62,7 @@ new fingerprint.
 
 - Chrome (or another browser that can run it full screen) available → the site opens in it.
 - No such browser, or Chrome refuses the session → the site opens in the app's own WebView.
-- The launch throws, or Chrome has not covered the screen within 8 s → the app's own WebView.
+- The launch throws, or Chrome has not covered the screen within 12 s → the app's own WebView.
 
 `app/src/test/java/com/goodtechies/erp/LauncherTest.java` proves each case by starting the real
 launcher in a simulated Android (Robolectric). Run it before shipping an APK:

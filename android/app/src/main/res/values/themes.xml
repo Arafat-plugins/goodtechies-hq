@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The in-app WebView screen (used when Chrome is not available). -->
+    <style name="Theme.GoodErp.WebView" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
+</resources>

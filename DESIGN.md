@@ -508,6 +508,8 @@ Three things this table is load-bearing for:
 - **The bubble's side and its squared tail corner** carry who spoke, so the fill is not doing that
   alone either.
 
+**Custom utility `chat-wallpaper` (`app.css`, Telegram reference, 4 Oct 2026):** the background behind an open conversation — `--muted` with a faint dot pattern drawn from `--foreground` at 9%, so it follows light and dark with no new colour.
+
 **Messaging polish (28 Sep 2026).** The composer is one pill (`rounded-3xl`, `border-input`,
 `bg-card`): Attach, the textarea, the mic and "@ Mentions" inside it, and **Send joined to its right
 end** as a `--primary` segment (`rounded-r-3xl`). The textarea has no border of its own; its focus

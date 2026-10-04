@@ -12,12 +12,12 @@ import {
     ChartPie,
     ClipboardCheck,
     Clock,
-    FileText,
     FolderKanban,
     Gauge,
     HandCoins,
     LayoutDashboard,
     ListChecks,
+    ListTodo,
     MessagesSquare,
     PartyPopper,
     Receipt,
@@ -39,33 +39,20 @@ export const adminNav: NavGroup[] = [
     {
         label: 'My work',
         items: [
-            // My Tasks, Due Today and Overdue used to open here. They are now the scope dropdown
-            // on the Tasks toolbar (`/admin/tasks?scope=mine|due-today|overdue`), so an Admin's
-            // own plate and the agency's are one screen read two ways; the old `/admin/my-tasks`
-            // URLs 302 there. What is left in this group is the Admin as a person, not as a
-            // manager of work.
+            // Polish 002 (Faruk's ERP issues doc): the top block is My Attendance, then the
+            // Dashboard and My Tasks. My Leave and My Payslip left the sidebar — their shared
+            // routes (`/leave`, `/payslip`) still work, and the Company group that held only the
+            // Dashboard is gone because the Dashboard now sits here.
             // An Admin's own attendance. It points at the SHARED route, because clocking in is
-            // a fact about the person rather than about the shell — Part D §8's office
-            // employees include both Admins — and the page picks its layout from the viewer's
-            // surface, the way Profile does.
+            // a fact about the person rather than about the shell, and the page picks its
+            // layout from the viewer's surface, the way Profile does.
             { label: 'My Attendance', href: '/attendance', icon: UserCheck },
-            // An Admin's own leave. It points at the SHARED route, because applying for leave
-            // is a fact about the person rather than about the shell — Part C §1 gives that
-            // cell to every role — and the page picks its layout from the viewer's surface,
-            // exactly as My Attendance above it does.
-            { label: 'My Leave', href: '/leave', icon: CalendarOff },
-            // Phase 9. An Admin's own payslip. It points at the SHARED `/payslip`, because
-            // Part C §1 gives *every* role "view own payslip" and Part E's Phase 9 names
-            // "Employee/Remote/**Admin (self)** and the Accountant in its own shell". Being
-            // able to read everybody's payroll is a different question, asked by a different
-            // key on a different screen — this row is the personal one, which is why it sits in
-            // MY WORK beside My Attendance and My Leave rather than in FINANCE beside Payroll.
-            { label: 'My Payslip', href: '/payslip', activePrefix: '/payslip', icon: FileText },
+            { label: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
+            // The Tasks toolbar's "mine" scope — the old `/admin/my-tasks` 302s here. The full
+            // URL is a longer claim than the Tasks row's `/admin/tasks` prefix, so this row
+            // lights while it is open (`activeItem`).
+            { label: 'My Tasks', href: '/admin/tasks?scope=mine', icon: ListTodo },
         ],
-    },
-    {
-        label: 'Company',
-        items: [{ label: 'Company Dashboard', href: '/admin/dashboard', icon: LayoutDashboard }],
     },
     {
         label: 'Work',

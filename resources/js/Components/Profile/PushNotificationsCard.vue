@@ -18,7 +18,9 @@ import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
 import { Label } from '@/Components/ui/label';
 import { Switch } from '@/Components/ui/switch';
-import { deviceState, type PushDeviceState, turnOff, turnOn } from '@/lib/push';
+import { deviceState, inAppWebView, type PushDeviceState, turnOff, turnOn } from '@/lib/push';
+
+const webView = inAppWebView();
 
 const props = defineProps<{
     push: PushSettings;
@@ -85,6 +87,10 @@ function save(): void {
         <CardContent class="flex flex-col gap-4">
             <div v-if="state !== 'checking'" class="flex min-w-0 flex-col gap-2">
                 <p v-if="!configured" class="text-sm text-muted-foreground">Notifications aren't set up on the server yet.</p>
+                <p v-else-if="state === 'unsupported' && webView" class="text-sm text-muted-foreground">
+                    goodERP is running in its backup browser because Chrome couldn't open it on this phone, and the backup
+                    browser can't show notifications. Install or update Google Chrome, then close and reopen the goodERP app.
+                </p>
                 <p v-else-if="state === 'unsupported'" class="text-sm text-muted-foreground">
                     This browser can't show notifications. On Android, use the goodERP app or Chrome.
                 </p>

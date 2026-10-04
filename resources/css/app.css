@@ -56,8 +56,8 @@
     --primary: oklch(0.56 0.205 34.4);              /* #D12D00 — 5.13:1 on card */
     --primary-hover: oklch(0.50 0.205 34.4);        /* #BC0A00 — 6.48:1 on background */
     --primary-foreground: oklch(0.99 0 0);          /* #FCFCFC — 4.99:1 on primary */
-    --bubble-own: oklch(0.42 0 0);                  /* own DM bubble, client's colour, 12-77; ~9:1 */
-    --bubble-own-foreground: oklch(0.99 0 0);       /* own DM bubble, client's colour, 12-77; ~9:1 */
+    --bubble-own: oklch(0.55 0.17 256);             /* own bubble, Telegram blue (client reference, 2026-10-04; was the client's grey, 12-77); ~5:1 */
+    --bubble-own-foreground: oklch(0.99 0 0);       /* own bubble, Telegram blue (client reference, 2026-10-04; was the client's grey, 12-77); ~5:1 */
     --destructive: oklch(0.577 0.245 27.325);       /* #E7000B — shadcn default, unchanged */
     --ring: var(--brand);                           /* #F04E27 — focus ring is brand, painted opaque */
 
@@ -247,8 +247,8 @@
     --primary: oklch(0.72 0.174 34.4);              /* #FE7555 — 7.31:1 on canvas */
     --primary-hover: oklch(0.78 0.150 34.4);        /* #FF9175 */
     --primary-foreground: oklch(0.1582 0.0118 260.6); /* #0A0D12 — 7.31:1 on primary */
-    --bubble-own: oklch(0.42 0 0);                  /* own DM bubble, client's colour, 12-77; ~9:1 */
-    --bubble-own-foreground: oklch(0.99 0 0);       /* own DM bubble, client's colour, 12-77; ~9:1 */
+    --bubble-own: oklch(0.55 0.17 256);             /* own bubble, Telegram blue (client reference, 2026-10-04; was the client's grey, 12-77); ~5:1 */
+    --bubble-own-foreground: oklch(0.99 0 0);       /* own bubble, Telegram blue (client reference, 2026-10-04; was the client's grey, 12-77); ~5:1 */
     --destructive: oklch(0.704 0.191 22.216);       /* #FF6467 — shadcn default, unchanged */
     --ring: var(--brand);                           /* #FE6845 */
 
@@ -667,4 +667,12 @@
     @media (prefers-reduced-motion: reduce) {
         animation: none;
     }
+}
+
+/* The chat background behind a conversation (Telegram reference, 2026-10-04): a faint dot
+   pattern drawn from the foreground colour, so it follows light and dark with no new colour. */
+@utility chat-wallpaper {
+    background-color: var(--muted);
+    background-image: radial-gradient(color-mix(in oklch, var(--foreground) 9%, transparent) 1px, transparent 1.2px);
+    background-size: 18px 18px;
 }

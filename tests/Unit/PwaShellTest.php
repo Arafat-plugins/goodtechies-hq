@@ -34,6 +34,10 @@ it('registers a service worker that never caches app pages', function () {
 
     expect(file_exists(PWA_path('public/offline.html')))->toBeTrue()
         ->and($worker)->toContain("event.request.mode !== 'navigate'")
+        // Speed (2026-10-04): the hashed build files come from the device; pages never do.
+        ->and($worker)->toContain("const BUILD_PREFIX = '/build/assets/';")
+        ->and($worker)->toContain('event.respondWith(cacheFirst(ASSETS, request));')
+        ->and($worker)->toContain('event.respondWith(fetch(request).catch(() => caches.match(OFFLINE_URL)));')
         ->and(file_get_contents(PWA_path('resources/js/app.ts')))->toContain("navigator.serviceWorker.register('/sw.js')");
 });
 

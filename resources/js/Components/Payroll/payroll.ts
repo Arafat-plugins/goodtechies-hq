@@ -169,18 +169,29 @@ export interface PayrollCurrentMonth {
  * is refused with a 422 by `AdjustPayrollItemRequest` (which prohibits them rather than
  * dropping them, so the mistake is visible).
  */
-export const PAYROLL_ADJUSTABLE = ['base_salary', 'allowance', 'bonus', 'deduction', 'advance'] as const;
+export const PAYROLL_ADJUSTABLE_ALL = ['base_salary', 'allowance', 'bonus', 'deduction', 'advance'] as const;
 
-export type PayrollAdjustableField = (typeof PAYROLL_ADJUSTABLE)[number];
+export type PayrollAdjustableField = (typeof PAYROLL_ADJUSTABLE_ALL)[number];
+
+/**
+ * Polish 002: the client removed allowance. It is shown (and typed) only where a line still
+ * carries a non-zero one — an older month — so every figure on screen still adds up to the net.
+ */
+export const PAYROLL_ADJUSTABLE: readonly PayrollAdjustableField[] = ['base_salary', 'bonus', 'deduction', 'advance'];
+
+/** The adjustable figures for these lines: allowance only when one of them still has some. */
+export function payrollAdjustableFor(items: readonly { allowance: string }[]): readonly PayrollAdjustableField[] {
+    return items.some((item) => Number(item.allowance) !== 0) ? PAYROLL_ADJUSTABLE_ALL : PAYROLL_ADJUSTABLE;
+}
+
+/** Every money column for these lines, in reading order. */
+export function payrollMoneyFieldsFor(items: readonly { allowance: string }[]): PayrollMoneyField[] {
+    return [...payrollAdjustableFor(items), 'leave_impact', 'net_salary'];
+}
 
 /** Every money column on a payroll line, read-only ones included, in reading order. */
 export type PayrollMoneyField = PayrollAdjustableField | 'leave_impact' | 'net_salary';
 
-export const PAYROLL_MONEY_FIELDS: PayrollMoneyField[] = [
-    ...PAYROLL_ADJUSTABLE,
-    'leave_impact',
-    'net_salary',
-];
 
 /** The column heading for each figure. One spelling, used by the table and by the dialog. */
 export const PAYROLL_FIELD_LABELS: Record<PayrollMoneyField, string> = {
@@ -303,17 +314,7 @@ export function payrollActions(period: PayrollPeriod): PayrollAction[] {
         });
     }
 
-    if (can.can_lock && next.includes('locked')) {
-        actions.push({
-            key: 'lock',
-            label: 'Lock the month',
-            description:
-                'Closes the month to the finance ledger: no income or expense dated in it can be recorded, edited, moved or deleted. An Admin can reverse this.',
-            url: payrollRoutes.lock(period.id),
-            confirm: 'lock',
-            variant: 'default',
-        });
-    }
+    // Polish 002: no separate Lock step — Mark paid on an Approved month closes and pays it.
 
     if (can.can_reverse_lock && period.status === 'locked' && next.includes('approved')) {
         actions.push({
@@ -433,7 +434,7 @@ export function leaveImpactSentence(
     return (
         `${name} had ${breakdown.unpaid_days} unpaid leave ${breakdown.unpaid_days === 1 ? 'day' : 'days'} in ` +
         `${monthLabel}, out of ${breakdown.payable_days} payable working ${breakdown.payable_days === 1 ? 'day' : 'days'} ` +
-        `on their own schedule. Calculate deducted that share of base salary plus allowance, which came to ` +
+        `on their own schedule. Calculate deducted that share of base salary, which came to ` +
         `${formatMoney(impact, currency)}.`
     );
 }

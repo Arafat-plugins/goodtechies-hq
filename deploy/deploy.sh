@@ -219,6 +219,9 @@ fi
 step "reload $PHP_FPM_SERVICE"
 svc reload "$PHP_FPM_SERVICE"
 
+step "nginx: HTTP/2 (one connection per phone instead of six)"
+bash "$APP_DIR/deploy/http2.sh" "/etc/nginx/sites-available/goodtechies-hq" || true
+
 step "maintenance mode off"
 artisan up
 WENT_DOWN=0

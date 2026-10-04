@@ -274,3 +274,41 @@ it('refuses a salary without a start date, and one that is not money', function 
     'three decimal places' => [['base_salary' => '1500.005', 'allowance' => '0.00', 'effective_from' => SALARY_NOVEMBER], 'base_salary'],
     'negative allowance' => [['base_salary' => '1500.00', 'allowance' => '-5.00', 'effective_from' => SALARY_NOVEMBER], 'allowance'],
 ])->group('phase9');
+
+/*
+|--------------------------------------------------------------------------
+| Deleting a row (polish 002)
+|--------------------------------------------------------------------------
+*/
+
+it('lets an Admin delete a salary row and audits it with the whole row as old', function () {
+    $row = EmployeeSalary::where('employee_id', $this->yaseen->employee->getKey())->firstOrFail();
+
+    $this->actingAs($this->admin)
+        ->delete('/salaries/rows/'.$row->getKey())
+        ->assertRedirect()
+        ->assertSessionHas('success');
+
+    expect(EmployeeSalary::find($row->getKey()))->toBeNull();
+
+    $audit = AuditLog::where('event', AuditEvent::SalaryDeleted->value)->sole();
+    expect((int) $audit->actor_id)->toBe((int) $this->admin->getKey())
+        ->and($audit->old_value['base_salary'])->toBe($row->base_salary)
+        ->and($audit->new_value)->toBeNull();
+})->group('phase9');
+
+it('refuses the salary delete to every role but Admin', function (string $who) {
+    $row = EmployeeSalary::where('employee_id', $this->yaseen->employee->getKey())->firstOrFail();
+
+    $this->actingAs($this->{$who})
+        ->delete('/salaries/rows/'.$row->getKey())
+        ->assertForbidden();
+
+    expect(EmployeeSalary::find($row->getKey()))->not->toBeNull()
+        ->and(AuditLog::where('event', AuditEvent::SalaryDeleted->value)->count())->toBe(0);
+})->with([
+    'accountant' => ['accountant'],
+    'manager' => ['manager'],
+    'employee' => ['yaseen'],
+    'remote employee' => ['tapu'],
+])->group('phase9');

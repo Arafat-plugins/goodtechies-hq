@@ -5,6 +5,7 @@ import EmptyState from '@/Components/EmptyState.vue';
 import { formatMoney } from '@/Components/Finance/finance';
 import type { SalaryEmployee } from '@/Components/Payroll/payslip';
 import { formatEffectiveDate } from '@/Components/Payroll/payslip';
+import SalaryDeleteButton from '@/Components/Payroll/SalaryDeleteButton.vue';
 import SalaryEditDialog from '@/Components/Payroll/SalaryEditDialog.vue';
 import PageShell from '@/Components/PageShell.vue';
 import { Card } from '@/Components/ui/card';
@@ -120,12 +121,6 @@ defineProps<{
                                 </dd>
                             </div>
                             <div class="flex min-w-0 flex-col gap-0.5">
-                                <dt class="text-xs text-muted-foreground">Allowance</dt>
-                                <dd class="text-lg font-semibold tabular-nums">
-                                    {{ formatMoney(employee.current.allowance, currency) }}
-                                </dd>
-                            </div>
-                            <div class="flex min-w-0 flex-col gap-0.5">
                                 <dt class="text-xs text-muted-foreground">In force since</dt>
                                 <dd class="text-sm font-medium">
                                     {{ formatEffectiveDate(employee.current.effective_from) }}
@@ -166,11 +161,11 @@ defineProps<{
                                             <th scope="col" class="px-3 py-2 text-right font-medium text-muted-foreground">
                                                 Base
                                             </th>
-                                            <th scope="col" class="px-3 py-2 text-right font-medium text-muted-foreground">
-                                                Allowance
-                                            </th>
                                             <th scope="col" class="py-2 pl-3 text-left font-medium text-muted-foreground">
                                                 Set by
+                                            </th>
+                                            <th scope="col" class="w-10 py-2 pl-3">
+                                                <span class="sr-only">Actions</span>
                                             </th>
                                         </tr>
                                     </thead>
@@ -182,10 +177,10 @@ defineProps<{
                                             <td class="px-3 py-2 text-right tabular-nums whitespace-nowrap">
                                                 {{ formatMoney(row.base_salary, currency) }}
                                             </td>
-                                            <td class="px-3 py-2 text-right tabular-nums whitespace-nowrap">
-                                                {{ formatMoney(row.allowance, currency) }}
-                                            </td>
                                             <td class="py-2 pl-3 text-muted-foreground">{{ row.set_by ?? 'Unknown' }}</td>
+                                            <td class="py-1 pl-3 text-right">
+                                                <SalaryDeleteButton :row="row" :employee-name="employee.name" :currency="currency" />
+                                            </td>
                                         </tr>
                                     </tbody>
                                 </table>

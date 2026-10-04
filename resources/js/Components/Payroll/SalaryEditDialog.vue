@@ -58,7 +58,6 @@ const props = defineProps<{ employee: SalaryEmployee; currency: string }>();
 const open = ref(false);
 
 const baseId = useId();
-const allowanceId = useId();
 const fromId = useId();
 
 /** The first of next month, as `YYYY-MM-DD`. See the class note for why that is the default. */
@@ -72,7 +71,8 @@ function firstOfNextMonth(): string {
 
 const form = useForm({
     base_salary: props.employee.current?.base_salary ?? '',
-    allowance: props.employee.current?.allowance ?? '0.00',
+    // Polish 002: allowance is no longer used anywhere; a new salary always sets it to 0.
+    allowance: '0.00',
     effective_from: firstOfNextMonth(),
 });
 
@@ -84,7 +84,7 @@ watch(open, (isOpen) => {
 
     form.clearErrors();
     form.base_salary = props.employee.current?.base_salary ?? '';
-    form.allowance = props.employee.current?.allowance ?? '0.00';
+    form.allowance = '0.00';
     form.effective_from = firstOfNextMonth();
 });
 
@@ -128,11 +128,7 @@ function submit(): void {
                     <span class="font-medium text-foreground tabular-nums">
                         {{ formatMoney(employee.current.base_salary, currency) }}
                     </span>
-                    base plus
-                    <span class="font-medium text-foreground tabular-nums">
-                        {{ formatMoney(employee.current.allowance, currency) }}
-                    </span>
-                    allowance, since {{ formatEffectiveDate(employee.current.effective_from) }}.
+                    a month, since {{ formatEffectiveDate(employee.current.effective_from) }}.
                 </p>
                 <p v-else class="text-sm text-muted-foreground">
                     {{ employee.name }} has no salary set yet, so no payroll draft can include them.
@@ -151,22 +147,6 @@ function submit(): void {
                         required
                     />
                     <p v-if="form.errors.base_salary" class="text-xs text-destructive">{{ form.errors.base_salary }}</p>
-                </div>
-
-                <div class="flex min-w-0 flex-col gap-2">
-                    <Label :for="allowanceId">Allowance</Label>
-                    <Input
-                        :id="allowanceId"
-                        v-model="form.allowance"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        inputmode="decimal"
-                        class="tabular-nums"
-                        required
-                    />
-                    <p class="text-xs text-muted-foreground">Enter 0 if there is no allowance.</p>
-                    <p v-if="form.errors.allowance" class="text-xs text-destructive">{{ form.errors.allowance }}</p>
                 </div>
 
                 <div class="flex min-w-0 flex-col gap-2">

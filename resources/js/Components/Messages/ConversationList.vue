@@ -1,45 +1,32 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { Hash, Megaphone, MessageSquare, Users, UsersRound } from '@lucide/vue';
-import { computed } from 'vue';
+import { ChevronDown, FolderKanban, Hash, Megaphone, MessageSquare, Users, UsersRound } from '@lucide/vue';
+import { computed, ref, useId, watch } from 'vue';
 import ConversationAvatar from '@/Components/Messages/ConversationAvatar.vue';
-import type { ConversationSummary, ConversationTypeKey } from '@/Components/Messages/messages';
-import { CONVERSATION_GROUPS, messagesHref } from '@/Components/Messages/messages';
+import {
+    type ChatListEntry,
+    type ConversationSummary,
+    type ConversationTypeKey,
+    chatListEntries,
+    formatListTime,
+    messagesHref,
+} from '@/Components/Messages/messages';
+import { personTone } from '@/Components/Messages/people';
 import { isOnline } from '@/Components/Messages/presence';
 import { isViewingConversation } from '@/Components/Realtime/shell';
 import { cn } from '@/lib/utils';
 
 /**
- * The Messages page's left rail: Team, Announcements, Projects, Direct.
+ * The Messages page's chat list, Telegram-style (2026-10-04, client reference): one list,
+ * newest activity on top, a round avatar per row, name + time on the first line, the last
+ * message + unread badge on the second. Every row is a `Link` to `/messages?conversation=<id>`.
  *
- * ## Links, not buttons
+ * ## The Projects folder
  *
- * Every row is a `Link` to `/messages?conversation=<id>`, so a thread is bookmarkable, the back
- * button works, and a colleague can be sent one — the same reason the Tasks view switcher is
- * links and the Notification Center's tab is a query parameter (§5.10). `preserve-scroll` keeps
- * the rail where it was when the thread beside it changes.
- *
- * ## Unread is never a dot alone
- *
- * An unread row carries a COUNT in a pill, `font-medium` on the label, and an `sr-only` sentence
- * spelling it out. The selected row carries `aria-current="page"`, the brand tint and a rail on
- * its left edge — the shell's own active treatment (DESIGN.md §1.7). Neither state is a hue on
- * its own (DESIGN.md §5.6).
- *
- * ## The rhythm
- *
- * Two lines per row, `py-1`, groups a hairline apart. The rail is the thing somebody scans
- * twenty times an hour, so it is dense on purpose; the label truncates and the excerpt
- * truncates, because a row that wraps is a row whose neighbours move.
- *
- * ## Faces for people and groups (brief 010)
- *
- * A DM row and a group row draw `ConversationAvatar` — a group's picture or the initials — and a
- * DM's carries the online dot (`presence.ts`). Channels keep their type icon. A group with no
- * message yet says how many people are in it instead of an excerpt.
- *
- * There is no message count per person anywhere here, and there is not going to be: what the
- * row shows is who spoke last and how much of it this reader has not seen. Part H.
+ * Project channels never sit in the main list. They collapse into ONE "Projects" row that opens
+ * like a dropdown, and only projects that actually have a message appear inside it. The folder
+ * carries the projects' unread total and moves to wherever its newest project message puts it.
+ * It opens by itself when the conversation in front of the reader is one of its projects.
  */
 
 const props = defineProps<{
@@ -47,25 +34,38 @@ const props = defineProps<{
     activeId: number | null;
 }>();
 
+const entries = computed<ChatListEntry[]>(() => chatListEntries(props.conversations));
+
+const folderId = `${useId()}-projects`;
+const inFolder = computed(() => props.conversations.some((row) => row.type === 'project' && row.id === props.activeId));
+const open = ref(inFolder.value);
+
+watch(inFolder, (value) => {
+    if (value) {
+        open.value = true;
+    }
+});
+
 const ICONS: Record<ConversationTypeKey, typeof Hash> = {
     team: Users,
     announcement: Megaphone,
     project: Hash,
+    group: UsersRound,
     dm: MessageSquare,
     task: MessageSquare,
-    group: UsersRound,
 };
-
-/** The plan's order — Team, Announcements, Projects, Groups, Direct — with empty groups dropped. */
-const groups = computed(() =>
-    CONVERSATION_GROUPS.map((name) => ({
-        name,
-        rows: props.conversations.filter((row) => row.group === name),
-    })).filter((group) => group.rows.length > 0),
-);
 
 function iconFor(row: ConversationSummary) {
     return row.type === null ? MessageSquare : ICONS[row.type];
+}
+
+/** People get a face; a group gets its picture when it has one; everything else an icon circle. */
+function hasFace(row: ConversationSummary): boolean {
+    return row.type === 'dm' || (row.type === 'group' && Boolean(row.avatar_url));
+}
+
+function tone(row: ConversationSummary) {
+    return personTone(row.type === 'dm' ? (row.peer_id ?? row.id) : row.id);
 }
 
 /**
@@ -77,79 +77,189 @@ function unreadShown(row: ConversationSummary): number {
     return isViewingConversation(row.id) ? 0 : row.unread_count;
 }
 
-/** People and groups get a face; channels keep their icon. */
-function hasFace(row: ConversationSummary): boolean {
-    return row.type === 'dm' || row.type === 'group';
-}
-
-function membersText(count: number | null | undefined): string {
-    return count === 1 ? '1 member' : `${count ?? 0} members`;
-}
-
 function unreadLabel(row: ConversationSummary): string {
     return row.unread_count === 1 ? '1 unread message' : `${row.unread_count} unread messages`;
+}
+
+function folderUnread(rows: ConversationSummary[]): number {
+    return rows.reduce((sum, row) => sum + unreadShown(row), 0);
+}
+
+function preview(row: ConversationSummary): string {
+    const last = row.last_message;
+
+    if (!last) {
+        if (row.type === 'group') {
+            return row.member_count === 1 ? '1 member' : `${row.member_count ?? 0} members`;
+        }
+
+        return '';
+    }
+
+    if (row.type === 'dm') {
+        return `${last.is_mine ? 'You: ' : ''}${last.excerpt}`;
+    }
+
+    return `${last.is_mine ? 'You' : (last.author ?? 'Somebody')}: ${last.excerpt}`;
+}
+
+function folderPreview(rows: ConversationSummary[]): string {
+    return rows.length > 0 ? `${rows[0].label}: ${preview(rows[0])}` : '';
 }
 </script>
 
 <template>
-    <nav aria-label="Conversations" class="flex min-w-0 flex-col gap-3">
-        <section v-for="group in groups" :key="group.name" class="flex min-w-0 flex-col gap-0.5">
-            <h2 class="px-2 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                {{ group.name }}
-            </h2>
-
-            <ul class="flex min-w-0 flex-col">
-                <li v-for="row in group.rows" :key="row.id" class="min-w-0">
-                    <Link
-                        :href="messagesHref(row.id)"
-                        preserve-scroll
-                        :aria-current="row.id === activeId ? 'page' : undefined"
-                        :class="
-                            cn(
-                                'flex min-w-0 items-center gap-2 rounded-md border-l-2 py-1 pr-2 pl-1.5 text-sm',
-                                'focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
-                                row.id === activeId
-                                    ? 'border-brand bg-brand-tint font-medium hover:bg-brand-tint-strong'
-                                    : 'border-transparent hover:bg-accent',
-                            )
-                        "
+    <nav aria-label="Conversations" class="flex min-w-0 flex-col">
+        <ul class="flex min-w-0 flex-col gap-0.5">
+            <li
+                v-for="entry in entries"
+                :key="entry.kind === 'chat' ? entry.row.id : 'projects'"
+                class="min-w-0"
+            >
+                <Link
+                    v-if="entry.kind === 'chat'"
+                    :href="messagesHref(entry.row.id)"
+                    preserve-scroll
+                    :aria-current="entry.row.id === activeId ? 'page' : undefined"
+                    :class="
+                        cn(
+                            'flex min-w-0 items-center gap-3 rounded-lg px-2 py-2',
+                            'focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
+                            entry.row.id === activeId ? 'bg-brand-tint hover:bg-brand-tint-strong' : 'hover:bg-accent',
+                        )
+                    "
+                >
+                    <ConversationAvatar
+                        v-if="hasFace(entry.row) || entry.row.type === 'dm'"
+                        :label="entry.row.label"
+                        :avatar-url="entry.row.avatar_url ?? null"
+                        :online="entry.row.type === 'dm' ? isOnline(entry.row.peer_id, entry.row.peer_last_seen_at) : null"
+                        class="size-12 text-sm"
+                    />
+                    <span
+                        v-else
+                        :class="cn('flex size-12 shrink-0 items-center justify-center rounded-full', tone(entry.row).avatar)"
+                        aria-hidden="true"
                     >
-                        <ConversationAvatar
-                            v-if="hasFace(row)"
-                            :label="row.label"
-                            :avatar-url="row.avatar_url ?? null"
-                            :online="row.type === 'dm' ? isOnline(row.peer_id, row.peer_last_seen_at) : null"
-                        />
-                        <component
-                            :is="iconFor(row)"
-                            v-else
-                            class="size-4 shrink-0 text-muted-foreground"
+                        <component :is="iconFor(entry.row)" class="size-5" />
+                    </span>
+
+                    <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span class="flex min-w-0 items-baseline gap-2">
+                            <span :class="cn('min-w-0 flex-1 truncate text-sm', 'font-medium')">{{ entry.row.label }}</span>
+                            <span
+                                :class="
+                                    cn(
+                                        'shrink-0 text-xs tabular-nums',
+                                        unreadShown(entry.row) > 0 ? 'font-medium text-primary' : 'text-muted-foreground',
+                                    )
+                                "
+                            >{{ formatListTime(entry.row.last_message?.created_at) }}</span>
+                        </span>
+                        <span class="flex min-w-0 items-center gap-2">
+                            <span class="min-w-0 flex-1 truncate text-sm text-muted-foreground">{{ preview(entry.row) }}</span>
+                            <span
+                                v-if="unreadShown(entry.row) > 0"
+                                class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium tabular-nums text-primary-foreground"
+                            >
+                                {{ entry.row.unread_count > 99 ? '99+' : entry.row.unread_count }}<span class="sr-only">{{ unreadLabel(entry.row) }}</span>
+                            </span>
+                        </span>
+                    </span>
+                </Link>
+
+                <template v-else>
+                    <button
+                        type="button"
+                        :aria-expanded="open"
+                        :aria-controls="folderId"
+                        class="flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                        @click="open = !open"
+                    >
+                        <span
+                            class="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+                            aria-hidden="true"
+                        >
+                            <FolderKanban class="size-5" />
+                        </span>
+
+                        <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span class="flex min-w-0 items-baseline gap-2">
+                                <span :class="cn('min-w-0 flex-1 truncate text-sm', 'font-medium')">Projects</span>
+                                <span
+                                    :class="
+                                        cn(
+                                            'shrink-0 text-xs tabular-nums',
+                                            folderUnread(entry.rows) > 0 ? 'font-medium text-primary' : 'text-muted-foreground',
+                                        )
+                                    "
+                                >{{ formatListTime(entry.latestAt) }}</span>
+                            </span>
+                            <span class="flex min-w-0 items-center gap-2">
+                                <span class="min-w-0 flex-1 truncate text-sm text-muted-foreground">{{ folderPreview(entry.rows) }}</span>
+                                <span
+                                    v-if="folderUnread(entry.rows) > 0"
+                                    class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium tabular-nums text-primary-foreground"
+                                >
+                                    {{ folderUnread(entry.rows) > 99 ? '99+' : folderUnread(entry.rows) }}<span class="sr-only">{{ folderUnread(entry.rows) === 1 ? '1 unread message in projects' : `${folderUnread(entry.rows)} unread messages in projects` }}</span>
+                                </span>
+                            </span>
+                        </span>
+
+                        <ChevronDown
+                            :class="cn('size-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none', open && 'rotate-180')"
                             aria-hidden="true"
                         />
+                    </button>
 
-                        <span class="flex min-w-0 flex-1 flex-col">
-                            <span
-                                :class="cn('truncate', unreadShown(row) > 0 && 'font-medium')"
-                            >{{ row.label }}</span>
-                            <span v-if="row.last_message" class="truncate text-xs text-muted-foreground">
-                                {{ row.last_message.is_mine ? 'You' : (row.last_message.author ?? 'Somebody') }}:
-                                {{ row.last_message.excerpt }}
-                            </span>
-                            <span v-else-if="row.type === 'group'" class="truncate text-xs text-muted-foreground">
-                                {{ membersText(row.member_count) }}
-                            </span>
-                        </span>
+                    <ul v-show="open" :id="folderId" class="flex min-w-0 flex-col gap-0.5 pl-4">
+                        <li v-for="row in entry.rows" :key="row.id" class="min-w-0">
+                            <Link
+                                :href="messagesHref(row.id)"
+                                preserve-scroll
+                                :aria-current="row.id === activeId ? 'page' : undefined"
+                                :class="
+                                    cn(
+                                        'flex min-w-0 items-center gap-3 rounded-lg px-2 py-2',
+                                        'focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
+                                        row.id === activeId ? 'bg-brand-tint hover:bg-brand-tint-strong' : 'hover:bg-accent',
+                                    )
+                                "
+                            >
+                                <span
+                                    :class="cn('flex size-10 shrink-0 items-center justify-center rounded-full', tone(row).avatar)"
+                                    aria-hidden="true"
+                                >
+                                    <component :is="iconFor(row)" class="size-4" />
+                                </span>
 
-                        <span
-                            v-if="unreadShown(row) > 0"
-                            class="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-xs font-medium tabular-nums text-primary-foreground"
-                        >
-                            {{ row.unread_count > 99 ? '99+' : row.unread_count }}
-                            <span class="sr-only">{{ unreadLabel(row) }}</span>
-                        </span>
-                    </Link>
-                </li>
-            </ul>
-        </section>
+                                <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                                    <span class="flex min-w-0 items-baseline gap-2">
+                                        <span :class="cn('min-w-0 flex-1 truncate text-sm', 'font-medium')">{{ row.label }}</span>
+                                        <span
+                                            :class="
+                                                cn(
+                                                    'shrink-0 text-xs tabular-nums',
+                                                    unreadShown(row) > 0 ? 'font-medium text-primary' : 'text-muted-foreground',
+                                                )
+                                            "
+                                        >{{ formatListTime(row.last_message?.created_at) }}</span>
+                                    </span>
+                                    <span class="flex min-w-0 items-center gap-2">
+                                        <span class="min-w-0 flex-1 truncate text-sm text-muted-foreground">{{ preview(row) }}</span>
+                                        <span
+                                            v-if="unreadShown(row) > 0"
+                                            class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium tabular-nums text-primary-foreground"
+                                        >
+                                            {{ row.unread_count > 99 ? '99+' : row.unread_count }}<span class="sr-only">{{ unreadLabel(row) }}</span>
+                                        </span>
+                                    </span>
+                                </span>
+                            </Link>
+                        </li>
+                    </ul>
+                </template>
+            </li>
+        </ul>
     </nav>
 </template>

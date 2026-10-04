@@ -89,8 +89,13 @@ const props = withDefaults(
         conversationId?: number | null;
         /** Brief 013: the thread has a composer, so the menu offers Reply. */
         canReply?: boolean;
+        /**
+         * Telegram style in a group or channel: an incoming run starts with the author's name
+         * inside the bubble, and a small avatar sits beside it. A DM passes false.
+         */
+        authorLine?: boolean;
     }>(),
-    { layout: 'stacked', conversationId: null, canReply: false },
+    { layout: 'stacked', conversationId: null, canReply: false, authorLine: false },
 );
 
 /** Spoken by the thread's one live region — a row does not get a live region of its own. */
@@ -213,10 +218,10 @@ const StampContent: FunctionalComponent<{ spacer?: boolean }> = (stampProps) => 
  */
 const bubbleClass = computed(() =>
     cn(
-        'flex min-w-0 flex-col gap-1 rounded-xl px-3 py-2',
+        'flex min-w-0 flex-col gap-1 rounded-2xl px-3 py-1.5',
         mine.value
-            ? 'rounded-br-sm bg-bubble-own text-bubble-own-foreground'
-            : 'rounded-bl-sm border bg-muted text-foreground',
+            ? 'rounded-br-md bg-bubble-own text-bubble-own-foreground'
+            : 'rounded-bl-md border bg-card text-foreground',
         // The mention highlight has to survive on both fills, so it is a ring rather than a
         // left bar here: `--primary` on `--muted` is 4.71:1 and `--bubble-own-foreground` on
         // `--bubble-own` is ~9:1 (bubble-own, 12-77), both clear of the 3:1 a boundary needs.
@@ -405,15 +410,25 @@ async function react(emoji: string): Promise<void> {
         :class="
             cn(
                 'group relative flex min-w-0',
-                startsRun ? 'mt-2' : 'mt-0.5',
+                startsRun ? 'mt-2.5' : 'mt-0.5',
                 mine ? 'justify-end' : 'justify-start',
+                authorLine && !mine && 'gap-2',
             )
         "
     >
+        <!-- Telegram style in a group or channel: a small avatar beside an incoming run. -->
+        <template v-if="authorLine && !mine">
+            <Avatar v-if="startsRun" class="mt-0.5 size-8 shrink-0">
+                <AvatarFallback :class="cn('text-xs font-medium', tone.avatar)">
+                    {{ initialsOf(message.author?.name) }}
+                </AvatarFallback>
+            </Avatar>
+            <span v-else class="size-8 shrink-0" aria-hidden="true" />
+        </template>
         <div
             :class="
                 cn(
-                    'flex min-w-0 max-w-4/5 flex-col gap-1 sm:max-w-3/4 lg:max-w-3/5',
+                    'flex min-w-0 max-w-[85%] flex-col gap-1 sm:max-w-3/4 lg:max-w-3/5',
                     mine ? 'items-end' : 'items-start',
                     editing && 'w-full',
                 )
@@ -446,6 +461,8 @@ async function react(emoji: string): Promise<void> {
                     </p>
 
                     <template v-else>
+                        <span v-if="authorLine && !mine && startsRun" :class="cn('text-xs font-semibold', tone.name)">{{ author }}</span>
+
                         <!--
                             Addressed to this reader. The words carry it; the ring on the bubble is the
                             second carrier, never the only one — and it is on EVERY row of the run, not

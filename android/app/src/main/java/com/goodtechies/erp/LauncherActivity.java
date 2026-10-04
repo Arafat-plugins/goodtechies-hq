@@ -27,7 +27,7 @@ public class LauncherActivity extends com.google.androidbrowserhelper.trusted.La
     static final String SITE_URL = "https://erp.goodtechies.com/";
 
     /** Long enough for Chrome's cold start on a slow phone, short enough not to feel broken. */
-    static final long HANDOVER_TIMEOUT_MS = 8000;
+    static final long HANDOVER_TIMEOUT_MS = 12000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable handoverWatchdog = () ->

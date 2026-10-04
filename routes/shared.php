@@ -544,6 +544,10 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
             Route::put('/{employee}', [SalaryController::class, 'update'])
                 ->whereNumber('employee')
                 ->name('update');
+            // Polish 002: remove a salary row entered by mistake (audited `salary.deleted`).
+            Route::delete('/rows/{salary}', [SalaryController::class, 'destroy'])
+                ->whereNumber('salary')
+                ->name('destroy');
         });
 
     // ── Payroll (Phase 9, slice 2a) ─────────────────────────────────────────────────

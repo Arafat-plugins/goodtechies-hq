@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { Pencil } from '@lucide/vue';
+import { computed } from 'vue';
 import type { PayrollItem, PayrollLeaveMap, PayrollMoneyField } from '@/Components/Payroll/payroll';
 import {
     PAYROLL_FIELD_LABELS,
     PAYROLL_FIELD_LONG_LABELS,
-    PAYROLL_MONEY_FIELDS,
+    payrollMoneyFieldsFor,
     PAYROLL_SUBTRACTED,
     formatMoney,
     leaveImpactSummary,
@@ -90,6 +91,9 @@ function leaveFor(item: PayrollItem) {
 
 /** Does anybody's line on this period accept an edit? Decides whether the column exists. */
 const anyEditable = () => props.items.some((item) => item.permissions.can_update || item.permissions.can_annotate);
+
+// Polish 002: allowance is a column only while a line in this month still carries one.
+const moneyFields = computed(() => payrollMoneyFieldsFor(props.items));
 </script>
 
 <template>
@@ -144,7 +148,7 @@ const anyEditable = () => props.items.some((item) => item.permissions.can_update
                     </thead>
                     <tbody>
                         <tr
-                            v-for="field in PAYROLL_MONEY_FIELDS.filter((key) => key !== 'net_salary')"
+                            v-for="field in moneyFields.filter((key) => key !== 'net_salary')"
                             :key="field"
                             class="border-b border-border/60"
                         >
@@ -188,7 +192,7 @@ const anyEditable = () => props.items.some((item) => item.permissions.can_update
             <table class="w-full text-sm">
                 <caption class="px-4 pt-4 text-left text-xs text-muted-foreground">
                     Every line of {{ monthLabel }}. Leave impact is worked out by Calculate from approved unpaid
-                    leave, and the net is worked out by the database — base plus allowance plus bonus, less
+                    leave, and the net is worked out by the database — base plus bonus, less
                     deduction, advance and leave impact. Neither can be typed.
                 </caption>
                 <thead>
@@ -197,7 +201,7 @@ const anyEditable = () => props.items.some((item) => item.permissions.can_update
                             Employee
                         </th>
                         <th
-                            v-for="field in PAYROLL_MONEY_FIELDS"
+                            v-for="field in moneyFields"
                             :key="field"
                             scope="col"
                             class="px-3 py-3 text-right font-medium text-muted-foreground"
@@ -223,7 +227,7 @@ const anyEditable = () => props.items.some((item) => item.permissions.can_update
                         </th>
 
                         <td
-                            v-for="field in PAYROLL_MONEY_FIELDS"
+                            v-for="field in moneyFields"
                             :key="field"
                             class="px-3 py-3 text-right tabular-nums"
                             :class="field === 'net_salary' ? 'font-medium' : ''"

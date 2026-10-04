@@ -169,6 +169,29 @@ class SalaryController extends Controller
     }
 
     /**
+     * Delete one salary row (polish 002). The policy and the audit row are
+     * `PayrollService::deleteSalary()`'s.
+     *
+     * `{salary}` is NOT route-model bound: binding runs before the route's `can:` middleware,
+     * so a bound id would answer a non-Admin 404 for a missing row and 403 for a present one.
+     * Resolving it here keeps every non-Admin at the same 403.
+     */
+    public function destroy(Request $request, int $salary): RedirectResponse
+    {
+        $salary = EmployeeSalary::query()->findOrFail($salary);
+        $name = $salary->employee?->user?->name ?? 'The employee';
+        $from = $salary->effective_from?->format('j F Y');
+
+        $this->payroll->deleteSalary($request->user(), $salary);
+
+        return back()->with('success', sprintf(
+            "%s's salary from %s was deleted. Months already drafted keep their figures.",
+            $name,
+            $from ?? 'that date',
+        ));
+    }
+
+    /**
      * One `employee_salaries` row as the screen reads it, or null where there is none.
      *
      * Five keys. The two figures are the exact decimal strings PostgreSQL holds — never floats,

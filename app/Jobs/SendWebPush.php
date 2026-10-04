@@ -21,7 +21,7 @@ class SendWebPush implements ShouldQueue
     public int $tries = 1;
 
     /**
-     * @param  array{title: string, body: string, url: string, tag: string}  $message
+     * @param  array{title: string, body: string, url: string, tag: string, sender?: string}  $message
      * @param  int|null  $messageId  The chat message this push announces — skipped if it was deleted before the worker ran.
      */
     public function __construct(

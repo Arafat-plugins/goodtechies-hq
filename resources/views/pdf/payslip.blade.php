@@ -68,6 +68,12 @@
         ['label' => 'Advance', 'amount' => $payslip['advance'], 'sign' => '−'],
         ['label' => 'Leave impact', 'amount' => $payslip['leave_impact'], 'sign' => '−'],
     ];
+
+    // Polish 002: allowance is shown only when an older line still carries one.
+    $lines = array_values(array_filter(
+        $lines,
+        fn (array $line): bool => $line['label'] !== 'Allowance' || (float) $line['amount'] !== 0.0,
+    ));
 @endphp
 <!DOCTYPE html>
 <html lang="en">

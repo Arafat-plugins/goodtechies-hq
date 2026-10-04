@@ -18,7 +18,8 @@ defineProps<{
 const form = useForm({
     email: '',
     password: '',
-    remember: false,
+    // On by default (12-89): sign in once on a phone and stay signed in until signing out.
+    remember: true,
 });
 
 function submit(): void {

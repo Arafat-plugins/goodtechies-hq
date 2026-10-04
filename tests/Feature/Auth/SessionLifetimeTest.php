@@ -13,8 +13,9 @@ use Illuminate\Support\Str;
 | Session lifetime — two days of inactivity, sliding (decision 12-84)
 |--------------------------------------------------------------------------
 |
-| Closing the tab does not sign anybody out; two days without a request does.
-| "Remember me" is capped to the same two days.
+| Closing the tab does not sign anybody out; two days without a request ends the SESSION.
+| "Remember me" (on by default) signs the person back in for 400 days — they stay signed in
+| until they sign out (decision 12-89, replacing 12-84's two-day cap on it).
 |
 */
 
@@ -23,11 +24,17 @@ it('keeps a session for two days of inactivity and not on browser close', functi
         ->and((bool) config('session.expire_on_close'))->toBeFalse();
 });
 
-it('caps remember-me to the session lifetime', function () {
+it('remembers a person for 400 days, until they sign out (decision 12-89)', function () {
     $guard = Auth::guard('web');
 
     expect($guard)->toBeInstanceOf(SessionGuard::class)
-        ->and((fn (): int => $this->rememberDuration)->call($guard))->toBe(2880);
+        ->and((fn (): int => $this->rememberDuration)->call($guard))->toBe(576000);
+});
+
+it('ticks Remember me on the sign-in form by default', function () {
+    $form = file_get_contents(resource_path('js/Pages/Auth/Login.vue'));
+
+    expect($form)->toContain('remember: true,');
 });
 
 /**

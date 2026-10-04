@@ -68,31 +68,37 @@ const crumbs = computed<Crumb[]>(() => props.breadcrumb ?? []);
 
 <template>
     <div :class="cn('flex min-w-0 flex-col', bleed ? 'gap-3' : 'gap-6')" :data-page-bleed="bleed || undefined">
-        <!-- Absolutely positioned by `sr-only`, so it is not a flex item and adds no gap. -->
-        <h1 v-if="titleHidden" class="sr-only">{{ heading }}</h1>
+        <!--
+            Polish 002: the client removed the visible page title and its description line from
+            every page. The heading stays for screen readers (absolutely positioned by `sr-only`,
+            so it is not a flex item and adds no gap); the breadcrumb, the actions and the tabs
+            still render when a page has them.
+        -->
+        <h1 class="sr-only">{{ heading }}</h1>
+        <p v-if="subline && !titleHidden" class="sr-only">{{ subline }}</p>
 
-        <div v-if="!titleHidden || crumbs.length > 0 || $slots.tabs" class="flex min-w-0 flex-col gap-4">
-            <Breadcrumb v-if="crumbs.length > 0">
-                <BreadcrumbList>
-                    <template v-for="(crumb, index) in crumbs" :key="`${crumb.label}-${index}`">
-                        <BreadcrumbItem>
-                            <BreadcrumbLink v-if="crumb.href && index < crumbs.length - 1" as-child>
-                                <Link :href="crumb.href">{{ crumb.label }}</Link>
-                            </BreadcrumbLink>
-                            <BreadcrumbPage v-else>{{ crumb.label }}</BreadcrumbPage>
-                        </BreadcrumbItem>
-                        <BreadcrumbSeparator v-if="index < crumbs.length - 1" />
-                    </template>
-                </BreadcrumbList>
-            </Breadcrumb>
-
-            <!-- Actions sit right of the title from sm up, and wrap under it at 375. -->
-            <div v-if="!titleHidden" class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div class="flex min-w-0 flex-col gap-1">
-                    <h1 class="text-2xl font-semibold tracking-tight">{{ heading }}</h1>
-                    <p v-if="subline" class="text-sm text-muted-foreground">{{ subline }}</p>
-                </div>
-                <div v-if="$slots.actions" class="flex shrink-0 flex-wrap items-center gap-2">
+        <div v-if="crumbs.length > 0 || $slots.actions || $slots.tabs" class="flex min-w-0 flex-col gap-3">
+            <div
+                v-if="crumbs.length > 0 || $slots.actions"
+                class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+                <Breadcrumb v-if="crumbs.length > 0" class="min-w-0">
+                    <BreadcrumbList>
+                        <template v-for="(crumb, index) in crumbs" :key="`${crumb.label}-${index}`">
+                            <BreadcrumbItem>
+                                <BreadcrumbLink v-if="crumb.href && index < crumbs.length - 1" as-child>
+                                    <Link :href="crumb.href">{{ crumb.label }}</Link>
+                                </BreadcrumbLink>
+                                <BreadcrumbPage v-else>{{ crumb.label }}</BreadcrumbPage>
+                            </BreadcrumbItem>
+                            <BreadcrumbSeparator v-if="index < crumbs.length - 1" />
+                        </template>
+                    </BreadcrumbList>
+                </Breadcrumb>
+                <div
+                    v-if="$slots.actions"
+                    class="flex shrink-0 flex-wrap items-center gap-2 sm:ml-auto"
+                >
                     <slot name="actions" />
                 </div>
             </div>

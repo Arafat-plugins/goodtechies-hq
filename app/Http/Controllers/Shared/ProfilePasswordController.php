@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Shared;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Profile\UpdatePasswordRequest;
 use App\Services\PushService;
+use App\Support\RememberCookie;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -26,6 +27,10 @@ class ProfilePasswordController extends Controller
 
         // A lost or shared device stops showing this person's notifications.
         $push->forgetAllDevices($user);
+
+        // The new token signed every device out of "remember me" — including this one, which
+        // keeps its login (12-89: stay signed in until signing out).
+        RememberCookie::rememberThisDevice($user->fresh());
 
         if (config('session.driver') === 'database') {
             DB::connection(config('session.connection'))

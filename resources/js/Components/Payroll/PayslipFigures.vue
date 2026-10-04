@@ -40,14 +40,16 @@ interface FigureLine {
     direction: 'Added' | 'Deducted';
 }
 
-const lines = computed<FigureLine[]>(() => [
+// Polish 002: allowance is hidden unless an older line still carries one, so a payslip's
+// figures always add up to its net.
+const lines = computed<FigureLine[]>(() => ([
     { key: 'base_salary', label: 'Base salary', amount: props.payslip.base_salary, sign: '+', direction: 'Added' },
     { key: 'allowance', label: 'Allowance', amount: props.payslip.allowance, sign: '+', direction: 'Added' },
     { key: 'bonus', label: 'Bonus', amount: props.payslip.bonus, sign: '+', direction: 'Added' },
     { key: 'deduction', label: 'Deduction', amount: props.payslip.deduction, sign: '−', direction: 'Deducted' },
     { key: 'advance', label: 'Advance', amount: props.payslip.advance, sign: '−', direction: 'Deducted' },
     { key: 'leave_impact', label: 'Leave impact', amount: props.payslip.leave_impact, sign: '−', direction: 'Deducted' },
-]);
+] satisfies FigureLine[]).filter((line) => line.key !== 'allowance' || Number(line.amount) !== 0));
 </script>
 
 <template>

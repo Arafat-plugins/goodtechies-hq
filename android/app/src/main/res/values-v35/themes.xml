@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 15 draws apps edge to edge by default, which put goodERP's top bar under the
+         clock and Wi-Fi icons. The WebView screen keeps the classic layout: the page starts
+         below the status bar and ends above the navigation buttons. -->
+    <style name="Theme.GoodErp.WebView" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+</resources>

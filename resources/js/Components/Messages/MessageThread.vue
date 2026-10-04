@@ -1935,6 +1935,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     cn(
                         'min-w-0 rounded-md focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
                         scroll && 'min-h-0 flex-1 overflow-y-auto pr-1',
+                        layout === 'sided' && 'chat-wallpaper px-2 py-2',
                     )
                 "
                 @scroll.passive="onScroll"
@@ -1967,16 +1968,14 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     </li>
 
                     <template v-for="entry in rendered" :key="entry.message.id">
-                        <!-- The day rule. A word, so it reads the same without colour. -->
+                        <!-- The day pill (Telegram reference). A word, so it reads the same without colour. -->
                         <li
                             v-if="entry.dayLabel"
-                            class="flex min-w-0 items-center gap-3 py-3"
+                            class="sticky top-1 z-10 flex min-w-0 justify-center py-2"
                         >
-                            <span class="h-px flex-1 bg-border" aria-hidden="true" />
-                            <span class="shrink-0 text-xs font-medium text-muted-foreground">
+                            <span class="rounded-full border bg-card/90 px-3 py-0.5 text-xs font-medium text-muted-foreground backdrop-blur-sm">
                                 {{ entry.dayLabel }}
                             </span>
-                            <span class="h-px flex-1 bg-border" aria-hidden="true" />
                         </li>
 
                         <!--
@@ -2008,6 +2007,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                                 :starts-run="entry.startsRun"
                                 :links-stale="linksStale"
                                 :layout="layout"
+                                :author-line="layout === 'sided' && thread.type !== 'dm'"
                                 :conversation-id="thread.conversation_id"
                                 :can-reply="thread.can_post"
                                 @announce="actionStatus = $event"

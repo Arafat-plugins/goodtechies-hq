@@ -43,7 +43,7 @@ class PushService
     }
 
     /**
-     * @param  array{title: string, body: string, url: string, tag: string}  $message
+     * @param  array{title: string, body: string, url: string, tag: string, sender?: string}  $message
      * @return int How many devices the push service accepted it for.
      */
     public function send(User $user, PushCategory $category, array $message): int

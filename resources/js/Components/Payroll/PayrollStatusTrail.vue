@@ -43,7 +43,10 @@ const props = defineProps<{
     monthLabel: string;
 }>();
 
-const currentIndex = computed(() => props.statuses.findIndex((step) => step.value === props.current));
+// Polish 002: Locked is no longer on the spine; a month still sitting in it reads as Approved.
+const currentIndex = computed(() =>
+    props.statuses.findIndex((step) => step.value === (props.current === 'locked' ? 'approved' : props.current)),
+);
 
 /** 'done' — already passed · 'current' — where the month is · 'ahead' — not yet. */
 function positionOf(index: number): 'done' | 'current' | 'ahead' {

@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Models\PayrollPeriod;
 use App\Models\User;
+use App\Support\PayrollStatus;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Gate;
@@ -54,10 +55,14 @@ class PayrollPeriodResource extends JsonResource
 
             // What the machine allows from here, as values. A screen greys a control out from
             // this; a service refuses it with a sentence if the screen gets it wrong.
-            'available_transitions' => array_map(
-                fn ($status): string => $status->value,
-                $this->resource->status?->transitions() ?? [],
-            ),
+            'available_transitions' => array_values(array_unique(array_merge(
+                array_map(
+                    fn ($status): string => $status->value,
+                    $this->resource->status?->transitions() ?? [],
+                ),
+                // Polish 002: Approved → Paid is one press (`PayrollService::markPaid`).
+                $this->resource->status === PayrollStatus::Approved ? [PayrollStatus::Paid->value] : [],
+            ))),
             'closes_the_month' => (bool) $this->resource->status?->closesTheMonth(),
 
             // **Calculate is the one verb that is not a transition**, so it cannot be read off

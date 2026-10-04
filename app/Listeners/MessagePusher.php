@@ -55,16 +55,19 @@ class MessagePusher
             ->filter(fn (User $user): bool => $user->hasPermission(Permission::MessagesUse))
             ->filter(fn (User $user): bool => Gate::forUser($user)->allows('view', $conversation));
 
-        foreach ($readers as $reader) {
-            $title = $conversation->type === ConversationType::Dm
-                ? (string) $event->actor->name
-                : $event->actor->name.' · '.$conversation->labelFor($reader);
+        $sender = (string) $event->actor->name;
+        $isDm = $conversation->type === ConversationType::Dm;
 
+        foreach ($readers as $reader) {
+            // Telegram's notification (client reference, 2026-10-04): a DM is titled with the
+            // sender and shows the text; any other chat is titled with the chat and shows
+            // "Sender: text". `sender` lets the service worker draw the sender's avatar.
             SendWebPush::dispatch((int) $reader->getKey(), PushCategory::Messages, [
-                'title' => $title,
-                'body' => $preview,
+                'title' => $isDm ? $sender : $conversation->labelFor($reader),
+                'body' => $isDm ? $preview : $sender.': '.$preview,
                 'url' => $url,
                 'tag' => 'conversation-'.$conversation->getKey(),
+                'sender' => $sender,
             ], (int) $event->message->getKey());
         }
     }

@@ -19,6 +19,7 @@ import ConversationAvatar from '@/Components/Messages/ConversationAvatar.vue';
 import ConversationContextPanel from '@/Components/Messages/ConversationContextPanel.vue';
 import GroupDialog from '@/Components/Messages/GroupDialog.vue';
 import MessagesRail from '@/Components/Messages/MessagesRail.vue';
+import { personTone } from '@/Components/Messages/people';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
 import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
 import { adoptInbox, isViewingConversation, onInboxPing } from '@/Components/Realtime/shell';
@@ -129,7 +130,9 @@ const viewerId = computed(() => page.props.auth.user?.id ?? null);
  * bar). A fixed 4rem guess was right only while the bar fitted on one row; when it wraps, the
  * workspace shrinks with it, so the composer and its Send button are never under the dock.
  */
-const workspaceHeight = computed(() => 'lg:h-[calc(100svh-15.5rem-var(--timer-dock-h,0px))]');
+// Polish 002: the page header is gone, so only the top bar (3.5rem) and the page padding
+// (0.75rem top, 1rem bottom) are spent — the workspace now fills to the bottom edge.
+const workspaceHeight = computed(() => 'lg:h-[calc(100svh-5.25rem-var(--timer-dock-h,0px))]');
 
 const activeId = computed(() => props.active?.conversation_id ?? null);
 
@@ -476,23 +479,26 @@ const activeLine = computed(() =>
                             <!-- Brief 010: a person or a group has a face; a channel its icon. -->
                             <ConversationAvatar
                                 v-if="active.type === 'dm' && active.peer"
+                                class="size-10"
                                 :label="headerLabel"
                                 :online="peerOnline"
                             />
                             <ConversationAvatar
                                 v-else-if="active.type === 'group'"
+                                class="size-10"
                                 :label="headerLabel"
                                 :avatar-url="groupPicture"
                             />
-                            <component
-                                :is="activeIcon"
+                            <span
                                 v-else
-                                class="hidden size-4 shrink-0 text-muted-foreground lg:block"
+                                :class="cn('flex size-10 shrink-0 items-center justify-center rounded-full', personTone(active.conversation_id).avatar)"
                                 aria-hidden="true"
-                            />
+                            >
+                                <component :is="activeIcon" class="size-5" />
+                            </span>
 
                             <div class="min-w-0 flex-1">
-                                <h2 class="min-w-0 truncate text-sm font-medium">
+                                <h2 class="min-w-0 truncate text-base font-semibold">
                                     {{ headerLabel }}
                                 </h2>
                                 <!-- A DM: "online", or when they were last seen. -->
