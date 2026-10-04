@@ -68,8 +68,13 @@ class ConversationService
      * screen opens on — the same window Telegram opens on — and older ones are read by asking
      * for them (`?before=`), which is one parameter rather than a pagination component in a
      * thread that is read upwards.
+     *
+     * 30, not 50 (2026-10-04, the client: opening a chat should load "only current as possible
+     * to see", and older history page by page as the reader scrolls up). 30 is two to three
+     * phone screens — enough that the first scroll up never waits — and each older page is the
+     * same size, fetched automatically when the top of the log comes into view.
      */
-    public const THREAD_WINDOW = 50;
+    public const THREAD_WINDOW = 30;
 
     /**
      * How many hits a search answers with.

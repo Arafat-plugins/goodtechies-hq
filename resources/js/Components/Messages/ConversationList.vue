@@ -11,6 +11,7 @@ import {
     formatListTime,
     messagesHref,
 } from '@/Components/Messages/messages';
+import { OPEN_PROPS, finishOpening, startOpening } from '@/Components/Messages/opening';
 import { personTone } from '@/Components/Messages/people';
 import { isOnline } from '@/Components/Messages/presence';
 import { isViewingConversation } from '@/Components/Realtime/shell';
@@ -19,7 +20,8 @@ import { cn } from '@/lib/utils';
 /**
  * The Messages page's chat list, Telegram-style (2026-10-04, client reference): one list,
  * newest activity on top, a round avatar per row, name + time on the first line, the last
- * message + unread badge on the second. Every row is a `Link` to `/messages?conversation=<id>`.
+ * message + unread badge on the second. Every row is a `Link` to `/messages?conversation=<id>`
+ * that fetches only the thread and the lists (`OPEN_PROPS`, a partial visit), never the page.
  *
  * ## The Projects folder
  *
@@ -120,6 +122,10 @@ function folderPreview(rows: ConversationSummary[]): string {
                     v-if="entry.kind === 'chat'"
                     :href="messagesHref(entry.row.id)"
                     preserve-scroll
+                    preserve-state
+                    :only="OPEN_PROPS"
+                    @start="startOpening(entry.row.id)"
+                    @finish="finishOpening(entry.row.id)"
                     :aria-current="entry.row.id === activeId ? 'page' : undefined"
                     :class="
                         cn(
@@ -217,6 +223,10 @@ function folderPreview(rows: ConversationSummary[]): string {
                             <Link
                                 :href="messagesHref(row.id)"
                                 preserve-scroll
+                                preserve-state
+                                :only="OPEN_PROPS"
+                                @start="startOpening(row.id)"
+                                @finish="finishOpening(row.id)"
                                 :aria-current="row.id === activeId ? 'page' : undefined"
                                 :class="
                                     cn(

@@ -128,7 +128,7 @@ async function computePeaks(buffer: ArrayBuffer): Promise<number[]> {
 </script>
 
 <script setup lang="ts">
-import { Loader2, Pause, Play } from '@lucide/vue';
+import { Pause, Play } from '@lucide/vue';
 import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import { claimPlayback, formatClock, releasePlayback, spokenClock } from '@/Components/Messages/voice';
 import { cn } from '@/lib/utils';
@@ -502,7 +502,15 @@ onBeforeUnmount(() => {
 
 <template>
     <!-- No surface of its own: the caller (or the bubble) is already one. -->
-    <div class="flex min-w-0 flex-col gap-1">
+    <div
+        :class="
+            cn(
+                'flex min-w-0 flex-col gap-1',
+                // The shimmer on the own blue bubble is drawn from the bubble's own foreground.
+                onAccent && '[--shimmer-base:color-mix(in_oklch,var(--bubble-own-foreground)_22%,transparent)]',
+            )
+        "
+    >
         <audio
             ref="audioEl"
             :src="audioSrc ?? undefined"
@@ -523,9 +531,12 @@ onBeforeUnmount(() => {
                 :class="
                     cn(
                         'inline-flex size-10 shrink-0 items-center justify-center rounded-full transition-colors outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4',
-                        onAccent
-                            ? 'bg-bubble-own-foreground text-bubble-own hover:bg-bubble-own-foreground/90 focus-visible:ring-bubble-own-foreground'
-                            : 'bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-ring',
+                        // Not ready yet: a shimmering disc where the button will be (2026-10-04).
+                        loading
+                            ? 'shimmer disabled:opacity-100'
+                            : onAccent
+                              ? 'bg-bubble-own-foreground text-bubble-own hover:bg-bubble-own-foreground/90 focus-visible:ring-bubble-own-foreground'
+                              : 'bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-ring',
                     )
                 "
                 :disabled="failed || loading"
@@ -533,8 +544,7 @@ onBeforeUnmount(() => {
                 :aria-describedby="statusId"
                 @click="toggle"
             >
-                <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
-                <component :is="playing ? Pause : Play" v-else aria-hidden="true" />
+                <component :is="playing ? Pause : Play" v-if="!loading" aria-hidden="true" />
             </button>
 
             <div class="flex min-w-0 flex-1 flex-col">
@@ -565,18 +575,22 @@ onBeforeUnmount(() => {
                     @pointercancel="onPointerUp"
                     @keydown="onKey"
                 >
-                    <span
-                        v-for="(peak, index) in peaks"
-                        :key="index"
-                        aria-hidden="true"
-                        :class="
-                            cn(
-                                'w-0.5 shrink-0 rounded-full bg-current',
-                                index / peaks.length < fraction ? 'opacity-100' : 'opacity-40',
-                            )
-                        "
-                        :style="{ height: Math.round(peak * 100) + '%' }"
-                    />
+                    <!-- Still loading: one shimmering strip where the waveform will be drawn. -->
+                    <span v-if="loading" class="shimmer h-4 w-full rounded-full" aria-hidden="true" />
+                    <template v-else>
+                        <span
+                            v-for="(peak, index) in peaks"
+                            :key="index"
+                            aria-hidden="true"
+                            :class="
+                                cn(
+                                    'w-0.5 shrink-0 rounded-full bg-current',
+                                    index / peaks.length < fraction ? 'opacity-100' : 'opacity-40',
+                                )
+                            "
+                            :style="{ height: Math.round(peak * 100) + '%' }"
+                        />
+                    </template>
                 </div>
 
                 <div class="flex min-w-0 items-center justify-between gap-2">

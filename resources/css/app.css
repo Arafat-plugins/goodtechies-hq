@@ -676,3 +676,36 @@
     background-image: radial-gradient(color-mix(in oklch, var(--foreground) 9%, transparent) 1px, transparent 1.2px);
     background-size: 18px 18px;
 }
+
+/* Shimmer (2026-10-04, client: photos and voice notes "before they completely load, give there
+   shimmer effect"): a soft band of light sweeping across a `--muted` block, drawn from the
+   foreground colour so it follows light and dark with no new colour. Used for a chat that is
+   opening, older messages on their way, and a photo or voice note that has not arrived yet.
+   Reduced motion: the block stays, the sweep does not. */
+@keyframes shimmer-sweep {
+    from {
+        background-position: 150% 0;
+    }
+    to {
+        background-position: -50% 0;
+    }
+}
+
+@utility shimmer {
+    /* `--shimmer-base` lets a block on a coloured surface (the own blue bubble) keep that surface. */
+    background-color: var(--shimmer-base, var(--muted));
+    background-image: linear-gradient(
+        100deg,
+        transparent 20%,
+        color-mix(in oklch, var(--foreground) 8%, transparent) 50%,
+        transparent 80%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: shimmer-sweep 1.4s ease-in-out infinite;
+    border-color: transparent;
+
+    @media (prefers-reduced-motion: reduce) {
+        animation: none;
+    }
+}

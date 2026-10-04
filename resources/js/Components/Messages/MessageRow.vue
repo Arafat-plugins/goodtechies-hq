@@ -154,6 +154,24 @@ const clock = computed(() => formatClockTime(props.message.created_at));
  */
 const inlineStamp = computed(() => Boolean(props.message.body) && props.message.attachments.length === 0);
 
+/**
+ * A photo and nothing else, in a chat (2026-10-04, the client: "a padding like blue color border
+ * appear, remove it entirely"): no bubble around it, Telegram-style. The picture is the message,
+ * with rounded corners of its own, and the time sits on a dark pill over its bottom corner.
+ * Anything else in the message — words, a quote, a file that is not a picture, links that have
+ * lapsed — keeps the bubble.
+ */
+const photoOnly = computed(
+    () =>
+        sided.value &&
+        !deleted.value &&
+        !props.linksStale &&
+        !props.message.body &&
+        !props.message.reply_to &&
+        props.message.attachments.length > 0 &&
+        props.message.attachments.every((file) => file.kind === 'image'),
+);
+
 /** The stamp's colour: quiet on either DM fill, muted on a channel row. */
 const stampTone = computed(() =>
     sided.value && mine.value ? 'text-bubble-own-foreground/80' : 'text-muted-foreground',
@@ -217,17 +235,22 @@ const StampContent: FunctionalComponent<{ spacer?: boolean }> = (stampProps) => 
  * instead of a full-width band, and tighten as the column gets wider.
  */
 const bubbleClass = computed(() =>
-    cn(
-        'flex min-w-0 flex-col gap-1 rounded-2xl px-3 py-1.5',
-        mine.value
-            ? 'rounded-br-md bg-bubble-own text-bubble-own-foreground'
-            : 'rounded-bl-md border bg-card text-foreground',
-        // The mention highlight has to survive on both fills, so it is a ring rather than a
-        // left bar here: `--primary` on `--muted` is 4.71:1 and `--bubble-own-foreground` on
-        // `--bubble-own` is ~9:1 (bubble-own, 12-77), both clear of the 3:1 a boundary needs.
-        mentionsMe.value && 'ring-2',
-        mentionsMe.value && (mine.value ? 'ring-bubble-own-foreground' : 'ring-primary'),
-    ),
+    photoOnly.value
+        ? cn(
+              'relative flex min-w-0 flex-col gap-1',
+              mentionsMe.value && 'rounded-2xl ring-2 ring-primary',
+          )
+        : cn(
+            'flex min-w-0 flex-col gap-1 rounded-2xl px-3 py-1.5',
+            mine.value
+                ? 'rounded-br-md bg-bubble-own text-bubble-own-foreground'
+                : 'rounded-bl-md border bg-card text-foreground',
+            // The mention highlight has to survive on both fills, so it is a ring rather than a
+            // left bar here: `--primary` on `--muted` is 4.71:1 and `--bubble-own-foreground` on
+            // `--bubble-own` is ~9:1 (bubble-own, 12-77), both clear of the 3:1 a boundary needs.
+            mentionsMe.value && 'ring-2',
+            mentionsMe.value && (mine.value ? 'ring-bubble-own-foreground' : 'ring-primary'),
+          ),
 );
 
 /** The `mentions_me` label. A chip, not a hairline — and it is words, so it is never a tint. */
@@ -508,8 +531,9 @@ async function react(emoji: string): Promise<void> {
                                 <AttachmentCard
                                     :file="file"
                                     :stale="linksStale"
-                                    :on-accent="onAccent"
+                                    :on-accent="onAccent && !photoOnly"
                                     inline
+                                    bare
                                 />
                             </li>
                         </ul>
@@ -522,7 +546,11 @@ async function react(emoji: string): Promise<void> {
                         -->
                         <span
                             v-if="!inlineStamp"
-                            :class="cn('inline-flex items-center gap-1 self-end text-xs tabular-nums', stampTone)"
+                            :class="
+                                photoOnly
+                                    ? 'absolute right-2 bottom-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-1.5 py-0.5 text-xs text-white tabular-nums'
+                                    : cn('inline-flex items-center gap-1 self-end text-xs tabular-nums', stampTone)
+                            "
                         >
                             <StampContent />
                         </span>

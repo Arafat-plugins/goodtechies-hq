@@ -5,6 +5,12 @@
  * image that errors drops its entry, so the next render takes the fresh url.
  */
 const imageUrls = new Map<number, string>();
+
+/**
+ * Pictures this tab has already drawn, by file id: reopening a chat shows them at once instead
+ * of shimmering again for a picture the browser already has.
+ */
+const drawnImages = new Set<number>();
 </script>
 
 <script setup lang="ts">
@@ -59,12 +65,19 @@ const props = withDefaults(
         inline?: boolean;
         /** This card sits inside the own `--bubble-own` bubble: drop the hairline, keep the surface. */
         onAccent?: boolean;
+        /**
+         * A picture in a chat bubble, Telegram-style (2026-10-04): only the picture, rounded —
+         * no card frame around it and no name/size line under it. The download is in the
+         * lightbox the picture opens. Files that are not pictures keep their card.
+         */
+        bare?: boolean;
     }>(),
-    { stale: false, inline: false, onAccent: false },
+    { stale: false, inline: false, onAccent: false, bare: false },
 );
 
 const rendersImage = computed(() => props.inline && !props.stale && props.file.kind === 'image');
 const rendersVoice = computed(() => props.inline && !props.stale && props.file.kind === 'voice');
+const bareImage = computed(() => props.bare && rendersImage.value);
 
 /** Brief 013: the image's lightbox, and the thumbnail focus returns to when it closes. */
 const lightboxOpen = ref(false);
@@ -87,11 +100,29 @@ const imageUrl = computed(() => {
     return props.file.url;
 });
 
+/**
+ * Until the picture has arrived its place shimmers (2026-10-04, the client: "photo voice, before
+ * they completely load, give there shimmer effect"). The `<img>` is in the page the whole time —
+ * invisible and laid over the placeholder — so the browser fetches it as usual; when it lands,
+ * the placeholder goes and the picture takes its own size.
+ */
+const imageReady = ref(drawnImages.has(props.file.id));
+
+function onImageLoad(): void {
+    drawnImages.add(props.file.id);
+    imageReady.value = true;
+}
+
 function onImageError(): void {
     if (imageUrls.get(props.file.id) !== props.file.url) {
         imageUrls.delete(props.file.id);
         imageEpoch.value += 1;
+
+        return;
     }
+
+    // Nothing fresher to try: stop shimmering and let the picture's name stand in for it.
+    imageReady.value = true;
 }
 
 const meta = computed(() => {
@@ -130,8 +161,8 @@ const meta = computed(() => {
                 'flex max-w-full min-w-0 flex-col gap-1.5',
                 // 12-77: a voice note is only its player, sitting straight on the bubble and
                 // taking the bubble's own foreground — no card, no border, no padding.
-                rendersVoice
-                    ? 'w-64 border-0 bg-transparent p-0'
+                rendersVoice || bareImage
+                    ? cn('border-0 bg-transparent p-0', rendersVoice ? 'w-64' : 'w-fit')
                     : 'w-fit rounded-lg border bg-card p-1.5 text-card-foreground shadow-flat',
                 !rendersImage && !rendersVoice && 'w-full sm:max-w-xs',
                 onAccent && !rendersVoice && 'border-transparent',
@@ -145,7 +176,14 @@ const meta = computed(() => {
             type="button"
             :aria-label="`Open ${file.name}`"
             aria-haspopup="dialog"
-            class="block w-fit max-w-full min-w-0 cursor-zoom-in overflow-hidden rounded-md bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+            :class="
+                cn(
+                    'relative block w-fit max-w-full min-w-0 cursor-zoom-in overflow-hidden bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
+                    bareImage ? 'rounded-2xl' : 'rounded-md',
+                    !imageReady && 'shimmer h-44 w-60',
+                )
+            "
+            :aria-busy="!imageReady || undefined"
             data-testid="attachment-image"
             @click="lightboxOpen = true"
         >
@@ -153,7 +191,14 @@ const meta = computed(() => {
                 :src="imageUrl"
                 :alt="file.name"
                 loading="lazy"
-                class="block h-auto max-h-64 w-auto max-w-full object-contain sm:max-w-xs"
+                :class="
+                    cn(
+                        'block h-auto w-auto max-w-full object-contain',
+                        bareImage ? 'max-h-80 sm:max-w-sm' : 'max-h-64 sm:max-w-xs',
+                        !imageReady && 'absolute inset-0 size-full opacity-0',
+                    )
+                "
+                @load="onImageLoad"
                 @error="onImageError"
             >
         </button>
@@ -183,7 +228,7 @@ const meta = computed(() => {
         />
 
         <!-- An image's caption line: its name and a download, kept to the image's width. -->
-        <div v-if="rendersImage" class="flex w-0 min-w-full items-center gap-2 px-1">
+        <div v-if="rendersImage && !bareImage" class="flex w-0 min-w-full items-center gap-2 px-1">
             <span class="flex min-w-0 flex-1 flex-col">
                 <span class="min-w-0 truncate text-xs font-medium" :title="file.name">
                     {{ file.name }}
@@ -214,7 +259,7 @@ const meta = computed(() => {
 
         <!-- A file: the whole compact card is the one link. -->
         <a
-            v-else-if="!stale && !rendersVoice"
+            v-else-if="!stale && !rendersVoice && !rendersImage"
             :href="file.url"
             :target="file.is_previewable ? '_blank' : undefined"
             rel="noopener noreferrer"

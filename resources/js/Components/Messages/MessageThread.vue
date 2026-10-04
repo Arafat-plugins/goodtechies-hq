@@ -1011,6 +1011,14 @@ function scrollToBottom(): void {
 function onMediaLoad(): void {
     if (pinned) {
         scrollToBottom();
+        // A picture swaps its shimmering placeholder for its real size in the render AFTER its
+        // `load` event (this listener runs first, in the capture phase), so settle once more
+        // when that has painted.
+        requestAnimationFrame(() => {
+            if (pinned) {
+                scrollToBottom();
+            }
+        });
     }
 }
 
@@ -1374,13 +1382,100 @@ async function load(before: number | null = null): Promise<void> {
     }
 }
 
-function loadEarlier(): void {
-    const oldest = thread.value.messages[0]?.id ?? null;
+/**
+ * Older history, one page (`THREAD_WINDOW`, 30) at a time, as the reader scrolls up
+ * (2026-10-04, the client: "if the user scroll for old message … it will load again some data,
+ * again some data like this"). The top of the log carries a sentinel; when it comes within
+ * `OLDER_MARGIN_PX` of view the next page is fetched, shimmering rows hold its place, and the
+ * reader stays on the message they were reading — the distance from the BOTTOM of the list is
+ * what is kept, so the page that lands above them pushes nothing they are looking at.
+ *
+ * The button is still there for a keyboard or a screen reader, visible when focused.
+ */
+const loadingOlder = ref(false);
+const olderSentinel = ref<HTMLElement | null>(null);
+const olderInView = ref(false);
+const OLDER_MARGIN_PX = 400;
+let olderObserver: IntersectionObserver | null = null;
 
-    if (oldest !== null) {
-        void load(oldest);
+async function loadEarlier(): Promise<void> {
+    const oldest = thread.value.messages.find((message) => message.id > 0)?.id ?? null;
+
+    if (oldest === null || loadingOlder.value || jumping || !thread.value.has_more) {
+        return;
+    }
+
+    loadingOlder.value = true;
+
+    const el = listEl.value;
+    const fromBottom = el === null ? 0 : el.scrollHeight - el.scrollTop;
+
+    try {
+        await load(oldest);
+        await nextTick();
+
+        const landed = (thread.value.messages.find((message) => message.id > 0)?.id ?? null) !== oldest;
+
+        if (landed && el !== null && props.scroll) {
+            // Keep the reader's place: the same distance from the bottom as before the page landed.
+            el.scrollTop = el.scrollHeight - fromBottom;
+        }
+
+        // The observer reports a frame late, so ask the geometry now: a page that leaves the top
+        // still in reach asks for the next one, a page that filled the screen does not. A failed
+        // or overtaken read does not retry by itself — scrolling away and back, or the button.
+        olderInView.value = landed && olderNear();
+    } finally {
+        loadingOlder.value = false;
     }
 }
+
+/** Is the top sentinel within `OLDER_MARGIN_PX` of the visible part of the log? */
+function olderNear(): boolean {
+    const root = listEl.value;
+    const sentinel = olderSentinel.value;
+
+    if (root === null || sentinel === null) {
+        return false;
+    }
+
+    return sentinel.getBoundingClientRect().bottom >= root.getBoundingClientRect().top - OLDER_MARGIN_PX;
+}
+
+function watchForOlder(): void {
+    olderObserver?.disconnect();
+    olderObserver = null;
+
+    // Only a thread that scrolls itself (the Messages page). In the project Discussion tab and
+    // the task panel the page scrolls, the sentinel never leaves the screen, and watching it
+    // would pull in the whole history; there the button stays, visible.
+    if (!props.scroll || olderSentinel.value === null || typeof IntersectionObserver === 'undefined') {
+        return;
+    }
+
+    olderObserver = new IntersectionObserver(
+        (entries) => {
+            olderInView.value = entries.some((entry) => entry.isIntersecting);
+        },
+        { root: listEl.value, rootMargin: `${OLDER_MARGIN_PX}px 0px 0px 0px` },
+    );
+    olderObserver.observe(olderSentinel.value);
+}
+
+// The sentinel comes and goes with `has_more`; observe whichever element is there now.
+watch(olderSentinel, () => watchForOlder());
+
+// In view, nothing loading, more to load: fetch. A page that lands and still leaves the top in
+// view (a short page, a tall screen) asks again, until the screen is full or history ends.
+watch([olderInView, loadingOlder, () => thread.value.has_more], ([inView, busy, more]) => {
+    if (inView && !busy && more) {
+        void loadEarlier();
+    }
+});
+
+onBeforeUnmount(() => {
+    olderObserver?.disconnect();
+});
 
 /** What a realtime transport calls. It never paints a frame it was handed. */
 defineExpose({ refresh: () => load() });
@@ -2065,17 +2160,36 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 />
 
                 <ol v-else class="flex min-w-0 flex-col">
-                    <li v-if="thread.has_more" class="flex justify-center pb-2">
+                    <li
+                        v-if="thread.has_more"
+                        ref="olderSentinel"
+                        class="flex min-w-0 flex-col gap-3 pb-2"
+                        data-testid="older-sentinel"
+                    >
+                        <!-- Scrolling up loads the next page by itself; this is the keyboard's way in. -->
                         <Button
                             type="button"
                             variant="ghost"
                             size="sm"
-                            :aria-busy="refreshing || undefined"
+                            :class="['self-center', scroll && 'sr-only focus-visible:not-sr-only']"
+                            :aria-busy="loadingOlder || undefined"
                             @click="loadEarlier"
                         >
                             <ChevronUp aria-hidden="true" />
                             Load earlier messages
                         </Button>
+                        <template v-if="loadingOlder">
+                            <p class="sr-only" role="status">Loading earlier messages…</p>
+                            <div
+                                v-for="(width, index) in ['w-44', 'w-56', 'w-36']"
+                                :key="index"
+                                :class="['flex min-w-0 items-end gap-2', index === 2 ? 'justify-end' : 'justify-start']"
+                                aria-hidden="true"
+                            >
+                                <span v-if="index !== 2" class="shimmer size-8 shrink-0 rounded-full" />
+                                <span :class="['shimmer h-11 max-w-[75%] rounded-2xl', width]" />
+                            </div>
+                        </template>
                     </li>
 
                     <template v-for="entry in rendered" :key="entry.message.id">

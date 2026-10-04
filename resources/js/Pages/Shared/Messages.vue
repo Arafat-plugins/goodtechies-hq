@@ -13,14 +13,16 @@ import {
     UsersRound,
 } from '@lucide/vue';
 import { useMediaQuery } from '@vueuse/core';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { type EffectScope, computed, effectScope, onBeforeUnmount, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import ConversationAvatar from '@/Components/Messages/ConversationAvatar.vue';
 import ConversationContextPanel from '@/Components/Messages/ConversationContextPanel.vue';
 import GroupDialog from '@/Components/Messages/GroupDialog.vue';
 import MessagesRail from '@/Components/Messages/MessagesRail.vue';
+import { openingId } from '@/Components/Messages/opening';
 import { personTone } from '@/Components/Messages/people';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
+import ThreadSkeleton from '@/Components/Messages/ThreadSkeleton.vue';
 import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
 import { adoptInbox, isViewingConversation, onInboxPing } from '@/Components/Realtime/shell';
 import {
@@ -54,6 +56,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Comp
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
+import { useNavigationPending } from '@/lib/useNavigationPending';
 import { cn } from '@/lib/utils';
 import type { SharedProps } from '@/types';
 
@@ -123,29 +126,31 @@ const page = usePage();
 const viewerId = computed(() => page.props.auth.user?.id ?? null);
 
 /**
- * How much of the viewport the shell has already spent, before the workspace gets the rest.
+ * Messages fills the screen edge to edge, like Telegram, at every width.
  *
- * Top bar, page padding, the page header and the gap under it — plus the sticky timer bar's
- * MEASURED height, `--timer-dock-h`, which `TimerBar` keeps on `<html>` (0 when there is no
- * bar). A fixed 4rem guess was right only while the bar fitted on one row; when it wraps, the
- * workspace shrinks with it, so the composer and its Send button are never under the dock.
+ * Phone first (2026-10-04, the client: "its look like a box inside another box it will be full
+ * height and width"), then desktop the same day ("this red bordered … like under a box, make it
+ * like Telegram"): the page padding is cancelled (`<main>` is `p-4 pt-3`), the workspace is
+ * exactly the screen under the 3.5rem top bar and above the timer dock's MEASURED height
+ * (`--timer-dock-h`, which `TimerBar` keeps on `<html>`, 0 when there is no dock), and the
+ * cards lose their border, corners and shadow. The columns are divided by hairlines instead,
+ * the chat background runs to the edges, and the composer sits on the bottom edge.
  */
-// Polish 002: the page header is gone, so only the top bar (3.5rem) and the page padding
-// (0.75rem top, 1rem bottom) are spent — the workspace now fills to the bottom edge.
-const workspaceHeight = computed(() => 'lg:h-[calc(100svh-5.25rem-var(--timer-dock-h,0px))]');
-
-/**
- * Below `lg` (a phone, the Android app) Messages fills the screen edge to edge like a chat app
- * (2026-10-04, the client: "its look like a box inside another box it will be full height and
- * width"): the page padding is cancelled, the workspace is exactly the screen under the top bar
- * (and the timer dock), and the cards lose their border, corners and shadow. The thread's own
- * frame goes too, so the chat background runs to the edges and the composer sits at the bottom.
- */
-const mobileFill =
-    'max-lg:-mx-4 max-lg:-mt-3 max-lg:-mb-4 max-lg:gap-0 max-lg:h-[calc(100dvh-3.5rem-var(--timer-dock-h,0px))]';
-const mobileCard = 'max-lg:h-full max-lg:rounded-none max-lg:border-0 max-lg:shadow-none';
+const fill =
+    '-mx-4 -mt-3 -mb-4 gap-0 h-[calc(100dvh-3.5rem-var(--timer-dock-h,0px))]';
+const flatCard = 'h-full rounded-none border-0 shadow-flat';
 
 const activeId = computed(() => props.active?.conversation_id ?? null);
+
+/**
+ * The chat the reader just tapped, while its thread is on its way (`opening.ts`): its list row,
+ * for the name and face in the shimmering header. `null` once the thread has arrived.
+ */
+const opening = computed(() =>
+    openingId.value === null || openingId.value === activeId.value
+        ? null
+        : (props.conversations.find((row) => row.id === openingId.value) ?? null),
+);
 
 const routes = computed(() =>
     props.active === null ? null : conversationRoutes(props.active.conversation_id),
@@ -169,6 +174,28 @@ const description = computed(() => {
     return unread === 1 ? '1 unread message.' : `${unread} unread messages.`;
 });
 
+/**
+ * While a chat is opening this page draws its own placeholder (a shimmering thread), so it
+ * claims the skeleton the way a screen does (`useNavigationPending`) and the shell does not also
+ * dim the whole page under it. Only while one is opening: leaving Messages dims as everywhere.
+ */
+let openingSkeleton: EffectScope | null = null;
+
+watch(openingId, (id) => {
+    if (id !== null && openingSkeleton === null) {
+        openingSkeleton = effectScope();
+        openingSkeleton.run(() => useNavigationPending());
+    } else if (id === null && openingSkeleton !== null) {
+        openingSkeleton.stop();
+        openingSkeleton = null;
+    }
+});
+
+onBeforeUnmount(() => {
+    openingSkeleton?.stop();
+    openingSkeleton = null;
+});
+
 /* ------------------------------------------------------------------ the one-column pane */
 
 /**
@@ -184,7 +211,8 @@ const showsThread = computed(() => {
     const params = new URLSearchParams(query);
 
     // `?unread=1` (the top bar's Messages icon) opens a thread just as `?conversation=` does.
-    return params.has('conversation') || params.has('unread');
+    // A chat that is opening is already "the thread" on a phone: the tap swaps screens at once.
+    return params.has('conversation') || params.has('unread') || openingId.value !== null;
 });
 
 /* ------------------------------------------------------------------ the context panel */
@@ -397,7 +425,7 @@ const activeLine = computed(() =>
             the workspace takes the rest, so an announcement never steals the height the thread
             was going to use for messages.
         -->
-        <div :class="cn('flex min-w-0 flex-col gap-3 lg:min-h-[30rem]', workspaceHeight, mobileFill)">
+        <div :class="cn('flex min-w-0 flex-col lg:min-h-[30rem]', fill)">
             <!--
                 The announcement banner the plan asks for. It is **not dismissed by a button**:
                 it goes quiet when the announcements channel is read, which is one state and not
@@ -410,7 +438,7 @@ const activeLine = computed(() =>
                 preserve-scroll
                 :class="
                     cn(
-                        'flex min-w-0 shrink-0 items-start gap-3 rounded-lg border bg-card p-3 shadow-raised max-lg:m-3',
+                        'flex min-w-0 shrink-0 items-start gap-3 rounded-lg border bg-card p-3 shadow-raised m-3',
                         'hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
                         announcement.is_unread && 'border-primary',
                     )
@@ -434,7 +462,7 @@ const activeLine = computed(() =>
             <div
                 :class="
                     cn(
-                        'grid min-w-0 gap-3 lg:min-h-0 lg:flex-1 max-lg:min-h-0 max-lg:flex-1 max-lg:grid-rows-[minmax(0,1fr)]',
+                        'grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)] gap-0',
                         'lg:grid-cols-[18rem_minmax(0,1fr)]',
                         asColumn && 'xl:grid-cols-[18rem_minmax(0,1fr)_18rem]',
                     )
@@ -448,8 +476,8 @@ const activeLine = computed(() =>
                     :class="
                         cn(
                             'min-h-0 min-w-0 gap-0 overflow-hidden py-0 shadow-raised',
-                            'lg:flex',
-                            mobileCard,
+                            'lg:flex lg:border-r',
+                            flatCard,
                             showsThread && 'hidden',
                         )
                     "
@@ -457,7 +485,7 @@ const activeLine = computed(() =>
                     <div class="flex min-h-0 min-w-0 flex-1 flex-col p-3">
                         <MessagesRail
                             :conversations="conversations"
-                            :active-id="activeId"
+                            :active-id="opening?.id ?? activeId"
                             :people="people"
                             :can-manage-groups="can_manage_groups === true"
                         />
@@ -470,12 +498,18 @@ const activeLine = computed(() =>
                         cn(
                             'min-h-0 min-w-0 gap-0 overflow-hidden py-0 shadow-raised',
                             'lg:flex',
-                            mobileCard,
+                            flatCard,
                             !showsThread && 'hidden',
                         )
                     "
                 >
-                    <template v-if="active && routes">
+                    <ThreadSkeleton
+                        v-if="opening"
+                        :label="opening.label"
+                        :avatar-url="opening.avatar_url ?? null"
+                    />
+
+                    <template v-else-if="active && routes">
                         <div class="flex min-w-0 shrink-0 items-center gap-2 border-b p-3">
                             <Button
                                 as-child
@@ -603,12 +637,12 @@ const activeLine = computed(() =>
                         </div>
 
                         <!--
-                            Below `lg` the thread runs edge to edge: no padding around it, the
-                            chat background square to the screen, and the composer keeping its
-                            own side and bottom spacing (above the gesture bar).
+                            The thread runs edge to edge: no padding around it, the chat
+                            background square to the pane, and the composer keeping its own
+                            side and bottom spacing (above a phone's gesture bar).
                         -->
                         <div
-                            class="flex min-h-0 min-w-0 flex-1 flex-col p-3 max-lg:p-0 max-lg:[&_[role=log]]:rounded-none max-lg:[&_[role=log]]:px-3 max-lg:[&_[data-testid=message-thread]]:gap-0 max-lg:[&_[data-testid=message-thread]_form]:px-3 max-lg:[&_[data-testid=message-thread]_form]:pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+                            class="flex min-h-0 min-w-0 flex-1 flex-col [&_[role=log]]:rounded-none [&_[role=log]]:px-3 lg:[&_[role=log]]:px-6 [&_[data-testid=message-thread]]:gap-0 [&_[data-testid=message-thread]_form]:px-3 [&_[data-testid=message-thread]_form]:pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:[&_[data-testid=message-thread]_form]:px-6"
                         >
                             <!--
                                 `max-h-none` is this page taking responsibility for the
@@ -643,7 +677,7 @@ const activeLine = computed(() =>
                 -->
                 <Card
                     v-if="asColumn && active"
-                    class="hidden min-h-0 min-w-0 gap-0 overflow-hidden py-0 shadow-raised xl:flex"
+                    class="hidden h-full min-h-0 min-w-0 gap-0 overflow-hidden rounded-none border-0 border-l py-0 shadow-flat xl:flex"
                 >
                     <div class="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b p-3">
                         <h2 class="min-w-0 truncate text-sm font-medium">Details</h2>

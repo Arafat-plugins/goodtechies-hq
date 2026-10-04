@@ -110,7 +110,9 @@ class MessageController extends Controller
             // so nothing here can reach a conversation that list did not already allow.
             'active' => fn (): ?array => $active === null ? null : $this->threadWithPeer($request, $active),
             'announcement' => $this->banner($user),
-            'people' => $this->messageablePeople($user),
+            // A closure too (2026-10-04): opening another chat is a partial reload of `active` and
+            // `conversations` only, so the roster is not rebuilt on every click in the list.
+            'people' => fn (): array => $this->messageablePeople($user),
             'can_manage_groups' => $user->hasPermission(Permission::MessagesManage),
         ]);
     }
