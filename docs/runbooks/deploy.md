@@ -11,6 +11,45 @@ bash deploy/deploy.sh           # fetches main, fast-forwards, then releases
 
 `bash` because the repository is committed from Windows, so the script has no execute bit.
 
+### One click from Windows: `deploy-live.bat` (decision 12-92)
+
+The 1 GB VPS has no swap (`swapon` is refused in its container), and `npm run build` peaks near
+0.95 GB, so a plain `deploy.sh` can die with `ENOMEM` (it did on 2026-10-03). The everyday
+release is therefore:
+
+1. `push-to-github.bat`
+2. `deploy-live.bat` (double-click). It warns about anything not on GitHub, logs in over SSH
+   (root password, or a password-free key it offers to set up once in
+   `%USERPROFILE%\.ssh\goodtechies_hq_deploy`), sends `deploy/live-deploy.sh` and runs it.
+
+`deploy/live-deploy.sh` does nothing when the server already runs `origin/main` (`FORCE=1`
+rebuilds anyway). Otherwise it:
+
+- needs 1.5 GB of free disk;
+- dumps the database to `/root/hq-backups` (newest 10 kept);
+- copies `public/build`;
+- pauses `hq-queue` and `hq-reverb` for the build (always restarted);
+- fast-forwards the code;
+- runs `SKIP_PULL=1 bash deploy/deploy.sh`, with `SKIP_NPM_CI=1` when `package*.json` did not
+  change, and retries it once;
+- on a second failure, resets the code to the previous commit, restores the old build,
+  re-caches and brings the site up (exit 2);
+- finally checks `/login` and pending migrations.
+
+Before the release it also removes junk (decision 12-93): `/swapfile`, which this container
+can never switch on (2.1 GB); apt's downloaded packages; the journal beyond 50 MB; app logs
+beyond 50 MB; rotated logs older than 14 days. After the build it clears the npm and composer
+caches. It never touches the database, `storage/app`, `.env` or any backup.
+
+The database dump is verified (`pg_restore --list`) before anything changes, and
+`/root/hq-backups/latest.dump` points at it. The bat copies it to
+`%USERPROFILE%\goodtechies-hq-backups` on the PC (newest 10). A release whose new migrations
+drop, rename, truncate or delete data in `up()` stops until it is run as
+`deploy-live.bat allow-db-changes`. `deploy-live.bat clean` removes junk only.
+
+Logs are in `/root/hq-deploy-logs`. Without a PC at hand, the same script runs from the VPSDime
+web console: `bash /var/www/goodtechies-hq/deploy/live-deploy.sh`.
+
 ## Automatic deploys
 
 - **Trigger:** a push to `main`, or Actions → Deploy → Run workflow. Runs queue, never overlap,

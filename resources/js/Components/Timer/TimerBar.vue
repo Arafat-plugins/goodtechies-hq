@@ -47,6 +47,14 @@ const canTrack = computed(() => page.props.auth.user?.canTrackTime === true);
 
 const visible = ref(true);
 
+/**
+ * On a phone, Messages is a full-screen chat and its composer belongs on the bottom edge, so the
+ * dock steps aside there (client, 2026-10-04: "remove bottom timer … the sending message bar will
+ * be at the bottom"). Hidden by CSS only: the timer and its heartbeat keep running in `useTimer()`,
+ * and the measured height drops to 0, so the page takes the room back on its own.
+ */
+const onMessages = computed(() => page.component === 'Shared/Messages');
+
 onMounted(() => {
     visible.value = readBarVisible();
 
@@ -107,7 +115,11 @@ function show(): void {
 </script>
 
 <template>
-    <div v-if="canTrack" ref="dock" class="sticky bottom-0 z-20 min-w-0">
+    <div
+        v-if="canTrack"
+        ref="dock"
+        :class="['sticky bottom-0 z-20 min-w-0', { 'max-lg:hidden': onMessages }]"
+    >
         <section
             v-if="visible"
             aria-label="Timer"

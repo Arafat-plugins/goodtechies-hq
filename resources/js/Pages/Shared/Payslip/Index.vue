@@ -138,10 +138,6 @@ const provisional = computed(() => props.items.filter((item) => !item.release.re
                         <h2 id="payslips-provisional" class="text-base font-semibold tracking-tight">
                             Not paid yet — provisional
                         </h2>
-                        <p class="text-sm text-muted-foreground">
-                            These months are still being worked on. The figures can change before payday, so they are
-                            not payslips yet.
-                        </p>
                     </div>
 
                     <ul class="flex min-w-0 flex-col gap-3">

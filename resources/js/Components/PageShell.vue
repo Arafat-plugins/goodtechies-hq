@@ -1,14 +1,6 @@
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3';
-import { computed } from 'vue';
-import {
-    Breadcrumb,
-    BreadcrumbItem,
-    BreadcrumbLink,
-    BreadcrumbList,
-    BreadcrumbPage,
-    BreadcrumbSeparator,
-} from '@/Components/ui/breadcrumb';
+import { computed, provide, shallowRef } from 'vue';
+import { PAGE_ACTIONS } from '@/lib/pageActions';
 import { cn } from '@/lib/utils';
 
 export interface Crumb {
@@ -63,50 +55,61 @@ const heading = computed(() =>
 
 const subline = computed(() => (props.greeting ? formatDay(props.greeting.today) : props.description));
 
-const crumbs = computed<Crumb[]>(() => props.breadcrumb ?? []);
+/** Polish 007: the in-page breadcrumb is gone; `breadcrumb` is still accepted and ignored. */
+void props.breadcrumb;
+
+/** Where the actions render: a claimed toolbar host, else this shell's own row. */
+const actionsHost = shallowRef<HTMLElement | null>(null);
+const actionsHome = shallowRef<HTMLElement | null>(null);
+
+provide(PAGE_ACTIONS, {
+    host: actionsHost,
+    claim: (el) => {
+        if (actionsHost.value !== null) {
+            return false;
+        }
+
+        actionsHost.value = el;
+
+        return true;
+    },
+    release: (el) => {
+        if (actionsHost.value === el) {
+            actionsHost.value = null;
+        }
+    },
+});
 </script>
 
 <template>
     <div :class="cn('flex min-w-0 flex-col', bleed ? 'gap-3' : 'gap-6')" :data-page-bleed="bleed || undefined">
         <!--
-            Polish 002: the client removed the visible page title and its description line from
-            every page. The heading stays for screen readers (absolutely positioned by `sr-only`,
-            so it is not a flex item and adds no gap); the breadcrumb, the actions and the tabs
-            still render when a page has them.
+            Polish 002: no visible page title or description; the heading stays for screen
+            readers (absolutely positioned by `sr-only`, so it adds no gap).
+            Polish 007: no in-page breadcrumb either — the top bar already shows the same trail.
+            The actions go to the end of the page's first toolbar row when that row carries a
+            `PageActionsHost`; otherwise they sit in this row, beside the tabs when there are any.
         -->
         <h1 class="sr-only">{{ heading }}</h1>
         <p v-if="subline && !titleHidden" class="sr-only">{{ subline }}</p>
 
-        <div v-if="crumbs.length > 0 || $slots.actions || $slots.tabs" class="flex min-w-0 flex-col gap-3">
-            <div
-                v-if="crumbs.length > 0 || $slots.actions"
-                class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-                <Breadcrumb v-if="crumbs.length > 0" class="min-w-0">
-                    <BreadcrumbList>
-                        <template v-for="(crumb, index) in crumbs" :key="`${crumb.label}-${index}`">
-                            <BreadcrumbItem>
-                                <BreadcrumbLink v-if="crumb.href && index < crumbs.length - 1" as-child>
-                                    <Link :href="crumb.href">{{ crumb.label }}</Link>
-                                </BreadcrumbLink>
-                                <BreadcrumbPage v-else>{{ crumb.label }}</BreadcrumbPage>
-                            </BreadcrumbItem>
-                            <BreadcrumbSeparator v-if="index < crumbs.length - 1" />
-                        </template>
-                    </BreadcrumbList>
-                </Breadcrumb>
-                <div
-                    v-if="$slots.actions"
-                    class="flex shrink-0 flex-wrap items-center gap-2 sm:ml-auto"
-                >
-                    <slot name="actions" />
-                </div>
-            </div>
-
+        <div
+            v-if="$slots.tabs || ($slots.actions && !actionsHost)"
+            class="flex min-w-0 flex-wrap items-center gap-3"
+        >
             <div v-if="$slots.tabs" class="min-w-0">
                 <slot name="tabs" />
             </div>
+            <div
+                v-if="$slots.actions && !actionsHost"
+                ref="actionsHome"
+                class="ml-auto flex shrink-0 flex-wrap items-center gap-2"
+            />
         </div>
+
+        <Teleport v-if="$slots.actions && (actionsHost || actionsHome)" :to="actionsHost ?? actionsHome">
+            <slot name="actions" />
+        </Teleport>
 
         <div :class="cn('flex min-w-0 flex-col', bleed ? 'gap-3' : 'gap-6')">
             <slot />

@@ -92,6 +92,10 @@ class PayrollPeriodResource extends JsonResource
                 'can_lock' => $this->allows($viewer, 'lock'),
                 'can_reverse_lock' => $this->allows($viewer, 'reverseLock'),
                 'can_mark_paid' => $this->allows($viewer, 'markPaid'),
+                // Polish 005: a Draft can be moved to the month it pays for, by whoever may draft.
+                'can_change_month' => $viewer !== null
+                    && $this->resource->status === PayrollStatus::Draft
+                    && Gate::forUser($viewer)->allows('create', PayrollPeriod::class),
             ],
         ];
     }

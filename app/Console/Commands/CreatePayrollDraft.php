@@ -66,7 +66,7 @@ use Illuminate\Support\Carbon;
  * skips for want of a salary are **named in the output**, because a payroll that silently
  * misses somebody is the failure this command exists to prevent.
  */
-#[Signature('hq:create-payroll-draft {--month= : The month to draft (default: the current one)}')]
+#[Signature('hq:create-payroll-draft {--month= : The month to draft (default: the month just finished)}')]
 #[Description('Create the month\'s payroll draft with one line per active employee')]
 class CreatePayrollDraft extends Command
 {
@@ -128,16 +128,17 @@ class CreatePayrollDraft extends Command
     {
         $value = trim((string) ($this->option('month') ?? ''));
 
+        // Polish 005: pay follows the work, so the run on the 1st drafts the month just finished.
         if ($value === '') {
-            return Carbon::now();
+            return PayrollService::defaultDraftMonth(Carbon::now());
         }
 
         try {
             return Carbon::parse($value);
         } catch (\Throwable) {
-            $this->warn(sprintf('Could not read --month=%s; drafting the current month.', $value));
+            $this->warn(sprintf('Could not read --month=%s; drafting the month just finished.', $value));
 
-            return Carbon::now();
+            return PayrollService::defaultDraftMonth(Carbon::now());
         }
     }
 }

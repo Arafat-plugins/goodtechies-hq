@@ -46,7 +46,8 @@ const label = computed(() => {
 <template>
     <span class="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground" :title="label">
         <component :is="icon" class="size-3.5 shrink-0" aria-hidden="true" />
-        <span aria-hidden="true" class="hidden sm:inline">{{ pending ? 'Update waiting' : word }}</span>
+        <!-- Polish 011: in a chat (the default subject) only the icon shows; the word stays in the tooltip and for screen readers. -->
+        <span v-if="pending || subject !== 'new messages'" aria-hidden="true" class="hidden sm:inline">{{ pending ? 'Update waiting' : word }}</span>
         <span class="sr-only">{{ label }}</span>
     </span>
 </template>

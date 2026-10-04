@@ -113,13 +113,7 @@ const projectColumns = computed<ColumnDef<WorkloadProject>[]>(() => [
             </div>
 
             <section class="flex min-w-0 flex-col gap-2">
-                <h2 class="text-sm font-medium">Per employee</h2>
-                <p class="text-xs text-muted-foreground">
-                    In alphabetical order. Estimated and tracked are two separate figures about the same tasks — the
-                    estimate is a field on the task, so the hours beside it are everybody's hours on that task, not
-                    only this person's.
-                </p>
-
+                <!-- Polish 007: the heading sits in the table's own toolbar row, left of its controls. -->
                 <DataTable
                     id="admin-workload-employees"
                     :columns="employeeColumns"
@@ -130,6 +124,10 @@ const projectColumns = computed<ColumnDef<WorkloadProject>[]>(() => [
                     empty-title="Nobody is tracked yet"
                     empty-description="Employees appear here once their tracking mode is the office clock or the remote timer."
                 >
+                    <template #toolbar>
+                        <h2 class="text-sm font-medium">Per employee</h2>
+                    </template>
+
                     <template #cell-name="{ row }">
                         <div class="flex min-w-0 flex-col">
                             <span class="font-medium break-words">{{ row.name }}</span>
@@ -171,11 +169,6 @@ const projectColumns = computed<ColumnDef<WorkloadProject>[]>(() => [
             </section>
 
             <section class="flex min-w-0 flex-col gap-2">
-                <h2 class="text-sm font-medium">Projects with the most pending work</h2>
-                <p class="text-xs text-muted-foreground">
-                    Open tasks per project, most first. Projects with nothing pending are not listed.
-                </p>
-
                 <DataTable
                     id="admin-workload-projects"
                     :columns="projectColumns"
@@ -186,6 +179,10 @@ const projectColumns = computed<ColumnDef<WorkloadProject>[]>(() => [
                     empty-title="Nothing is pending"
                     empty-description="No project you can see is holding an open task right now."
                 >
+                    <template #toolbar>
+                        <h2 class="text-sm font-medium">Projects with the most pending work</h2>
+                    </template>
+
                     <template #cell-name="{ row }">
                         <Link :href="`/admin/projects/${row.id}`" class="font-medium break-words hover:underline">
                             {{ row.name }}
@@ -214,11 +211,6 @@ const projectColumns = computed<ColumnDef<WorkloadProject>[]>(() => [
                 </DataTable>
             </section>
 
-            <p class="text-xs text-muted-foreground">
-                Every figure links to the Tasks list under the same filter it was counted with, so a number that looks
-                wrong can be opened and read. Tracked hours are the approved ones — time added by hand and not yet
-                signed off is on Workforce → Time, and is not in these figures.
-            </p>
         </div>
     </PageShell>
 </template>

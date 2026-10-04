@@ -76,6 +76,8 @@ export interface PayrollPeriodPermissions {
     can_lock: boolean;
     can_reverse_lock: boolean;
     can_mark_paid: boolean;
+    /** Polish 005: may this viewer move this Draft to another month? */
+    can_change_month?: boolean;
 }
 
 /** One month of payroll, as the workbench knows it. `PayrollPeriodResource`. */
@@ -157,6 +159,21 @@ export interface PayrollCurrentMonth {
     value: string;
     label: string;
     has_period: boolean;
+    /** Polish 005: the latest month that may be drafted (`YYYY-MM`) — never one not yet begun. */
+    max: string;
+    /** Polish 005: every month that already has a payroll (`YYYY-MM`). */
+    taken: string[];
+}
+
+/** `2026-09` → `September 2026` (polish 005). */
+export function formatMonthValue(value: string): string {
+    const [year, month] = value.split('-').map(Number);
+
+    if (!year || !month) {
+        return value;
+    }
+
+    return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
 }
 
 /* --------------------------------------------------------------------- the fields */
@@ -229,6 +246,8 @@ export const payrollRoutes = {
     store: () => '/payroll',
     show: (period: number) => `/payroll/${period}`,
     item: (period: number, item: number) => `/payroll/${period}/items/${item}`,
+    /** Polish 005: move a Draft to the month it pays for. */
+    month: (period: number) => `/payroll/${period}/month`,
     calculate: (period: number) => `/payroll/${period}/calculate`,
     review: (period: number) => `/payroll/${period}/review`,
     approve: (period: number) => `/payroll/${period}/approve`,

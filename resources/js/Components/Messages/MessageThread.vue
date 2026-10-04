@@ -263,6 +263,47 @@ const bodyEl = ref<InstanceType<typeof Textarea> | null>(null);
 
 const body = ref('');
 const picked = ref<File | null>(null);
+/**
+ * Polish 005: more files waiting behind `picked`. One message still carries one attachment
+ * (`StoreMessageRequest`), so several are sent Telegram-style as consecutive messages: the
+ * typed text goes with the first, and each queued file follows on its own once the one before
+ * it has landed.
+ */
+const queued = ref<File[]>([]);
+/** At most this many files wait in the composer at once. */
+const MAX_ATTACHMENTS = 10;
+/** Everything in the composer, in send order. */
+const attachments = computed<File[]>(() => (picked.value === null ? [] : [picked.value, ...queued.value]));
+/** One object URL per image in the composer, revoked when the file leaves it. */
+const previewUrls = new Map<File, string>();
+
+function isImage(file: File): boolean {
+    return file.type.startsWith('image/') && file.type !== 'image/svg+xml';
+}
+
+function previewFor(file: File): string | null {
+    if (!isImage(file)) {
+        return null;
+    }
+
+    let url = previewUrls.get(file);
+
+    if (url === undefined) {
+        url = URL.createObjectURL(file);
+        previewUrls.set(file, url);
+    }
+
+    return url;
+}
+
+watch(attachments, (files) => {
+    for (const [file, url] of previewUrls) {
+        if (!files.includes(file)) {
+            URL.revokeObjectURL(url);
+            previewUrls.delete(file);
+        }
+    }
+});
 /** The finished recording, once the reader has stopped and kept it. `null` until then. */
 const voiceClip = ref<VoiceClip | null>(null);
 /** The mic is open, or a clip is sitting in the preview. Either way the paperclip is off. */
@@ -361,6 +402,7 @@ function grow(): void {
 
 function clearPicked(): void {
     picked.value = null;
+    queued.value = [];
     pickedError.value = null;
     sendFailed.value = null;
 
@@ -482,15 +524,73 @@ function onPageHide(): void {
 useUnsavedGuard(() => picked.value !== null || voiceClip.value !== null || voiceActive.value || body.value.trim() !== '');
 
 function choose(event: Event): void {
-    adoptFile((event.target as HTMLInputElement).files?.[0] ?? null);
+    const input = event.target as HTMLInputElement;
+
+    for (const file of Array.from(input.files ?? [])) {
+        adoptFile(file);
+    }
+
+    // So the same file can be chosen again after it is removed.
+    input.value = '';
 }
 
-/** One way in for a file, whether it was picked or pasted: same check, same preview. */
+/**
+ * One way in for a file, whether it was picked, pasted or dropped: same check, same preview.
+ * Polish 005: a second file no longer replaces the first — it joins the queue behind it.
+ */
 function adoptFile(file: File | null): void {
-    picked.value = file;
     serverError.value = null;
     sendFailed.value = null;
-    pickedError.value = file === null ? null : messageFileRejection(file);
+
+    if (file === null) {
+        clearPicked();
+
+        return;
+    }
+
+    const rejection = messageFileRejection(file);
+
+    if (picked.value === null) {
+        picked.value = file;
+        pickedError.value = rejection;
+
+        return;
+    }
+
+    if (rejection !== null) {
+        // The files already here stay; only this one is refused, and it says why.
+        toast.error(`${file.name}: ${rejection}`);
+
+        return;
+    }
+
+    if (attachments.value.length >= MAX_ATTACHMENTS) {
+        toast.error(`Up to ${MAX_ATTACHMENTS} files at a time. Send these first.`);
+
+        return;
+    }
+
+    queued.value = [...queued.value, file];
+}
+
+/** Take one file out of the composer (polish 005). */
+function removeAttachment(index: number): void {
+    if (index === 0) {
+        const [next, ...rest] = queued.value;
+
+        picked.value = next ?? null;
+        queued.value = rest;
+        pickedError.value = next === undefined ? null : messageFileRejection(next);
+        sendFailed.value = null;
+
+        if (pickerEl.value) {
+            pickerEl.value.value = '';
+        }
+
+        return;
+    }
+
+    queued.value = queued.value.filter((_, at) => at !== index - 1);
 }
 
 /** Can a file be taken in right now — by paste or by drop? The paperclip's own conditions. */
@@ -594,9 +694,7 @@ function onDrop(event: DragEvent): void {
 
     event.preventDefault();
 
-    const file = event.dataTransfer?.files?.[0] ?? null;
-
-    if (file !== null) {
+    for (const file of Array.from(event.dataTransfer?.files ?? [])) {
         adoptFile(file);
     }
 }
@@ -1715,9 +1813,22 @@ async function send(outgoing: Outgoing): Promise<void> {
             }
 
             if (carrying !== null) {
+                // Polish 005: files still waiting go next, each as its own message.
+                const rest = carrying === 'file' && stillHere() ? [...queued.value] : [];
+
                 // Sent: the draft goes with it, before anything else can read it back.
                 dropDraft();
                 resetComposer();
+
+                if (rest.length > 0) {
+                    const [next, ...after] = rest;
+
+                    picked.value = next;
+                    queued.value = after;
+                    pickedError.value = messageFileRejection(next);
+                    posting.value = false;
+                    void nextTick(post);
+                }
             }
 
             emit('settled');
@@ -2073,32 +2184,45 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     :id="pickerId"
                     ref="pickerEl"
                     type="file"
+                    multiple
                     :accept="MESSAGE_FILE_ACCEPT"
                     :disabled="posting || attachBlocked"
                     class="sr-only"
                     @change="choose"
                 >
 
-                <!-- The picked file, with the control that unpicks it. -->
-                <div
-                    v-if="picked"
-                    class="flex min-w-0 items-center gap-2 self-start rounded-md border bg-muted/40 py-1 pr-1 pl-2"
-                >
-                    <Paperclip class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <span class="min-w-0 truncate text-xs" :title="picked.name">
-                        {{ picked.name }}
-                    </span>
-                    <Button
-                        type="button"
-                        size="icon-xs"
-                        variant="ghost"
-                        :disabled="posting"
-                        :aria-label="`Remove ${picked.name}`"
-                        @click="clearPicked"
-                    >
-                        <X aria-hidden="true" />
-                    </Button>
-                </div>
+                <!--
+                    Polish 005: every file waiting to go — an image as a thumbnail, anything else
+                    as a chip — each with its own remove control. They go in this order.
+                -->
+                <ul v-if="attachments.length > 0" class="flex min-w-0 list-none flex-wrap gap-2 self-start">
+                    <li v-for="(file, index) in attachments" :key="`${index}-${file.name}-${file.lastModified}`" class="relative">
+                        <img
+                            v-if="previewFor(file)"
+                            :src="previewFor(file) ?? undefined"
+                            :alt="file.name"
+                            class="size-16 rounded-md border object-cover"
+                        >
+                        <div
+                            v-else
+                            class="flex h-16 max-w-48 min-w-0 items-center gap-2 rounded-md border bg-muted/40 py-1 pr-7 pl-2"
+                        >
+                            <Paperclip class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+                            <span class="min-w-0 truncate text-xs" :title="file.name">{{ file.name }}</span>
+                        </div>
+                        <Button
+                            type="button"
+                            size="icon-xs"
+                            variant="secondary"
+                            class="absolute -top-1.5 -right-1.5 size-5 rounded-full border shadow-flat"
+                            :disabled="posting && index === 0"
+                            :aria-label="`Remove ${file.name}`"
+                            @click="removeAttachment(index)"
+                        >
+                            <X aria-hidden="true" />
+                        </Button>
+                    </li>
+                </ul>
 
                 <p
                     v-if="fieldError"

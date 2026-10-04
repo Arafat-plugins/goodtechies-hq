@@ -10,6 +10,10 @@
 #   BRANCH     the branch releases come from (default: main)
 #   SKIP_PULL  1 = deploy the code that is already checked out (used for rollback)
 #   NODE_BUILD_HEAP_MB  Node's heap for `npm run build` on a box under 2 GB of RAM (default 768)
+#   SKIP_NPM_CI  1 = keep node_modules (packages unchanged); deploy/live-deploy.sh decides this
+#
+# One-click release from Windows: deploy-live.bat (repo root) runs deploy/live-deploy.sh over
+# SSH, which backs up the database, frees memory for the build, then calls this script.
 #
 # Automatic deploys: GitHub Actions (.github/workflows/deploy.yml) logs in with a key that
 # /root/.ssh/authorized_keys restricts to running this script and nothing else
@@ -171,7 +175,14 @@ if [ "$mem_mb" -lt 2000 ]; then
         echo "WARNING: no swap on a box under 2 GB; the build may be killed. install.sh creates /swapfile." >&2
     fi
 fi
-npm ci --include=dev --no-audit --no-fund
+# SKIP_NPM_CI=1 (set by deploy/live-deploy.sh when neither package.json nor package-lock.json
+# changed in this release): reuse node_modules instead of reinstalling it. `npm ci` deletes and
+# rewrites the whole tree, which costs a minute and a memory peak of its own on a 1 GB box.
+if [ "${SKIP_NPM_CI:-0}" = "1" ] && [ -d "$APP_DIR/node_modules" ]; then
+    echo "SKIP_NPM_CI=1 and node_modules is present: packages unchanged, not reinstalling"
+else
+    npm ci --include=dev --no-audit --no-fund
+fi
 npm run build
 
 step "migrate (pgsql_migrator)"

@@ -171,10 +171,6 @@ function confirmWithdraw(): void {
                     them. Part D §9: Unpaid and Other have no balance, so a card reading 0 would
                     be a lie in the UI.
                 -->
-                <p class="text-xs text-muted-foreground">
-                    Unpaid and Other have no balance — they are never refused for want of days, and Unpaid days are
-                    recorded as unpaid. Nothing tops a balance up automatically; an Admin sets these.
-                </p>
             </section>
 
             <section v-if="permissions.can_apply" aria-labelledby="apply-leave" class="flex min-w-0 flex-col gap-3">

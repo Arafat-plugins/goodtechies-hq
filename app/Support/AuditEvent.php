@@ -118,6 +118,8 @@ enum AuditEvent: string
     // audit row's `old` value is the whole of what the row said.
     case SalaryDeleted = 'salary.deleted';
     case PayrollApproved = 'payroll.approved';
+    // Polish 005: a draft moved to the month it actually pays for (old and new month).
+    case PayrollMonthChanged = 'payroll.month_changed';
     case PayrollLockReversed = 'payroll.lock_reversed';
     case ExpenseCreated = 'expense.created';
     case ExpenseEdited = 'expense.edited';
@@ -284,6 +286,7 @@ enum AuditEvent: string
             self::SalaryChanged => 'Salary changed',
             self::SalaryDeleted => 'Salary deleted',
             self::PayrollApproved => 'Payroll approved',
+            self::PayrollMonthChanged => 'Payroll month changed',
             self::PayrollLockReversed => 'Payroll lock reversed',
             self::ExpenseCreated => 'Expense recorded',
             self::ExpenseEdited => 'Expense edited',
@@ -354,6 +357,7 @@ enum AuditEvent: string
             self::SalaryChanged,
             self::SalaryDeleted,
             self::PayrollApproved,
+            self::PayrollMonthChanged,
             self::PayrollLockReversed,
             self::ExpenseCreated,
             self::ExpenseEdited,

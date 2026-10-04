@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { CalendarCheck, ChevronLeft, ChevronRight, Pencil } from '@lucide/vue';
+import { CalendarCheck, Pencil } from '@lucide/vue';
 import { ref } from 'vue';
 import EditDayDialog from '@/Components/Attendance/EditDayDialog.vue';
 import type {
@@ -9,13 +9,9 @@ import type {
     AttendanceStatusOption,
     AttendanceSummaryRow,
 } from '@/Components/Attendance/attendance';
-import {
-    attendanceRoutes,
-    formatMinutes,
-    formatShift,
-    noStatusLabel,
-} from '@/Components/Attendance/attendance';
+import { attendanceRoutes, formatMinutes, formatShift, noStatusLabel } from '@/Components/Attendance/attendance';
 import EmptyState from '@/Components/EmptyState.vue';
+import DateStepper from '@/Components/DateStepper.vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { Button } from '@/Components/ui/button';
@@ -97,27 +93,16 @@ useLiveProps(['rows', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
         :description="date.label"
         :breadcrumb="[{ label: 'Workforce' }, { label: 'Attendance' }]"
     >
-        <template #actions>
-            <div class="flex items-center gap-2">
-                <Button as-child variant="outline" size="icon">
-                    <Link :href="attendanceRoutes.roster(date.previous)" preserve-scroll>
-                        <ChevronLeft class="size-4" aria-hidden="true" />
-                        <span class="sr-only">Previous day</span>
-                    </Link>
-                </Button>
-                <Button v-if="date.value !== date.today" as-child variant="outline">
-                    <Link :href="attendanceRoutes.roster()">Today</Link>
-                </Button>
-                <Button as-child variant="outline" size="icon">
-                    <Link :href="attendanceRoutes.roster(date.next)" preserve-scroll>
-                        <ChevronRight class="size-4" aria-hidden="true" />
-                        <span class="sr-only">Next day</span>
-                    </Link>
-                </Button>
-            </div>
-        </template>
 
         <div class="flex min-w-0 flex-col gap-4">
+            <!-- Polish 007: the day (with its month) between the arrows, at the start of the row. -->
+            <DateStepper
+                :label="date.label"
+                :previous-href="attendanceRoutes.roster(date.previous)"
+                :next-href="attendanceRoutes.roster(date.next)"
+                :today-href="date.value !== date.today ? attendanceRoutes.roster() : null"
+            />
+
             <!-- Counts of people per status. Never a ranking. -->
             <ul v-if="summary.length" class="flex flex-wrap gap-2">
                 <li v-for="row in summary" :key="row.key">
@@ -187,10 +172,6 @@ useLiveProps(['rows', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
                 </li>
             </ul>
 
-            <p v-if="rows.length" class="text-xs text-muted-foreground">
-                A row links to that person's month. Off days come from each employee's own work schedule, and a remote
-                employee is never marked absent — their work is tracked by the timer.
-            </p>
         </div>
 
         <EditDayDialog

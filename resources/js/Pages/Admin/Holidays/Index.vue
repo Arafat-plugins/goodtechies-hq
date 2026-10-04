@@ -12,6 +12,7 @@ import {
     holidayWhen,
 } from '@/Components/Holidays/holidays';
 import HolidayFormDialog from '@/Components/Holidays/HolidayFormDialog.vue';
+import PageActionsHost from '@/Components/PageActionsHost.vue';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
 import {
@@ -239,8 +240,9 @@ const summary = computed(() => {
                 control changes the whole page and a bare select with a year in it says nothing
                 about what it does.
             -->
-            <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div class="flex min-w-0 flex-col gap-2">
+            <!-- Polish 007: year, count and the page's actions on one row. -->
+            <div class="flex min-w-0 flex-wrap items-center gap-3">
+                <div class="flex min-w-0 items-center gap-2">
                     <Label :for="yearSelectId">Year</Label>
                     <Select
                         :id="yearSelectId"
@@ -259,20 +261,9 @@ const summary = computed(() => {
                 </div>
 
                 <p class="text-sm text-muted-foreground">{{ summary }}</p>
+                <PageActionsHost />
             </div>
 
-            <!--
-                The warning that makes this screen worth opening. Most of the seeded dates are
-                estimates, and an Admin who does not know that has no reason to check a row.
-                It is text, not a tinted banner with no words — colour is never the only
-                carrier (DESIGN.md §6 rule 6).
-            -->
-            <p v-if="holidays.length > 0" class="text-xs text-muted-foreground">
-                Bangladesh's Eid, Shab e-Barat, Ashura, Janmashtami, Durga Puja and Buddha Purnima dates are
-                lunar or lunisolar: the seeded list is an estimate for those, not a government date. Check
-                them against the gazette and correct them here — the change reaches every employee's
-                attendance, including days already past.
-            </p>
 
             <DataTable
                 id="admin-holidays"

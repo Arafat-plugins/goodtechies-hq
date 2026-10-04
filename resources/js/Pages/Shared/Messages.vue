@@ -134,6 +134,17 @@ const viewerId = computed(() => page.props.auth.user?.id ?? null);
 // (0.75rem top, 1rem bottom) are spent — the workspace now fills to the bottom edge.
 const workspaceHeight = computed(() => 'lg:h-[calc(100svh-5.25rem-var(--timer-dock-h,0px))]');
 
+/**
+ * Below `lg` (a phone, the Android app) Messages fills the screen edge to edge like a chat app
+ * (2026-10-04, the client: "its look like a box inside another box it will be full height and
+ * width"): the page padding is cancelled, the workspace is exactly the screen under the top bar
+ * (and the timer dock), and the cards lose their border, corners and shadow. The thread's own
+ * frame goes too, so the chat background runs to the edges and the composer sits at the bottom.
+ */
+const mobileFill =
+    'max-lg:-mx-4 max-lg:-mt-3 max-lg:-mb-4 max-lg:gap-0 max-lg:h-[calc(100dvh-3.5rem-var(--timer-dock-h,0px))]';
+const mobileCard = 'max-lg:h-full max-lg:rounded-none max-lg:border-0 max-lg:shadow-none';
+
 const activeId = computed(() => props.active?.conversation_id ?? null);
 
 const routes = computed(() =>
@@ -386,7 +397,7 @@ const activeLine = computed(() =>
             the workspace takes the rest, so an announcement never steals the height the thread
             was going to use for messages.
         -->
-        <div :class="cn('flex min-w-0 flex-col gap-3 lg:min-h-[30rem]', workspaceHeight)">
+        <div :class="cn('flex min-w-0 flex-col gap-3 lg:min-h-[30rem]', workspaceHeight, mobileFill)">
             <!--
                 The announcement banner the plan asks for. It is **not dismissed by a button**:
                 it goes quiet when the announcements channel is read, which is one state and not
@@ -399,7 +410,7 @@ const activeLine = computed(() =>
                 preserve-scroll
                 :class="
                     cn(
-                        'flex min-w-0 shrink-0 items-start gap-3 rounded-lg border bg-card p-3 shadow-raised',
+                        'flex min-w-0 shrink-0 items-start gap-3 rounded-lg border bg-card p-3 shadow-raised max-lg:m-3',
                         'hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
                         announcement.is_unread && 'border-primary',
                     )
@@ -423,7 +434,7 @@ const activeLine = computed(() =>
             <div
                 :class="
                     cn(
-                        'grid min-w-0 gap-3 lg:min-h-0 lg:flex-1',
+                        'grid min-w-0 gap-3 lg:min-h-0 lg:flex-1 max-lg:min-h-0 max-lg:flex-1 max-lg:grid-rows-[minmax(0,1fr)]',
                         'lg:grid-cols-[18rem_minmax(0,1fr)]',
                         asColumn && 'xl:grid-cols-[18rem_minmax(0,1fr)_18rem]',
                     )
@@ -438,6 +449,7 @@ const activeLine = computed(() =>
                         cn(
                             'min-h-0 min-w-0 gap-0 overflow-hidden py-0 shadow-raised',
                             'lg:flex',
+                            mobileCard,
                             showsThread && 'hidden',
                         )
                     "
@@ -458,6 +470,7 @@ const activeLine = computed(() =>
                         cn(
                             'min-h-0 min-w-0 gap-0 overflow-hidden py-0 shadow-raised',
                             'lg:flex',
+                            mobileCard,
                             !showsThread && 'hidden',
                         )
                     "
@@ -518,7 +531,8 @@ const activeLine = computed(() =>
                                 >
                                     {{ memberCount === 1 ? '1 member' : `${memberCount} members` }}
                                 </button>
-                                <p v-else-if="activeLine" class="min-w-0 truncate text-xs text-muted-foreground">
+                                <!-- Who can read it: desktop only; on a phone the header is just the name. -->
+                                <p v-else-if="activeLine" class="min-w-0 truncate text-xs text-muted-foreground max-lg:hidden">
                                     {{ activeLine }}
                                 </p>
                             </div>
@@ -588,9 +602,16 @@ const activeLine = computed(() =>
                             </TooltipProvider>
                         </div>
 
-                        <div class="flex min-h-0 min-w-0 flex-1 flex-col p-3">
+                        <!--
+                            Below `lg` the thread runs edge to edge: no padding around it, the
+                            chat background square to the screen, and the composer keeping its
+                            own side and bottom spacing (above the gesture bar).
+                        -->
+                        <div
+                            class="flex min-h-0 min-w-0 flex-1 flex-col p-3 max-lg:p-0 max-lg:[&_[role=log]]:rounded-none max-lg:[&_[role=log]]:px-3 max-lg:[&_[data-testid=message-thread]]:gap-0 max-lg:[&_[data-testid=message-thread]_form]:px-3 max-lg:[&_[data-testid=message-thread]_form]:pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+                        >
                             <!--
-                                `lg:max-h-none` is this page taking responsibility for the
+                                `max-h-none` is this page taking responsibility for the
                                 thread's height: it has given the column a definite one, so the
                                 ceiling the thread carries for auto-height parents (the project
                                 Discussion tab, the task panel) must come off here.
@@ -601,7 +622,7 @@ const activeLine = computed(() =>
                                 :thread="active"
                                 :routes="routes"
                                 scroll
-                                class="lg:max-h-none"
+                                class="max-h-none"
                                 @read="reloadRail"
                             />
                         </div>

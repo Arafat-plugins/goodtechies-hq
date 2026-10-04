@@ -596,6 +596,11 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
                 ->whereNumber('period')
                 ->name('show');
 
+            // Polish 005: move a Draft to the month it pays for.
+            Route::put('/{period}/month', [PayrollController::class, 'changeMonth'])
+                ->whereNumber('period')
+                ->name('month');
+
             Route::put('/{period}/items/{item}', [PayrollController::class, 'updateItem'])
                 ->whereNumber('period')
                 ->whereNumber('item')

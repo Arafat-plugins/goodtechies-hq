@@ -9,12 +9,7 @@ import FinanceMonthNav from '@/Components/Finance/FinanceMonthNav.vue';
 import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
 import type { FinanceMonth, MonthlyRollup } from '@/Components/Finance/finance';
 import { financeRoutes, formatMoney } from '@/Components/Finance/finance';
-import {
-    financeTrendHref,
-    moneyValue,
-    type FinanceProjectCut,
-    type FinanceTrend,
-} from '@/Components/Finance/financeReport';
+import { financeTrendHref, moneyValue, type FinanceProjectCut, type FinanceTrend } from '@/Components/Finance/financeReport';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
@@ -158,11 +153,6 @@ const trendRange = computed(() => {
                 <h2 id="report-by-category" class="text-base font-semibold tracking-tight">
                     By category — {{ month.label }}
                 </h2>
-                <p class="text-sm text-muted-foreground">
-                    A category with nothing filed under it this month is not on these lists. The same cut is drawn
-                    as a chart on the
-                    <Link :href="dashboardHref" class="underline underline-offset-4">Finance dashboard</Link>.
-                </p>
             </div>
 
             <div class="grid min-w-0 gap-4 lg:grid-cols-2">
@@ -197,12 +187,6 @@ const trendRange = computed(() => {
                     an empty expense column beside the income one would invite exactly the wrong
                     conclusion, that projects cost nothing. Said in words, once, above the table.
                 -->
-                <p class="text-sm text-muted-foreground">
-                    <strong class="font-medium text-foreground">Income only.</strong>
-                    An expense is not linked to a project anywhere in this system, so there is no per-project cost
-                    to set beside these figures — and an empty column would read as though projects cost nothing.
-                    A project appears here by name and domain; nothing else about it belongs on a finance screen.
-                </p>
             </div>
 
             <Card class="min-w-0">
@@ -308,11 +292,6 @@ const trendRange = computed(() => {
             <div class="flex min-w-0 flex-wrap items-end justify-between gap-4">
                 <div class="flex min-w-0 flex-col gap-1">
                     <h2 id="report-trend" class="text-base font-semibold tracking-tight">Trend — {{ trendRange }}</h2>
-                    <p class="text-sm text-muted-foreground">
-                        {{ trend.months }} months to {{ month.label }}. The line is the net; the table has income,
-                        expenses and net for every month in the window. A month with nothing recorded is a point at
-                        zero, not a gap — dropping it would draw a line straight over it.
-                    </p>
                 </div>
 
                 <!--

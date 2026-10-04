@@ -9,3 +9,6 @@
 /.github export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore
+
+# Windows batch files need CRLF line endings: cmd.exe misreads labels and GOTOs in LF files.
+*.bat text eol=crlf

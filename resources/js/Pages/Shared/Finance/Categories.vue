@@ -175,12 +175,6 @@ const total = computed(() => props.income.length + props.expense.length);
         :breadcrumb="[{ label: 'Finance' }, { label: 'Categories' }]"
     >
         <div class="flex min-w-0 flex-col gap-4">
-            <p class="text-sm text-muted-foreground">
-                {{ total }} categories across both sides of the ledger.
-                <template v-if="!permissions.can_create">
-                    They are maintained by an Admin; this is the list every finance form offers.
-                </template>
-            </p>
 
             <div class="grid min-w-0 gap-4 lg:grid-cols-2">
                 <CategorySideCard

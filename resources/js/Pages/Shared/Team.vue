@@ -114,10 +114,6 @@ defineProps<{
                 </li>
             </ul>
 
-            <p v-if="members.length" class="text-xs text-muted-foreground">
-                Availability is today's status from each person's own work schedule — the same answer the Attendance
-                roster gives. It is a status, not a measure: nothing here counts hours or compares anybody.
-            </p>
         </div>
     </PageShell>
 </template>

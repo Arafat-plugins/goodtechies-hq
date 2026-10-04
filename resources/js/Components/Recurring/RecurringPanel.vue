@@ -200,10 +200,6 @@ function generate(template: RecurringTemplate): void {
             <div class="flex min-w-0 flex-wrap items-start justify-between gap-3">
                 <div class="flex min-w-0 flex-col gap-1">
                     <h2 class="text-sm font-medium">Recurring tasks</h2>
-                    <p class="text-sm text-muted-foreground">
-                        Retainer work that makes itself. One task per period, on one person’s
-                        plate, with its checklist already on it.
-                    </p>
                 </div>
                 <Button v-if="canManage" :id="ADD_BUTTON_ID" type="button" size="sm" @click="create">
                     <Plus aria-hidden="true" />

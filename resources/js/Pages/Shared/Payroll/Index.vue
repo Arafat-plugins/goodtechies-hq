@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
-import { CalendarClock, HandCoins, Plus } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { Head } from '@inertiajs/vue3';
+import { HandCoins } from '@lucide/vue';
+import { computed } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import PageShell from '@/Components/PageShell.vue';
 import type { PayrollCurrentMonth, PayrollPeriod } from '@/Components/Payroll/payroll';
-import { formatMoney, payrollRoutes } from '@/Components/Payroll/payroll';
+import { formatMoney } from '@/Components/Payroll/payroll';
+import PayrollDraftControl from '@/Components/Payroll/PayrollDraftControl.vue';
 import PayrollPeriodTable from '@/Components/Payroll/PayrollPeriodTable.vue';
-import { Button } from '@/Components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
+import { Card, CardContent } from '@/Components/ui/card';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
@@ -57,12 +57,8 @@ const props = defineProps<{
     currency: string;
 }>();
 
-/** The id the Draft control carries, so focus can be put back on it after a navigation. */
-const DRAFT_BUTTON_ID = 'payroll-create-draft';
-
-const drafting = ref(false);
-
-const mayDraft = computed(() => props.permissions.can_create && !props.current_month.has_period);
+/** Polish 005: anybody who may draft can draft any month that has no payroll yet. */
+const mayDraft = computed(() => props.permissions.can_create);
 
 /**
  * What the list adds up to, said once at the top.
@@ -86,24 +82,6 @@ const summary = computed(() => {
     }${total ? `, ${total} in all` : ''}.`;
 });
 
-function createDraft(): void {
-    if (drafting.value) {
-        return;
-    }
-
-    drafting.value = true;
-
-    router.post(
-        payrollRoutes.store(),
-        {},
-        {
-            preserveScroll: true,
-            onFinish: () => {
-                drafting.value = false;
-            },
-        },
-    );
-}
 </script>
 
 <template>
@@ -115,10 +93,7 @@ function createDraft(): void {
         :breadcrumb="[{ label: 'Finance' }, { label: 'Payroll' }]"
     >
         <template #actions>
-            <Button v-if="mayDraft" :id="DRAFT_BUTTON_ID" :disabled="drafting" @click="createDraft">
-                <Plus aria-hidden="true" />
-                {{ drafting ? 'Drafting…' : `Create the draft for ${current_month.label}` }}
-            </Button>
+            <PayrollDraftControl v-if="mayDraft && periods.length > 0" :month="current_month" />
         </template>
 
         <div class="flex min-w-0 flex-col gap-4">
@@ -136,43 +111,15 @@ function createDraft(): void {
                     <EmptyState
                         :icon="HandCoins"
                         title="No payroll month yet"
-                        :description="`A payroll period is created automatically on the 1st of each month, with one line per active employee at their current salary. Nothing is missing — ${current_month.label} simply has not been drafted yet.`"
+                        :description="`On the 1st of each month the payroll for the month just finished is drafted automatically, with one line per active employee at their salary. Choose a month to draft one now.`"
                     >
                         <template #action>
-                            <Button v-if="mayDraft" :disabled="drafting" @click="createDraft">
-                                <Plus aria-hidden="true" />
-                                {{ drafting ? 'Drafting…' : `Create the draft for ${current_month.label}` }}
-                            </Button>
+                            <PayrollDraftControl v-if="mayDraft" :month="current_month" />
                         </template>
                     </EmptyState>
                 </CardContent>
             </Card>
 
-            <!--
-                Said again, quietly, under a list that DOES have rows: the same question comes
-                up on the 2nd of a month whose draft has not run, and the answer is the same.
-            -->
-            <Card v-if="periods.length > 0 && !current_month.has_period">
-                <CardHeader>
-                    <CardTitle class="flex items-center gap-2">
-                        <CalendarClock class="size-4 text-muted-foreground" aria-hidden="true" />
-                        {{ current_month.label }} has no payroll period yet
-                    </CardTitle>
-                </CardHeader>
-                <CardContent class="flex min-w-0 flex-col gap-3">
-                    <p class="text-sm text-muted-foreground">
-                        The draft is created on the 1st of the month from everybody's current salary. Until then
-                        there is nothing to show for {{ current_month.label }}, which is expected rather than a
-                        fault.
-                    </p>
-                    <div v-if="mayDraft">
-                        <Button variant="outline" :disabled="drafting" @click="createDraft">
-                            <Plus aria-hidden="true" />
-                            {{ drafting ? 'Drafting…' : `Create it now` }}
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
         </div>
     </PageShell>
 </template>

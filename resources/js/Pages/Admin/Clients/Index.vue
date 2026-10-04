@@ -140,6 +140,7 @@ function confirmDeactivate(): void {
 
         <div class="flex min-w-0 flex-col gap-4">
             <FilterBar
+                page-actions
                 :search="filters.search"
                 :filters="filterDefs"
                 placeholder="Search clients…"

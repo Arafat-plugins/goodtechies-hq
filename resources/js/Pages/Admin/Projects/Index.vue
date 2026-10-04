@@ -273,6 +273,7 @@ function closeDelete(): void {
                 </ToggleGroup>
 
                 <FilterBar
+                    page-actions
                     class="min-w-0 flex-1"
                     :search="filters.search"
                     :filters="filterDefs"

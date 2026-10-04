@@ -213,9 +213,12 @@ it('renders the payroll period list for the admin and for the accountant', funct
             ->where('periods.0.status', 'draft')
             ->where('periods.0.items_count', 5)
             ->where('periods.0.net_total', PAYROLL_ENDPOINTS_NET_TOTAL)
-            // September already has a period, so the Create-draft control must not be offered.
-            ->where('current_month.value', '2026-09')
-            ->where('current_month.has_period', true)
+            // Polish 005: the default draft month is the one just finished — August on the
+            // 20th of September — and only September has a period.
+            ->where('current_month.value', '2026-08')
+            ->where('current_month.has_period', false)
+            ->where('current_month.max', '2026-09')
+            ->where('current_month.taken', ['2026-09'])
             ->where('permissions.can_create', true));
 })->with(['admin', 'accountant'])->group('phase9', 'payroll');
 
@@ -269,7 +272,7 @@ it('offers the empty state, and the create-draft control, when no month has been
         ->assertInertia(fn (Assert $page) => $page
             ->has('periods', 0)
             ->where('current_month.has_period', false)
-            ->where('current_month.label', 'September 2026')
+            ->where('current_month.label', 'August 2026')
             ->where('permissions.can_create', true));
 })->with(['admin', 'accountant'])->group('phase9', 'payroll');
 
@@ -282,7 +285,7 @@ it('drafts the current month from the list and lands on it', function () {
     // question. So the draft succeeds with five lines and the answer names the sixth person,
     // which is why this lands on the error channel: it is the only one that gets read.
     $this->actingAs($this->accountant)
-        ->post('/payroll')
+        ->post('/payroll', ['month' => '2026-09'])
         ->assertRedirectContains('/payroll/')
         ->assertSessionHas('error', fn (string $message) => str_contains($message, 'is drafted with 5 lines')
             && str_contains($message, 'no salary on record')
@@ -301,14 +304,14 @@ it('says plainly that the month is drafted when everybody has a salary on record
     $this->manager->employee->forceFill(['status' => 'inactive'])->save();
 
     $this->actingAs($this->accountant)
-        ->post('/payroll')
+        ->post('/payroll', ['month' => '2026-09'])
         ->assertSessionHas('success', fn (string $message) => str_contains($message, 'is drafted with 5 lines'));
 })->group('phase9', 'payroll');
 
 it('refuses a second draft for a month that already has one, with a sentence', function () {
     $this->actingAs($this->accountant)
         ->from('/payroll')
-        ->post('/payroll')
+        ->post('/payroll', ['month' => '2026-09'])
         ->assertRedirect('/payroll')
         ->assertSessionHas('error', fn (string $message) => str_contains($message, 'already has a payroll period'));
 
@@ -677,3 +680,63 @@ it('still refuses paid to the accountant on an approved month (polish 002)', fun
 
     expect($period->fresh()->status)->toBe(PayrollStatus::Approved);
 })->group('phase9', 'payroll');
+
+/*
+|--------------------------------------------------------------------------
+| Which month a payroll is for (polish 005)
+|--------------------------------------------------------------------------
+*/
+
+it('drafts the month just finished when no month is chosen (polish 005)', function () {
+    $this->actingAs($this->accountant)->post('/payroll')->assertRedirectContains('/payroll/');
+
+    expect(PayrollPeriod::query()->forMonth('2026-08-01')->exists())->toBeTrue();
+})->group('phase9', 'payroll');
+
+it('refuses to draft a month that has not started (polish 005)', function () {
+    $this->actingAs($this->admin)
+        ->from('/payroll')
+        ->post('/payroll', ['month' => '2026-10'])
+        ->assertRedirect('/payroll')
+        ->assertSessionHasErrors('month');
+
+    expect(PayrollPeriod::count())->toBe(1);
+})->group('phase9', 'payroll');
+
+it('moves a draft to another month and audits it (polish 005)', function () {
+    $this->actingAs($this->admin)
+        ->from("/payroll/{$this->period->id}")
+        ->put("/payroll/{$this->period->id}/month", ['month' => '2026-08'])
+        ->assertSessionHas('success', fn (string $message) => str_contains($message, 'August 2026'));
+
+    expect($this->period->fresh()->month->toDateString())->toBe('2026-08-01');
+
+    $audit = AuditLog::where('event', AuditEvent::PayrollMonthChanged->value)->sole();
+    expect($audit->old_value['month'])->toBe('2026-09-01')
+        ->and($audit->new_value['month'])->toBe('2026-08-01');
+})->group('phase9', 'payroll');
+
+it('refuses to move a month that is past Draft, or onto a month that has a period (polish 005)', function () {
+    $other = PayrollPeriod::create(['month' => '2026-07-01', 'status' => PayrollStatus::Draft]);
+
+    $this->actingAs($this->admin)
+        ->put("/payroll/{$this->period->id}/month", ['month' => '2026-07'])
+        ->assertSessionHas('error', fn (string $message) => str_contains($message, 'already has a payroll period'));
+
+    $calculated = payrollEndpointsWalkTo(PayrollStatus::Calculated);
+
+    $this->actingAs($this->admin)
+        ->put("/payroll/{$calculated->id}/month", ['month' => '2026-06'])
+        ->assertSessionHas('error', fn (string $message) => str_contains($message, 'Only a Draft'));
+
+    expect($calculated->fresh()->month->toDateString())->toBe('2026-09-01')
+        ->and($other->fresh()->month->toDateString())->toBe('2026-07-01');
+})->group('phase9', 'payroll');
+
+it('refuses the month change to roles without payroll.draft (polish 005)', function (string $role) {
+    $this->actingAs($this->{$role})
+        ->put("/payroll/{$this->period->id}/month", ['month' => '2026-08'])
+        ->assertForbidden();
+
+    expect($this->period->fresh()->month->toDateString())->toBe('2026-09-01');
+})->with(['employee', 'remote', 'manager'])->group('phase9', 'payroll');

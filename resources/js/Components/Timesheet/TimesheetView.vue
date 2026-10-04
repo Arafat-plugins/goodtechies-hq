@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Link, router } from '@inertiajs/vue3';
-import { CalendarRange, ChevronLeft, ChevronRight, Plus } from '@lucide/vue';
+import { router } from '@inertiajs/vue3';
+import { CalendarRange, Plus } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import StatCard from '@/Components/StatCard.vue';
@@ -16,8 +16,8 @@ import type {
 } from '@/Components/Timesheet/timesheet';
 import { againstTarget, formatDuration, timesheetRoutes } from '@/Components/Timesheet/timesheet';
 import { Button } from '@/Components/ui/button';
-import { Card } from '@/Components/ui/card';
 import { Label } from '@/Components/ui/label';
+import DateStepper from '@/Components/DateStepper.vue';
 import { NativeSelect, NativeSelectOption } from '@/Components/ui/native-select';
 
 /**
@@ -99,9 +99,10 @@ function switchEmployee(event: Event): void {
 <template>
     <div class="flex min-w-0 flex-col gap-4">
         <!-- Whose week, and which week. Both belong in the URL, so both are links. -->
-        <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div v-if="surface === 'admin' && employees?.length" class="flex min-w-0 flex-col gap-1.5 sm:max-w-xs">
-                <Label for="timesheet-employee">Employee</Label>
+        <!-- Polish 007: one row — employee, the week between its arrows, then Add time at the end. -->
+        <div class="flex min-w-0 flex-wrap items-center gap-3">
+            <div v-if="surface === 'admin' && employees?.length" class="flex min-w-0 items-center gap-2 sm:max-w-xs">
+                <Label for="timesheet-employee" class="sr-only">Employee</Label>
                 <NativeSelect
                     id="timesheet-employee"
                     :model-value="subject.id"
@@ -113,6 +114,14 @@ function switchEmployee(event: Event): void {
                 </NativeSelect>
             </div>
 
+            <DateStepper
+                :label="week.label"
+                unit="week"
+                :previous-href="weekHref(week.previous)"
+                :next-href="weekHref(week.next)"
+                :today-href="week.is_current ? null : weekHref(week.current)"
+            />
+
             <!--
                 The way in that does not need a cell: the Time page has the same control in the
                 same words, so somebody who thinks of it as "add time by hand" finds it on
@@ -122,30 +131,13 @@ function switchEmployee(event: Event): void {
                 v-if="permissions.can_add_time && rows.length"
                 type="button"
                 variant="outline"
-                class="self-start"
+                class="sm:ml-auto"
                 @click="addByHand"
             >
                 <Plus aria-hidden="true" />
                 Add time by hand
             </Button>
 
-            <div class="flex items-center gap-2 sm:ml-auto">
-                <Button as-child variant="outline" size="icon">
-                    <Link :href="weekHref(week.previous)" preserve-scroll>
-                        <ChevronLeft class="size-4" aria-hidden="true" />
-                        <span class="sr-only">The week before</span>
-                    </Link>
-                </Button>
-                <Button v-if="!week.is_current" as-child variant="outline">
-                    <Link :href="weekHref(week.current)">This week</Link>
-                </Button>
-                <Button as-child variant="outline" size="icon">
-                    <Link :href="weekHref(week.next)" preserve-scroll>
-                        <ChevronRight class="size-4" aria-hidden="true" />
-                        <span class="sr-only">The week after</span>
-                    </Link>
-                </Button>
-            </div>
         </div>
 
         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -203,29 +195,6 @@ function switchEmployee(event: Event): void {
             @add-time="openDialog"
         />
 
-        <!--
-            The three sentences this screen owes its reader: where the week starts and why,
-            what is not in the totals, and — when there is nothing on the grid for somebody
-            else — why that might be. None of them is a number dressed as a verdict.
-        -->
-        <Card class="flex flex-col gap-2 p-4">
-            <p class="text-xs text-muted-foreground">{{ week.starts_on_reason }}</p>
-
-            <p v-if="totals.pending_seconds > 0" class="text-xs text-muted-foreground">
-                {{ formatDuration(totals.pending_seconds) }} of this week is waiting for an Admin to sign it off and is
-                not in the totals above. It is shown in the cell it belongs to in the meantime.
-            </p>
-
-            <p v-if="totals.rejected_seconds > 0" class="text-xs text-muted-foreground">
-                {{ formatDuration(totals.rejected_seconds) }} of this week was not approved. The hours stay on the
-                record; they do not count towards the total.
-            </p>
-
-            <p v-if="!subject.is_self && subject.tracking_mode !== 'remote_timer'" class="text-xs text-muted-foreground">
-                {{ subject.name }}'s day is recorded by the office clock rather than the timer, so this week has no
-                tracked hours to show. Their attendance is on Workforce → Attendance.
-            </p>
-        </Card>
 
         <TimeEntryDialog
             v-if="permissions.can_add_time"

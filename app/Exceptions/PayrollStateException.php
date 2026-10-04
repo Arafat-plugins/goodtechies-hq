@@ -109,6 +109,15 @@ class PayrollStateException extends RuntimeException
      * `payroll_periods.month` is UNIQUE, so this is the sentence in front of a constraint the
      * database enforces against every writer.
      */
+    /** Polish 005: only a Draft can be moved to another month. */
+    public static function monthIsSettled(PayrollStatus $status): self
+    {
+        return new self(sprintf(
+            'This period is %s, so its month can no longer be changed. Only a Draft can be moved to another month.',
+            strtolower($status->label()),
+        ));
+    }
+
     public static function monthAlreadyHasAPeriod(string $month): self
     {
         return new self(sprintf('%s already has a payroll period. A month has exactly one.', $month));

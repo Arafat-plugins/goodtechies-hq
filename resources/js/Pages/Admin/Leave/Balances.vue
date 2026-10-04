@@ -176,10 +176,6 @@ function balanceOf(row: LeaveBalanceGridRow, type: LeaveTypeOption): number {
                     </table>
                 </Card>
 
-                <p class="text-xs text-muted-foreground">
-                    Unpaid and Other have no balance and no column — they are never refused for want of days
-                    (Part D §9). Numbers are days, and nothing here ranks one person against another.
-                </p>
             </template>
 
             <Card v-else class="p-4">

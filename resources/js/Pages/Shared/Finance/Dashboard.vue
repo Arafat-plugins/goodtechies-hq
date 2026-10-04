@@ -146,10 +146,6 @@ const isEmptyMonth = computed(
         <section aria-labelledby="finance-by-category" class="flex min-w-0 flex-col gap-4">
             <div class="flex min-w-0 flex-col gap-1">
                 <h2 id="finance-by-category" class="text-base font-semibold tracking-tight">By category</h2>
-                <p class="text-sm text-muted-foreground">
-                    A category with nothing filed under it this month is not on these lists — they report what
-                    happened, not what could have.
-                </p>
             </div>
 
             <div class="grid min-w-0 gap-4 lg:grid-cols-2">

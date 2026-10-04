@@ -86,12 +86,13 @@ function rowsOn(day: TimesheetDay): { row: TimesheetRow; cell: TimesheetCell }[]
  * the word.
  */
 function dayClass(day: TimesheetDay): string {
-    return cn(!day.is_working_day && 'bg-muted', day.is_future && 'opacity-60');
+    // Polish 007: today is a softly tinted column — no border — and says "Today" in words.
+    return cn(day.is_today ? 'bg-brand-tint' : !day.is_working_day && 'bg-muted', day.is_future && 'opacity-60');
 }
 
-/** The heading of a day column: the tint, plus the one ring that marks today. */
+/** The heading of a day column: the same tint as its cells. */
 function headClass(day: TimesheetDay): string {
-    return cn(dayClass(day), day.is_today && 'ring-2 ring-inset ring-ring');
+    return dayClass(day);
 }
 
 function add(date: string, taskId: number | null): void {
@@ -110,7 +111,7 @@ function add(date: string, taskId: number | null): void {
                     cn(
                         'flex flex-col gap-2 rounded-md border bg-card p-3 shadow-flat',
                         day.is_future && 'opacity-60',
-                        day.is_today && 'ring-2 ring-ring',
+                        day.is_today && 'bg-brand-tint',
                     )
                 "
             >

@@ -48,10 +48,10 @@ export const adminNav: NavGroup[] = [
             // layout from the viewer's surface, the way Profile does.
             { label: 'My Attendance', href: '/attendance', icon: UserCheck },
             { label: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
-            // The Tasks toolbar's "mine" scope — the old `/admin/my-tasks` 302s here. The full
+            // Polish 007: the Board, narrowed to the Tasks toolbar's "mine" scope. The full
             // URL is a longer claim than the Tasks row's `/admin/tasks` prefix, so this row
             // lights while it is open (`activeItem`).
-            { label: 'My Tasks', href: '/admin/tasks?scope=mine', icon: ListTodo },
+            { label: 'My Tasks', href: '/admin/tasks/board?scope=mine', icon: ListTodo },
         ],
     },
     {

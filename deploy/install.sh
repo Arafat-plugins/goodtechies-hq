@@ -409,7 +409,12 @@ else
         grep -qE '^/swapfile[[:space:]]' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
         echo "swap on: /swapfile, persisted in /etc/fstab"
     else
-        warn "swapon /swapfile failed (a container?); continuing without swap"
+        # A container (the VPSDime box is one) refuses swapon. The file would then be 2 GB of
+        # disk that can never be used, so it goes (decision 12-93). Releases free the build's
+        # memory instead: deploy/live-deploy.sh pauses the workers.
+        rm -f /swapfile
+        sed -i '\#^/swapfile[[:space:]]#d' /etc/fstab 2> /dev/null || true
+        warn "swapon /swapfile failed (a container?); continuing without swap, /swapfile removed"
     fi
 fi
 if [ "$LOW_MEMORY" = "1" ]; then

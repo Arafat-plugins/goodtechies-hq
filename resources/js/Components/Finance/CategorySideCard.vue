@@ -146,10 +146,6 @@ function usage(category: FinanceCategory): string {
                 </tbody>
             </table>
 
-            <p v-if="canCreate" class="text-xs text-muted-foreground">
-                A category that anything is filed under cannot be deleted, and none of them can be moved to
-                the other side of the ledger — that would move every record under it with it. Rename instead.
-            </p>
 
             <div v-if="canCreate">
                 <Button :id="addButtonId" type="button" variant="outline" @click="emit('add', kind)">

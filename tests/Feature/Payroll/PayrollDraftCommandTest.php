@@ -109,12 +109,13 @@ it('writes no audit row — a scheduled draft is not a decision anybody made', f
     expect(AuditLog::count())->toBe(0);
 })->group('phase9');
 
-it('defaults to the current month when no month is given', function () {
+it('defaults to the month just finished when no month is given (polish 005)', function () {
     Carbon::setTestNow('2027-03-14 09:00:00');
 
     payrollDraftRun();
 
-    expect(payrollDraftPeriod('2027-03-01'))->not->toBeNull();
+    expect(payrollDraftPeriod('2027-02-01'))->not->toBeNull()
+        ->and(payrollDraftPeriod('2027-03-01'))->toBeNull();
 
     Carbon::setTestNow();
 })->group('phase9');

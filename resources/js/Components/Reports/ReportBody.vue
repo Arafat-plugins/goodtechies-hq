@@ -213,14 +213,6 @@ const totals = computed(() => {
             </dl>
         </div>
 
-        <!--
-            The server's own caveats, in its own words — and only over an answer. A note about
-            how hours were counted, printed under "nobody tracked any", is a caveat on nothing.
-        -->
-        <ul v-if="hasRows && result.notes.length > 0" class="flex min-w-0 flex-col gap-1">
-            <li v-for="note in result.notes" :key="note" class="text-xs text-muted-foreground">
-                {{ note }}
-            </li>
-        </ul>
+        <!-- Polish 007: the server's caveats are no longer printed under the report. -->
     </div>
 </template>

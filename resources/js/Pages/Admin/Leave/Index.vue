@@ -7,6 +7,7 @@ import LeaveDecisionDialog, { type LeaveDecision } from '@/Components/Leave/Leav
 import LeaveRequestCard from '@/Components/Leave/LeaveRequestCard.vue';
 import type { LeaveRequestRow, LeaveStatusOption } from '@/Components/Leave/leave';
 import { leaveRoutes } from '@/Components/Leave/leave';
+import PageActionsHost from '@/Components/PageActionsHost.vue';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
@@ -90,6 +91,7 @@ function ask(request: LeaveRequestRow, verb: LeaveDecision): void {
                 so a number and the list it opens cannot disagree (decision 2-37). Zero is shown
                 rather than hidden: a status with nothing in it is an answer.
             -->
+            <div class="flex min-w-0 flex-wrap items-center gap-2">
             <nav aria-label="Filter by status" class="flex min-w-0 flex-wrap gap-2">
                 <Button
                     as-child
@@ -117,6 +119,8 @@ function ask(request: LeaveRequestRow, verb: LeaveDecision): void {
                     </Link>
                 </Button>
             </nav>
+                <PageActionsHost />
+            </div>
 
             <ul v-if="requests.length" class="flex min-w-0 flex-col gap-3">
                 <li v-for="request in requests" :key="request.id">

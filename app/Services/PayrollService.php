@@ -187,6 +187,64 @@ class PayrollService
         });
     }
 
+    /**
+     * The month a payroll is drafted for by default — polish 005: the month just finished.
+     * Pay follows the work, so on 1 October the payroll to prepare is September's.
+     */
+    public static function defaultDraftMonth(?CarbonInterface $today = null): Carbon
+    {
+        $today ??= Carbon::today(config('app.timezone'));
+
+        return PayrollPeriod::monthKey(Carbon::parse($today)->subMonthNoOverflow());
+    }
+
+    /**
+     * Move a DRAFT to the month it really pays for (polish 005), audited as
+     * `payroll.month_changed`. The lines keep their figures; Calculate works the leave impact
+     * out for the new month when it is pressed.
+     *
+     * @throws AuthorizationException
+     * @throws PayrollStateException
+     */
+    public function changeMonth(User $actor, PayrollPeriod $period, CarbonInterface $month): PayrollPeriod
+    {
+        if (! Gate::forUser($actor)->allows('create', PayrollPeriod::class)) {
+            throw new AuthorizationException('You are not allowed to change a payroll month.');
+        }
+
+        $key = PayrollPeriod::monthKey($month);
+
+        return DB::transaction(function () use ($actor, $period, $key): PayrollPeriod {
+            $period = PayrollPeriod::query()->lockForUpdate()->findOrFail($period->getKey());
+
+            if ($period->status !== PayrollStatus::Draft) {
+                throw PayrollStateException::monthIsSettled($period->status);
+            }
+
+            $from = PayrollPeriod::monthKey($period->month);
+
+            if ($from->equalTo($key)) {
+                return $period;
+            }
+
+            if (PayrollPeriod::query()->forMonth($key)->exists()) {
+                throw PayrollStateException::monthAlreadyHasAPeriod($key->format('F Y'));
+            }
+
+            $period->forceFill(['month' => $key->toDateString()])->save();
+
+            $this->audit->record(
+                AuditEvent::PayrollMonthChanged,
+                $period,
+                ['month' => $from->toDateString()],
+                ['month' => $key->toDateString()],
+                $actor,
+            );
+
+            return $period->refresh();
+        });
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Drafting a month

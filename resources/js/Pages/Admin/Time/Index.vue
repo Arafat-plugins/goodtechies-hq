@@ -1,16 +1,8 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
-import {
-    ChevronLeft,
-    ChevronRight,
-    CircleCheck,
-    FolderKanban,
-    Inbox,
-    ListChecks,
-    TriangleAlert,
-    Users,
-} from '@lucide/vue';
+import { Head } from '@inertiajs/vue3';
+import { CircleCheck, FolderKanban, Inbox, ListChecks, Users } from '@lucide/vue';
 import { computed, ref } from 'vue';
+import DateStepper from '@/Components/DateStepper.vue';
 import PageShell from '@/Components/PageShell.vue';
 import HoursBreakdown from '@/Components/Time/HoursBreakdown.vue';
 import RejectEntryDialog from '@/Components/Time/RejectEntryDialog.vue';
@@ -22,7 +14,6 @@ import type { WorkingNowRow } from '@/Components/Timer/taskTimer';
 import { workingNowPing } from '@/Components/Timer/taskTimer';
 import WorkingNowPanel from '@/Components/Timer/WorkingNowPanel.vue';
 import EmptyState from '@/Components/EmptyState.vue';
-import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import { ATTENDANCE_POLL_MS } from '@/Components/Realtime/live';
 import { useLiveProps, useLiveTaskProps } from '@/Components/Realtime/reload';
@@ -123,25 +114,14 @@ useLiveTaskProps(['working_now'], { accept: workingNowPing });
         :description="`${date.label} · week of ${week.label}`"
         :breadcrumb="[{ label: 'Workforce' }, { label: 'Time' }]"
     >
-        <template #actions>
-            <div class="flex items-center gap-2">
-                <Button as-child variant="outline" size="icon">
-                    <Link :href="adminTimeRoutes.index(date.previous)" preserve-scroll>
-                        <ChevronLeft class="size-4" aria-hidden="true" />
-                        <span class="sr-only">Previous day</span>
-                    </Link>
-                </Button>
-                <Button v-if="date.value !== date.today" as-child variant="outline">
-                    <Link :href="adminTimeRoutes.index()">Today</Link>
-                </Button>
-                <Button as-child variant="outline" size="icon">
-                    <Link :href="adminTimeRoutes.index(date.next)" preserve-scroll>
-                        <ChevronRight class="size-4" aria-hidden="true" />
-                        <span class="sr-only">Next day</span>
-                    </Link>
-                </Button>
-            </div>
-        </template>
+        <!-- Polish 007: the day (with its month) between the arrows, at the start of the page. -->
+        <DateStepper
+            :label="`${date.label} · week of ${week.label}`"
+            :previous-href="adminTimeRoutes.index(date.previous)"
+            :next-href="adminTimeRoutes.index(date.next)"
+            :today-href="date.value !== date.today ? adminTimeRoutes.index() : null"
+        />
+
 
         <!--
             Working now, at the top: who is timing which task right now, and for how long. It is
@@ -189,10 +169,6 @@ useLiveTaskProps(['working_now'], { accept: workingNowPing });
             <h2 id="flagged-entries" class="text-base font-semibold tracking-tight">
                 Flagged by the timer, already counted
             </h2>
-            <p class="text-sm text-muted-foreground">
-                The watchdog stopped or paused these and they count as they stand. Read the reason before this week is
-                signed off.
-            </p>
             <ul class="flex flex-col gap-2">
                 <TimeEntryRow
                     v-for="entry in flagged"
@@ -212,10 +188,6 @@ useLiveTaskProps(['working_now'], { accept: workingNowPing });
                 <HoursBreakdown title="By project" noun="project" :icon="FolderKanban" :rows="byProject" />
                 <HoursBreakdown title="By task" noun="task" :icon="ListChecks" :rows="byTask" />
             </div>
-            <p class="text-xs text-muted-foreground">
-                A total counts an entry once it has been approved. Anything still waiting is shown beside the total and
-                is not in it.
-            </p>
         </section>
 
         <!--
@@ -237,13 +209,6 @@ useLiveTaskProps(['working_now'], { accept: workingNowPing });
             />
         </Card>
 
-        <p class="flex items-start gap-2 text-xs text-muted-foreground">
-            <TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            <span>
-                Approving and turning down are both recorded in the audit log with the old and new values. These hours
-                are what payroll will read.
-            </span>
-        </p>
 
         <RejectEntryDialog v-model:open="rejectOpen" :entry="rejecting" />
     </PageShell>

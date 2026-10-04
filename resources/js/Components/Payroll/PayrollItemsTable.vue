@@ -190,11 +190,7 @@ const moneyFields = computed(() => payrollMoneyFieldsFor(props.items));
             tabindex="0"
         >
             <table class="w-full text-sm">
-                <caption class="px-4 pt-4 text-left text-xs text-muted-foreground">
-                    Every line of {{ monthLabel }}. Leave impact is worked out by Calculate from approved unpaid
-                    leave, and the net is worked out by the database — base plus bonus, less
-                    deduction, advance and leave impact. Neither can be typed.
-                </caption>
+                <caption class="sr-only">Every line of {{ monthLabel }}.</caption>
                 <thead>
                     <tr class="border-b border-border">
                         <th scope="col" class="px-4 py-3 text-left font-medium text-muted-foreground">

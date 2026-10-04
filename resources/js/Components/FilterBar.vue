@@ -46,6 +46,7 @@ import { createReusableTemplate } from '@vueuse/core';
 import { ChevronLeft, Filter, Plus, Search, X } from '@lucide/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import FilterChip from '@/Components/FilterChip.vue';
+import PageActionsHost from '@/Components/PageActionsHost.vue';
 import { Button } from '@/Components/ui/button';
 import {
     Command,
@@ -100,6 +101,8 @@ const props = withDefaults(
          * Active chips and *Clear all* get a row of their own below, only while one is set.
          */
         layout?: 'stacked' | 'toolbar';
+        /** Polish 007: this bar's row also carries the page's `#actions` (see PageActionsHost). */
+        pageActions?: boolean;
         /**
          * Chip mode: the value the SERVER applied for a filter key, read instead of the URL for
          * that key (`null` = not applied, no chip). For a filter the server may override, so a
@@ -499,16 +502,23 @@ function isChosen(def: FilterDef, value: string): boolean {
                 </slot>
                 <ReuseAddFilter v-if="chipMode" />
                 <slot name="trailing" />
+                <PageActionsHost v-if="pageActions" />
             </div>
         </div>
 
-        <div v-else class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <!--
+            Polish 007: one row — search, the page's extra controls and "Add filter" side by side,
+            then the page's own actions pushed to the end (`PageActionsHost`). Active chips go on
+            the row underneath only while there are any.
+        -->
+        <div v-else class="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <ReuseSearch v-if="searchable" />
             <div v-if="$slots.extra || $slots.default" class="flex flex-wrap items-center gap-2">
                 <slot name="extra">
                     <slot />
                 </slot>
             </div>
+            <ReuseAddFilter v-if="chipMode" />
 
             <Button
                 v-if="!chipMode && anyActive"
@@ -521,9 +531,10 @@ function isChosen(def: FilterDef, value: string): boolean {
                 <X aria-hidden="true" />
                 Clear
             </Button>
+            <PageActionsHost v-if="pageActions" />
         </div>
 
-        <div v-if="chipMode && (!toolbar || anyActive)" class="flex min-w-0 flex-wrap items-center gap-2">
+        <div v-if="chipMode && anyActive" class="flex min-w-0 flex-wrap items-center gap-2">
             <FilterChip
                 v-for="def in activeDefs"
                 :key="def.key"
@@ -532,8 +543,6 @@ function isChosen(def: FilterDef, value: string): boolean {
                 @edit="edit(def)"
                 @remove="remove(def)"
             />
-
-            <ReuseAddFilter v-if="!toolbar" />
 
             <Button v-if="anyActive" type="button" variant="ghost" size="sm" class="h-8" @click="clearAll">
                 <X aria-hidden="true" />

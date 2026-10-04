@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Shared;
 use App\Exceptions\PayrollStateException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Payroll\AdjustPayrollItemRequest;
+use App\Http\Requests\Payroll\PayrollMonthRequest;
 use App\Http\Requests\Payroll\ReverseLockRequest;
 use App\Http\Resources\PayrollItemResource;
 use App\Http\Resources\PayrollPeriodResource;
@@ -113,7 +114,10 @@ class PayrollController extends Controller
             ->orderByDesc('month')
             ->get();
 
-        $thisMonth = PayrollPeriod::monthKey(Carbon::today(config('app.timezone')));
+        // Polish 005: the month a Create-draft control drafts by default is the one just
+        // finished — pay follows the work, so in October the payroll to prepare is September's.
+        $thisMonth = PayrollService::defaultDraftMonth();
+        $latest = PayrollPeriod::monthKey(Carbon::today(config('app.timezone')));
 
         return Inertia::render('Shared/Payroll/Index', [
             'periods' => PayrollPeriodResource::collection($periods)->resolve($request),
@@ -129,6 +133,13 @@ class PayrollController extends Controller
                 'has_period' => $periods->contains(
                     fn (PayrollPeriod $period): bool => PayrollPeriod::monthKey($period->month)->equalTo($thisMonth),
                 ),
+                // The latest month a picker may offer (polish 005): never a month not yet begun.
+                'max' => $latest->format('Y-m'),
+                // Months that already have a period, so the picker can say so before submitting.
+                'taken' => $periods
+                    ->map(fn (PayrollPeriod $period): string => PayrollPeriod::monthKey($period->month)->format('Y-m'))
+                    ->values()
+                    ->all(),
             ],
 
             'permissions' => [
@@ -249,11 +260,12 @@ class PayrollController extends Controller
      * it would reach into `employee_salaries` history for a month somebody may already have
      * balanced — and Part D §14 does not ask for one.
      */
-    public function store(Request $request): RedirectResponse
+    public function store(PayrollMonthRequest $request): RedirectResponse
     {
         Gate::authorize('create', PayrollPeriod::class);
 
-        $month = Carbon::today(config('app.timezone'))->startOfMonth();
+        // Polish 005: the month chosen on the list, or the month just finished.
+        $month = $request->month() ?? PayrollService::defaultDraftMonth();
 
         try {
             $period = $this->payroll->createDraft($request->user(), $month);
@@ -283,6 +295,25 @@ class PayrollController extends Controller
         return redirect()
             ->route('payroll.show', $period)
             ->with($missing === [] ? 'success' : 'error', $message);
+    }
+
+    /**
+     * Move a Draft to the month it pays for (polish 005). The policy, the Draft-only rule, the
+     * one-period-per-month rule and the audit row are `PayrollService::changeMonth()`'s.
+     */
+    public function changeMonth(PayrollMonthRequest $request, PayrollPeriod $period): RedirectResponse
+    {
+        try {
+            $period = $this->payroll->changeMonth($request->user(), $period, $request->month());
+        } catch (PayrollStateException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        return back()->with('success', sprintf(
+            'This payroll is now for %s. Its payslips will say %s.',
+            $period->label(),
+            $period->label(),
+        ));
     }
 
     /**

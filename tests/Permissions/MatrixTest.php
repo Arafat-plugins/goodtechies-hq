@@ -1196,6 +1196,7 @@ function permissionMatrix(): array
         // tests/Feature/Payroll/PayrollEndpointsTest.php; these rows prove the gate.
         ['GET', 'payroll', $payroll(200)],
         ['GET', 'payroll/{period}', $payroll(200)],
+        ['PUT', 'payroll/{period}/month', $payroll(302)],
         ['PUT', 'payroll/{period}/items/{item}', $payroll(302)],
         ['POST', 'payroll/{period}/calculate', $payroll(302)],
 

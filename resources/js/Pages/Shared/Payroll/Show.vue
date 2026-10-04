@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeft, Undo2 } from '@lucide/vue';
+import { Head, router } from '@inertiajs/vue3';
+import { Undo2 } from '@lucide/vue';
 import { computed, nextTick, ref } from 'vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
@@ -13,12 +13,12 @@ import type {
 } from '@/Components/Payroll/payroll';
 import { formatMoney, payrollLines, payrollRoutes } from '@/Components/Payroll/payroll';
 import PayrollActions from '@/Components/Payroll/PayrollActions.vue';
+import PayrollMonthChange from '@/Components/Payroll/PayrollMonthChange.vue';
 import PayrollCloseDialog from '@/Components/Payroll/PayrollCloseDialog.vue';
 import PayrollItemDialog from '@/Components/Payroll/PayrollItemDialog.vue';
 import PayrollItemsTable from '@/Components/Payroll/PayrollItemsTable.vue';
 import PayrollStatusTrail from '@/Components/Payroll/PayrollStatusTrail.vue';
 import ReverseLockDialog from '@/Components/Payroll/ReverseLockDialog.vue';
-import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
@@ -238,15 +238,6 @@ const summary = computed(() => {
         description="One line per employee: what they are paid, what was added, what came off, and what the database worked the net out to."
         :breadcrumb="[{ label: 'Finance' }, { label: 'Payroll', href: payrollRoutes.index() }, { label: period.label }]"
     >
-        <template #actions>
-            <Button as-child variant="outline">
-                <Link :href="payrollRoutes.index()">
-                    <ArrowLeft aria-hidden="true" />
-                    All months
-                </Link>
-            </Button>
-        </template>
-
         <div class="flex min-w-0 flex-col gap-4">
             <!--
                 Where the month is, what comes next, and — when nothing comes next for this
@@ -262,6 +253,12 @@ const summary = computed(() => {
                             :status="period.state"
                             :label="period.status_label"
                             size="sm"
+                        />
+                        <PayrollMonthChange
+                            v-if="period.permissions.can_change_month && period.month"
+                            class="ml-auto"
+                            :period-id="period.id"
+                            :month="period.month"
                         />
                     </CardTitle>
                 </CardHeader>
