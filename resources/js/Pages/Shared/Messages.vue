@@ -19,7 +19,7 @@ import ConversationAvatar from '@/Components/Messages/ConversationAvatar.vue';
 import ConversationContextPanel from '@/Components/Messages/ConversationContextPanel.vue';
 import GroupDialog from '@/Components/Messages/GroupDialog.vue';
 import MessagesRail from '@/Components/Messages/MessagesRail.vue';
-import { openingId } from '@/Components/Messages/opening';
+import { openingId, rememberThread, rememberedThread } from '@/Components/Messages/opening';
 import { personTone } from '@/Components/Messages/people';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
 import ThreadSkeleton from '@/Components/Messages/ThreadSkeleton.vue';
@@ -146,6 +146,14 @@ const activeId = computed(() => props.active?.conversation_id ?? null);
  * The chat the reader just tapped, while its thread is on its way (`opening.ts`): its list row,
  * for the name and face in the shimmering header. `null` once the thread has arrived.
  */
+// Every thread that reaches the screen is remembered for this tab, so opening it again previews
+// its real messages (`ThreadSkeleton`) instead of a guess.
+watch(
+    () => props.active,
+    (thread) => rememberThread(thread),
+    { immediate: true },
+);
+
 const opening = computed(() =>
     openingId.value === null || openingId.value === activeId.value
         ? null
@@ -505,8 +513,13 @@ const activeLine = computed(() =>
                 >
                     <ThreadSkeleton
                         v-if="opening"
+                        :id="opening.id"
+                        :type="opening.type"
                         :label="opening.label"
                         :avatar-url="opening.avatar_url ?? null"
+                        :names-authors="opening.type !== 'dm'"
+                        :messages="rememberedThread(opening.id)"
+                        :last="opening.last_message"
                     />
 
                     <template v-else-if="active && routes">

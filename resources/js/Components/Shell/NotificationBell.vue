@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { Bell, BellOff, CheckCheck, PlugZap, TriangleAlert } from '@lucide/vue';
+import { Bell, BellOff, CheckCheck, PlugZap, Trash2, TriangleAlert } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import NotificationRow from '@/Components/Notifications/NotificationRow.vue';
-import { centerHref, markAllRead, useNotificationBell } from '@/Components/Notifications/notifications';
+import { centerHref, clearReadNotifications, markAllRead, useNotificationBell } from '@/Components/Notifications/notifications';
+import { cn } from '@/lib/utils';
 import { Button } from '@/Components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/Components/ui/popover';
 import { Skeleton } from '@/Components/ui/skeleton';
@@ -110,6 +111,17 @@ const loading = computed(() => recent.value.length === 0 && (status.value === 'i
                 >
                     <CheckCheck aria-hidden="true" />
                     Mark all read
+                </Button>
+                <!-- Polish 012: delete every notification already read. -->
+                <Button
+                    v-if="recent.some((row) => row.is_read)"
+                    variant="ghost"
+                    size="sm"
+                    :class="cn('h-7', unreadCount > 0 ? '' : 'ml-auto')"
+                    @click="clearReadNotifications()"
+                >
+                    <Trash2 aria-hidden="true" />
+                    Clear read
                 </Button>
             </div>
 

@@ -1459,6 +1459,9 @@ function permissionMatrix(): array
         //                                     nothing about whether the id exists, which is
         //                                     exactly what the three cells above it say.
         ['POST', 'notifications/{notification}/read', ['guest' => '302 /login', 'ADMIN' => 404, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 404]],
+        // Polish 012: deleting follows the same rule — Tapu's row is absent to everybody else.
+        ['DELETE', 'notifications/read', $notifications(302)],
+        ['DELETE', 'notifications/{notification}', ['guest' => '302 /login', 'ADMIN' => 404, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 404]],
 
         // The Team directory (Phase 6). Shared, like the Messages page it sits next to, and
         // gated by the same `messages.use` — so "the Accountant has no messaging routes" is one

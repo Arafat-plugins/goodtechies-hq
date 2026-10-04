@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Check } from '@lucide/vue';
+import { Check, Trash2 } from '@lucide/vue';
 import { computed } from 'vue';
 import type { NotificationRow } from '@/Components/Notifications/notifications';
 import {
+    dismissNotification,
     exactTime,
     markRead,
     openNotification,
@@ -107,6 +108,18 @@ const when = computed(() => props.row.updated_at ?? props.row.created_at);
             @click="markRead(row.id)"
         >
             <Check class="size-4" aria-hidden="true" />
+        </button>
+
+        <!-- Polish 012: a read row can be deleted from the bell and the Center. -->
+        <button
+            v-else
+            type="button"
+            :aria-label="`Delete: ${row.summary}`"
+            title="Delete"
+            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-destructive focus-visible:ring-3 focus-visible:ring-ring"
+            @click="dismissNotification(row.id)"
+        >
+            <Trash2 class="size-4" aria-hidden="true" />
         </button>
     </li>
 </template>

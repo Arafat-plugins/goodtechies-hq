@@ -256,3 +256,48 @@ it('sends a guest to the login page', function () {
     $this->get('/notifications/recent')->assertRedirect('/login');
     $this->post('/notifications/read-all')->assertRedirect('/login');
 })->group('phase2');
+
+/*
+|--------------------------------------------------------------------------
+| Deleting (polish 012)
+|--------------------------------------------------------------------------
+*/
+
+it('deletes one notification from the bell and the Center, keeping it as memory', function () {
+    $this->notifications->notify(NotificationType::TaskAssigned, $this->task, [$this->tapu], ['title' => $this->task->title]);
+    $row = Notification::query()->forUser($this->tapu)->sole();
+
+    $this->actingAs($this->tapu)->delete('/notifications/'.$row->id)->assertRedirect();
+
+    $fresh = $row->fresh();
+    expect($fresh)->not->toBeNull()
+        ->and($fresh->dismissed_at)->not->toBeNull()
+        ->and($fresh->is_read)->toBeTrue()
+        ->and($this->notifications->unreadCount($this->tapu))->toBe(0)
+        ->and($this->actingAs($this->tapu)->getJson('/notifications/recent')->json('notifications'))->toHaveCount(0)
+        // Still the table's memory: "has this ever been sent?" answers yes.
+        ->and($this->notifications->alreadySentFor(NotificationType::TaskAssigned, [$this->task]))->toBe([(int) $this->task->getKey()]);
+})->group('phase2');
+
+it('clears only the read notifications', function () {
+    $this->notifications->notify(NotificationType::TaskAssigned, $this->task, [$this->tapu], ['title' => $this->task->title]);
+    $this->notifications->markAllRead($this->tapu);
+    $this->travel(5)->minutes();
+    $this->notifications->notify(NotificationType::TaskCommented, $this->task, [$this->tapu], ['title' => $this->task->title]);
+
+    $this->actingAs($this->tapu)->delete('/notifications/read')->assertRedirect();
+
+    $left = $this->actingAs($this->tapu)->getJson('/notifications/recent')->json('notifications');
+    expect($left)->toHaveCount(1)
+        ->and($left[0]['type'])->toBe(NotificationType::TaskCommented->value)
+        ->and($this->notifications->unreadCount($this->tapu))->toBe(1);
+})->group('phase2');
+
+it('treats somebody else\'s notification as absent when deleting', function () {
+    $this->notifications->notify(NotificationType::TaskAssigned, $this->task, [$this->tapu], ['title' => $this->task->title]);
+    $row = Notification::query()->forUser($this->tapu)->sole();
+
+    $this->actingAs($this->admin)->delete('/notifications/'.$row->id)->assertNotFound();
+
+    expect($row->fresh()->dismissed_at)->toBeNull();
+})->group('phase2');

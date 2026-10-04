@@ -155,6 +155,37 @@ class NotificationController extends Controller
     }
 
     /**
+     * Delete one notification (polish 012). A row that is not this person's is absent (404).
+     */
+    public function destroy(Request $request, Notification $notification): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $notification = Notification::query()
+            ->forUser($user)
+            ->whereKey($notification->getKey())
+            ->firstOrFail();
+
+        $this->notifications->dismiss($user, $notification);
+
+        return back();
+    }
+
+    /**
+     * Delete every notification already read (polish 012). Unread ones stay where they are.
+     */
+    public function clearRead(Request $request): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $this->notifications->dismissRead($user);
+
+        return back();
+    }
+
+    /**
      * Mark everything read. Silent about how many, because the bell's own number is the answer
      * and it is one poll away.
      */

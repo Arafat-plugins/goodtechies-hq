@@ -311,6 +311,46 @@ class NotificationService
     }
 
     /**
+     * Delete one notification from its owner's bell and Center (polish 012).
+     *
+     * A dismissal, not a DELETE — see the migration: the row stays as memory for
+     * alreadySentFor(). Dismissing also reads it, so a badge never counts a row nobody can see.
+     */
+    public function dismiss(User $user, Notification $notification): void
+    {
+        if ((int) $notification->user_id !== (int) $user->getKey() || $notification->dismissed_at !== null) {
+            return;
+        }
+
+        $wasUnread = ! $notification->is_read;
+        $now = now();
+
+        $notification->forceFill([
+            'is_read' => true,
+            'read_at' => $notification->read_at ?? $now,
+            'dismissed_at' => $now,
+        ])->save();
+
+        if ($wasUnread) {
+            $this->announce($user);
+        }
+    }
+
+    /**
+     * Delete every notification this person has already read (polish 012). Unread rows stay.
+     */
+    public function dismissRead(User $user): int
+    {
+        $now = now();
+
+        return Notification::query()
+            ->forUser($user)
+            ->where('is_read', true)
+            ->whereNull('dismissed_at')
+            ->update(['dismissed_at' => $now, 'updated_at' => $now]);
+    }
+
+    /**
      * Which of these objects has ALREADY had a notification of this type, ever.
      *
      * This is how "once per task, not per day" is answered without a column: the notifications

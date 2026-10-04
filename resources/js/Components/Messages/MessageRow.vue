@@ -41,8 +41,8 @@ import { cn } from '@/lib/utils';
  * ## `sided` — a DM
  *
  * Two people talking, drawn the way every messaging app on the client's phone draws it. The
- * viewer's own messages sit RIGHT in a solid `--bubble-own` bubble (bubble-own, 12-77); the other person's sit LEFT on
- * `--muted`. The author name drops out entirely — there are two people and the side says which
+ * viewer's own messages sit RIGHT and the other person's LEFT, both on the same dark card bubble
+ * (since 2026-10-04 — the solid `--bubble-own` blue is gone); the side and the tail corner say whose. The author name drops out entirely — there are two people and the side says which
  * — and so does the avatar, because a column of the same two faces down a two-person
  * conversation carries nothing. The clock stays, inside the bubble.
  *
@@ -119,8 +119,14 @@ const mine = computed(() => props.message.is_mine);
 const deleted = computed(() => props.message.is_deleted === true);
 const mentionsMe = computed(() => props.message.mentions_me && !deleted.value);
 
-/** Everything in here is sitting on the `--bubble-own` fill (bubble-own, 12-77) and cannot use hue to say anything. */
-const onAccent = computed(() => sided.value && mine.value);
+/**
+ * Was: the viewer's own message sat on the solid `--bubble-own` blue, so everything inside it
+ * had to recolour itself. Since 2026-10-04 (the client, pointing at a blue bubble: "talking
+ * about this blue background" — chose "dark, like incoming") an own message uses the same dark
+ * card bubble as everybody else's, told apart by its SIDE and its tail corner. Nothing sits on
+ * a coloured fill any more, so the children's `onAccent` seam is always off.
+ */
+const onAccent = computed(() => false);
 
 /** A real, settled, not-deleted message — the only kind with a menu and reactions. */
 const live = computed(
@@ -174,7 +180,7 @@ const photoOnly = computed(
 
 /** The stamp's colour: quiet on either DM fill, muted on a channel row. */
 const stampTone = computed(() =>
-    sided.value && mine.value ? 'text-bubble-own-foreground/80' : 'text-muted-foreground',
+    'text-muted-foreground',
 );
 
 /** Brief 010: ✓ sent / ✓✓ seen, on the viewer's own DM messages only (`seen` is null elsewhere). */
@@ -243,13 +249,13 @@ const bubbleClass = computed(() =>
         : cn(
             'flex min-w-0 flex-col gap-1 rounded-2xl px-3 py-1.5',
             mine.value
-                ? 'rounded-br-md bg-bubble-own text-bubble-own-foreground'
+                ? 'rounded-br-md border bg-card text-foreground'
                 : 'rounded-bl-md border bg-card text-foreground',
             // The mention highlight has to survive on both fills, so it is a ring rather than a
             // left bar here: `--primary` on `--muted` is 4.71:1 and `--bubble-own-foreground` on
             // `--bubble-own` is ~9:1 (bubble-own, 12-77), both clear of the 3:1 a boundary needs.
             mentionsMe.value && 'ring-2',
-            mentionsMe.value && (mine.value ? 'ring-bubble-own-foreground' : 'ring-primary'),
+            mentionsMe.value && 'ring-primary',
           ),
 );
 
@@ -540,9 +546,7 @@ async function react(emoji: string): Promise<void> {
 
                         <!--
                             The clock stays, and in a DM it is always on: there is no author line above
-                            it to hang it from. `text-bubble-own-foreground/80` (bubble-own, 12-77): the
-                            ~9:1 base leaves room for a little alpha and still clears 4.5:1, so the size
-                            and that alpha make it quiet.
+                            it to hang it from, in `text-muted-foreground` on every bubble.
                         -->
                         <span
                             v-if="!inlineStamp"

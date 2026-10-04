@@ -53,6 +53,9 @@ class Notification extends Model
             // When the subject was DEALT WITH, which is not the same as when it was looked at.
             // See the migration and scopeGroupable().
             'resolved_at' => 'datetime',
+            // Polish 012: deleted by its owner — hidden from the bell and the Center, kept as
+            // memory for alreadySentFor(). Always a read row (migration CHECK).
+            'dismissed_at' => 'datetime',
         ];
     }
 
@@ -110,7 +113,8 @@ class Notification extends Model
      */
     public function scopeStillOpen(Builder $query): Builder
     {
-        return $query->whereNull('resolved_at');
+        // Polish 012: a row its owner deleted is gone from both lists too.
+        return $query->whereNull('resolved_at')->whereNull('dismissed_at');
     }
 
     /**

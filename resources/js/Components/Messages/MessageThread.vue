@@ -19,6 +19,7 @@ import EmojiPicker from '@/Components/Messages/EmojiPicker.vue';
 import { rememberEmoji } from '@/Components/Messages/emoji';
 import MentionPicker from '@/Components/Messages/MentionPicker.vue';
 import MessageRow from '@/Components/Messages/MessageRow.vue';
+import { rememberThread } from '@/Components/Messages/opening';
 import ReplyQuote from '@/Components/Messages/ReplyQuote.vue';
 import VoiceRecorder from '@/Components/Messages/VoiceRecorder.vue';
 import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
@@ -1654,6 +1655,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    // What this thread looked like when the reader left it: the next opening previews it.
+    rememberThread(thread.value);
     clearReconnect();
     clearInterval(ticker);
     document.removeEventListener('visibilitychange', refreshIfStale);

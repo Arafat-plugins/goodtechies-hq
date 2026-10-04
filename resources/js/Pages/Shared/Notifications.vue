@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { BellOff, CheckCheck, Clock } from '@lucide/vue';
+import { BellOff, CheckCheck, Clock, Trash2 } from '@lucide/vue';
 import { computed } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import type {
@@ -8,7 +8,7 @@ import type {
     NotificationTabKey,
     NotificationTabSummary,
 } from '@/Components/Notifications/notifications';
-import { TAB_PHASE, centerHref, markAllRead, useNotificationBell } from '@/Components/Notifications/notifications';
+import { TAB_PHASE, centerHref, clearReadNotifications, markAllRead, useNotificationBell } from '@/Components/Notifications/notifications';
 import NotificationRow from '@/Components/Notifications/NotificationRow.vue';
 import PageShell from '@/Components/PageShell.vue';
 import LiveUpdateNotice from '@/Components/Realtime/LiveUpdateNotice.vue';
@@ -137,6 +137,11 @@ function choose(value: string | number): void {
                 <CheckCheck aria-hidden="true" />
                 Mark all read
                 <span class="sr-only">({{ unread_count }} unread)</span>
+            </Button>
+            <!-- Polish 012: delete every notification already read. -->
+            <Button v-if="notifications.some((row) => row.is_read)" variant="outline" @click="clearReadNotifications()">
+                <Trash2 aria-hidden="true" />
+                Clear read
             </Button>
         </template>
 

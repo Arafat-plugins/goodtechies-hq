@@ -98,6 +98,9 @@ export const notificationRoutes = {
     recent: '/notifications/recent',
     read: (id: number): string => `/notifications/${id}/read`,
     readAll: '/notifications/read-all',
+    /** Polish 012: delete one notification, or every one already read. */
+    destroy: (id: number): string => `/notifications/${id}`,
+    clearRead: '/notifications/read',
 } as const;
 
 /**
@@ -665,6 +668,24 @@ export function markAllRead(): void {
             onSuccess: () => refreshBell(),
         },
     );
+}
+
+/** Polish 012: delete one notification from the bell and the Center. */
+export function dismissNotification(id: number): void {
+    router.delete(notificationRoutes.destroy(id), {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: () => refreshBell(),
+    });
+}
+
+/** Polish 012: delete every notification already read; unread ones stay. */
+export function clearReadNotifications(): void {
+    router.delete(notificationRoutes.clearRead, {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: () => refreshBell(),
+    });
 }
 
 /**

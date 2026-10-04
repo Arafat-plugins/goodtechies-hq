@@ -118,6 +118,11 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
 
             Route::post('/read-all', [NotificationController::class, 'readAll'])->name('read-all');
             Route::post('/{notification}/read', [NotificationController::class, 'read'])->name('read');
+            // Polish 012: delete one, or every one already read. Dismissals, not row deletes.
+            Route::delete('/read', [NotificationController::class, 'clearRead'])->name('clear-read');
+            Route::delete('/{notification}', [NotificationController::class, 'destroy'])
+                ->whereNumber('notification')
+                ->name('destroy');
         });
 
     // Messages (master prompt Part D §10, Phase 6): the team channel, the project channels,
