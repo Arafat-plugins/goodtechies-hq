@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title data-text="PROMPT_TITLE"></title>
+    <link rel="stylesheet" href="../ui/shared.css">
+    <link rel="stylesheet" href="prompt.css">
+    <script type="module" src="prompt.js"></script>
+</head>
+<body>
+    <main class="prompt">
+        <!-- Asking: the timer is still running -->
+        <section id="ask" aria-labelledby="ask-heading">
+            <h1 id="ask-heading" data-text="PROMPT_TITLE"></h1>
+            <p id="inactive" class="time" role="status" aria-live="off"></p>
+            <p id="pauses-at" class="time muted"></p>
+            <div class="choices">
+                <button type="button" class="primary" data-decision="keep" data-text="PROMPT_KEEP"></button>
+                <button type="button" class="secondary" data-decision="discard" data-text="PROMPT_DISCARD"></button>
+                <button type="button" class="secondary" data-decision="meeting" data-text="PROMPT_MEETING"></button>
+                <button type="button" class="danger" data-decision="stop" data-text="PROMPT_STOP"></button>
+            </div>
+        </section>
+
+        <!-- The server already paused the timer -->
+        <section id="paused" aria-labelledby="paused-heading" hidden>
+            <h1 id="paused-heading" class="time"></h1>
+            <p data-text="PROMPT_PAUSED_LINE"></p>
+            <div class="choices">
+                <button type="button" id="resume" class="primary" data-text="RESUME"></button>
+                <button type="button" id="stop" class="danger" data-text="PROMPT_STOP"></button>
+            </div>
+        </section>
+
+        <p id="error" class="error" role="alert" hidden></p>
+    </main>
+</body>
+</html>

@@ -273,3 +273,47 @@ it('tells the Messages page whether the viewer may manage groups', function () {
     expect($prop($this->admin))->toBeTrue()
         ->and($prop($this->yaseen))->toBeFalse();
 });
+
+/*
+| Client doc 2026-10-05 item 8: an Admin can delete a group.
+*/
+
+it('lets an Admin delete a group with its messages, files and picture, and audits it', function () {
+    $group = GROUP_make($this, withAvatar: true);
+    $avatar = $group->fresh()->avatar_path;
+
+    app(MessageService::class)->post($this->yaseen, $group, 'Hello group', null, []);
+
+    $this->actingAs($this->admin)
+        ->deleteJson("/messages/groups/{$group->id}")
+        ->assertOk()
+        ->assertJson(['deleted' => true]);
+
+    expect(Conversation::whereKey($group->id)->exists())->toBeFalse()
+        ->and(DB::table('messages')->where('conversation_id', $group->id)->count())->toBe(0)
+        ->and(Storage::exists($avatar))->toBeFalse();
+
+    $row = AuditLog::query()->where('event', 'message_group.deleted')->latest('id')->firstOrFail();
+
+    expect($row->old_value['name'])->toBe('Design crew')
+        ->and($row->old_value['messages'])->toBe(1);
+});
+
+it('refuses deleting a group to a member without messages.manage, and hides it from a non-member', function () {
+    $group = GROUP_make($this);
+
+    $this->actingAs($this->tapu)->deleteJson("/messages/groups/{$group->id}")->assertForbidden();
+
+    // Faruk is an Admin who is not in the group: whether it exists is not his to learn (404).
+    $this->actingAs($this->faruk)->deleteJson("/messages/groups/{$group->id}")->assertNotFound();
+
+    expect(Conversation::whereKey($group->id)->exists())->toBeTrue();
+});
+
+it('will not delete the team or announcements channel through the group endpoint', function () {
+    $team = app(\App\Services\ConversationService::class)->team();
+
+    $this->actingAs($this->admin)->deleteJson("/messages/groups/{$team->id}")->assertNotFound();
+
+    expect(Conversation::whereKey($team->id)->exists())->toBeTrue();
+});

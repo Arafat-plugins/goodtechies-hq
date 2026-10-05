@@ -524,8 +524,11 @@ class TaskController extends Controller
      */
     private function projects(Request $request): array
     {
+        // Client doc 2026-10-05 item 5: an archived ("deleted") project is not offered for a new
+        // task, a move, or a filter — its tasks stay reachable from the project itself.
         return Project::query()
             ->visibleTo($request->user())
+            ->notArchived()
             ->orderBy('name')
             ->get(['id', 'name'])
             ->map(fn (Project $project): array => ['id' => $project->id, 'name' => $project->name])

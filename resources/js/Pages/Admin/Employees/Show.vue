@@ -21,8 +21,10 @@ import EmployeeFirstSignInPanel from '@/Components/Employees/EmployeeFirstSignIn
 import EmployeeRecordCard from '@/Components/Employees/EmployeeRecordCard.vue';
 import EmployeeRoleCard from '@/Components/Employees/EmployeeRoleCard.vue';
 import EmployeeStatusDialog from '@/Components/Employees/EmployeeStatusDialog.vue';
+import ExtensionDevicesCard from '@/Components/Employees/ExtensionDevicesCard.vue';
 import ProjectAccessCard from '@/Components/Employees/ProjectAccessCard.vue';
 import PageShell from '@/Components/PageShell.vue';
+import type { ExtensionDevice } from '@/Components/Profile/TimerExtensionCard.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button } from '@/Components/ui/button';
@@ -80,6 +82,8 @@ const props = defineProps<{
      * cannot bring it back.
      */
     firstSignIn?: FirstSignInCredential | null;
+    /** Phase 11: connected timer extensions. Null — no card — unless the server sent them. */
+    extensionDevices: ExtensionDevice[] | null;
 }>();
 
 const employee = computed<EmployeeDetail>(() =>
@@ -219,6 +223,12 @@ function ask(intent: 'deactivate' | 'reactivate' | 'reset-password'): void {
                 :employee="employee"
                 :grantable-projects="grantableProjects ?? undefined"
                 :grantable-permissions="grantablePermissions ?? undefined"
+            />
+
+            <ExtensionDevicesCard
+                v-if="extensionDevices !== null"
+                :devices="extensionDevices"
+                :employee-id="employee.id"
             />
         </div>
     </PageShell>

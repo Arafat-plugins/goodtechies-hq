@@ -4,6 +4,7 @@ import type { FormDataConvertible } from '@inertiajs/core';
 import { FolderInput, Pencil, Plus, X } from '@lucide/vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
+import EstimateInput from '@/Components/Tasks/EstimateInput.vue';
 import type { TaskNamedRef, TaskOption, TaskTag } from '@/Components/Tasks/TaskList.vue';
 import { tagTone } from '@/Components/Tasks/TaskList.vue';
 import type { TaskDetail, TaskSurface } from '@/Components/Tasks/taskDetail';
@@ -89,13 +90,20 @@ const saving = ref(false);
 const opener = ref<{ $el?: unknown } | null>(null);
 const firstField = ref<{ $el?: unknown } | null>(null);
 
-const draft = ref({
+const draft = ref<{
+    title: string;
+    description: string;
+    priority: string;
+    start_date: string;
+    due_date: string;
+    estimated_minutes: number | null;
+}>({
     title: '',
     description: '',
     priority: '',
     start_date: '',
     due_date: '',
-    estimated_minutes: '',
+    estimated_minutes: null,
 });
 
 function edit(): void {
@@ -105,7 +113,7 @@ function edit(): void {
         priority: props.task.priority ?? '',
         start_date: props.task.start_date ?? '',
         due_date: props.task.due_date ?? '',
-        estimated_minutes: props.task.estimated_minutes === null ? '' : String(props.task.estimated_minutes),
+        estimated_minutes: props.task.estimated_minutes ?? null,
     };
     draftBaseline = JSON.stringify(draft.value);
     editing.value = true;
@@ -138,8 +146,7 @@ function save(): void {
     // back as a `prohibited` error, which is correct but is not a thing to make them see.
     const payload: Record<string, FormDataConvertible> = {
         description: blank(draft.value.description),
-        estimated_minutes:
-            draft.value.estimated_minutes.trim() === '' ? null : Number(draft.value.estimated_minutes),
+        estimated_minutes: draft.value.estimated_minutes,
     };
 
     if (mayPlan.value) {
@@ -453,14 +460,8 @@ function move(): void {
                 </div>
 
                 <div class="flex min-w-0 flex-col gap-2">
-                    <Label for="task-estimate">Estimate (minutes)</Label>
-                    <Input
-                        id="task-estimate"
-                        v-model="draft.estimated_minutes"
-                        type="number"
-                        min="0"
-                        :disabled="saving"
-                    />
+                    <Label for="task-estimate">Estimate</Label>
+                    <EstimateInput id="task-estimate" v-model="draft.estimated_minutes" :disabled="saving" />
                     <p v-if="formErrors.estimated_minutes" class="text-xs text-destructive">
                         {{ formErrors.estimated_minutes }}
                     </p>

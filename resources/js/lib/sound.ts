@@ -170,7 +170,9 @@ export function playChime(): void {
  * rewound to the start each time, so two quick sends replay rather than stack up.
  */
 // Polish 013: the sent sound is quieter than the arrival sound — it confirms your own action.
-const MESSAGE_SOUND_VOLUME: Record<'received' | 'sent', number> = { received: 0.6, sent: 0.25 };
+// Polish 021: the `sent` FILE now rings for a bell notification (client: "swap the notification
+// and the sending sounds"), so it plays at the arrival volume; sending plays the chime instead.
+const MESSAGE_SOUND_VOLUME: Record<'received' | 'sent', number> = { received: 0.6, sent: 0.6 };
 const players: Partial<Record<'received' | 'sent', HTMLAudioElement>> = {};
 
 function playFile(which: 'received' | 'sent'): void {
@@ -211,8 +213,14 @@ export function playMessageReceived(): void {
  */
 export function playMessageSent(): void {
     if (soundAllowed()) {
-        playFile('sent');
+        // Polish 021: sending plays the short "pop" that used to be the bell's sound.
+        playChime();
     }
+}
+
+/** Polish 021: a new bell notification plays the file that used to confirm a send. */
+export function playNotification(): void {
+    playFile('sent');
 }
 
 /* ------------------------------------------------------------------ when it plays */
@@ -292,10 +300,11 @@ export function noteUnread(source: ChimeSource, count: number): void {
     lastChimeAt = now;
     lastChimeSource = source;
 
-    // Brief 009: a message rise plays Telegram's incoming sound; the bell keeps the chime.
+    // Brief 009: a message rise plays Telegram's incoming sound. Polish 021: the bell plays the
+    // former send sound (and sending plays the former bell chime).
     if (source === 'messages') {
         playMessageReceived();
     } else {
-        playChime();
+        playNotification();
     }
 }

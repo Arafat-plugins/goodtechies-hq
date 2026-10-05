@@ -54,6 +54,8 @@ use Illuminate\Foundation\Http\FormRequest;
  *     session. Past an hour the pause arrives after the idleness it was meant to catch.
  *   - **`idle_flag_percent` 0–100.** A percentage of one entry, so its own arithmetic is the
  *     range. 0 flags everything and 100 flags nothing, and both are legible choices.
+ *   - **`idle_prompt_seconds` 30–1800.** How long the extension waits before asking whether to keep idle time.
+ *   - **`activity_retention_days` 7–730.** How long per-minute activity and site rows are kept.
  *
  * `backup_last_verified_at` is **not** here. `SettingsService::READ_ONLY` already refuses it and
  * `hq:verify-backup` is its only writer; leaving it out of this table is what makes the screen
@@ -162,6 +164,24 @@ class UpdateSettingsRequest extends FormRequest
             'max' => 100,
             'unit' => '%',
             'help' => 'How much of one entry may be idle before it is marked for an Admin to look at.',
+        ],
+        'idle_prompt_seconds' => [
+            'section' => 'Timer',
+            'label' => 'Ask "are you still working?" after idle for',
+            'type' => 'integer',
+            'min' => 30,
+            'max' => 1800,
+            'unit' => 'seconds',
+            'help' => 'How long a remote timer may sit with no keyboard, mouse, video or call before the extension asks whether to keep the time.',
+        ],
+        'activity_retention_days' => [
+            'section' => 'Timer',
+            'label' => 'Keep per-minute activity and site data for',
+            'type' => 'integer',
+            'min' => 7,
+            'max' => 730,
+            'unit' => 'days',
+            'help' => 'Minute-by-minute activity and website time older than this is deleted every night. Totals per entry stay.',
         ],
     ];
 

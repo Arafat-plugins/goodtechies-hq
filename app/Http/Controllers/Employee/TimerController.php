@@ -10,11 +10,14 @@ use App\Http\Requests\Time\StartTimerRequest;
 use App\Models\Employee;
 use App\Models\Task;
 use App\Models\TimeEntry;
+use App\Services\ActivityService;
+use App\Services\IdleRule;
 use App\Services\TimerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -106,6 +109,8 @@ class TimerController extends Controller
 
         if ($entry !== null) {
             $this->timer->heartbeat($entry);
+            app(ActivityService::class)->recordWebMinute($entry, Carbon::now());
+            app(IdleRule::class)->apply($entry->fresh(), Carbon::now());
         }
 
         return response()->json($this->timerState($request, $employee));

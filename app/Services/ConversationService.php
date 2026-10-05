@@ -169,7 +169,8 @@ class ConversationService
      */
     public function team(): Conversation
     {
-        return $this->singleton(ConversationType::Team, 'Team');
+        // Client doc 2026-10-05: the company-wide chat is called "Resource".
+        return $this->singleton(ConversationType::Team, 'Resource');
     }
 
     /**

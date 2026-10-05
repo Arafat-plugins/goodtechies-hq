@@ -1,0 +1,63 @@
+/* options.css — the options page (opened in a tab). */
+
+.options {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: var(--s-8) var(--s-4);
+}
+
+h1 {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+section {
+    margin-top: var(--s-6);
+    padding-top: var(--s-4);
+    border-top: 1px solid var(--border);
+}
+
+h2 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: var(--s-2);
+}
+
+section p + p,
+section p + button,
+section button + p {
+    margin-top: var(--s-2);
+}
+
+ul,
+ol {
+    margin: 0;
+    padding-left: var(--s-6);
+}
+
+li + li {
+    margin-top: var(--s-1);
+}
+
+.inline {
+    display: flex;
+    gap: var(--s-2);
+}
+
+.inline input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.server-form p {
+    margin-top: var(--s-2);
+}
+
+#device-name {
+    overflow-wrap: anywhere;
+}
+
+footer {
+    margin-top: var(--s-8);
+    font-size: 13px;
+}

@@ -1,0 +1,13 @@
+{
+    "name": "goodtechies-timer-extension",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "test": "node --test",
+        "icons": "python3 scripts/make-icons.py ../../public/brand/icon-512.png",
+        "package": "bash scripts/package.sh",
+        "test:ui": "node tests/ui/popup-size.mjs",
+        "test:e2e": "node tests/e2e/run.mjs"
+    }
+}

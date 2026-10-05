@@ -139,6 +139,8 @@ export interface TimeDay {
 
 export const timerRoutes = {
     index: '/employee/time',
+    activity: '/employee/time/activity',
+    extensionCode: '/profile/extension/code',
     current: '/employee/time/current',
     start: '/employee/time/start',
     pause: '/employee/time/pause',

@@ -3,7 +3,7 @@
 > Source of truth: `docs/master-prompt-v1.md` (v1.2), condensed from the client spec *GoodTechies HQ — Agency Operating System v1.0 (Sept 2026)* + the client's "Application Visuals" design doc + current ClickUp workspace (`docs/design-refs/`).
 > Updated at the end of every phase and after every gate. A new session must be able to continue from this file alone.
 
-**Last updated:** 26 Sep 2026 · **Current phase:** 12 — Admin tools ✅ **complete** (all admin screens, the ClickUp importer, the security and performance passes, and the UX polish pass) · **Status:** **there is nothing left to build.** **GATE D** and **GATE E** are both open and both yours; GATE A and GATE B questions still open; Phase 11 is blocked on spec §46; the cutover itself needs your ClickUp export
+**Last updated:** 5 Oct 2026 (Phase 11 built — see its section) · **Current phase:** 12 — Admin tools ✅ **complete** (all admin screens, the ClickUp importer, the security and performance passes, and the UX polish pass) · **Status:** **there is nothing left to build.** **GATE D** and **GATE E** are both open and both yours; GATE A and GATE B questions still open; Phase 11 is blocked on spec §46; the cutover itself needs your ClickUp export
 **Test suite:** `php vendor/bin/pest` → **2776 / 2776 passed** (run it in the nine parts `AGENTS.md` lists — one process times out) · **Deployed on VPS:** no. The deploy kit passed in a fresh Ubuntu 24.04 container; see the deployment log. · **Execution method:** dispatch v1.5.1
 
 > **This header and the table below had gone four phases stale** (they still said "Phase 0.5, 343 tests, waiting for GATE B" on 25 Sep, with Phases 7-9 marked unbuilt). The per-phase write-ups further down were correct throughout. Both are now current. `CLAUDE.md` says a new session must be able to continue from this file alone — that is only true if the top of it is true, so **update the header and the table in the same commit as the write-up**, not afterwards.
@@ -30,7 +30,7 @@
 | 8 | Finance module + Accountant surface | — | ✅ complete |
 | 9 | Payroll state machine + payslips | **GATE E** | ✅ complete — **GATE E open** |
 | 10 | Reports + global search + Gantt view + dashboards finalized | — | ✅ complete |
-| 11 | Activity-tracking browser extension (blocked until the client amends spec §46) | **GATE F** | ⬜ blocked |
+| 11 | Activity-tracking browser extension (spec §46 amended in writing 5 Oct 2026 — decision 11-01) | **GATE F** | ✅ built 5 Oct 2026 — **GATE F open**: install the extension on your machine and run the manual checklist |
 | 12 | Admin tools (Users & Roles, audit viewer, settings, notification defaults), backup health, UX polish pass, migration import, hardening, cutover | **Final review** | ✅ built — the cutover *run* needs the client's export |
 
 ---
@@ -85,8 +85,10 @@ Defaults from master prompt Part H §2; the "Confirmed on" column stays empty un
 | Backup destination | *(a bucket in a different provider account or region)* | — |
 | Idle pause threshold (`idle_pause_minutes`, Phase 11) | *(default 5)* | — |
 | Idle flag threshold (`idle_flag_percent`, Phase 11) | *(default 25 %)* | — |
-| Video-only rule + `<all_urls>` content script (Phase 11) | *(default: only `<video>` excuses idleness; install warning documented)* | — |
-| Spec §46 amendment for Phase 11 (activity extension) | **not yet — Phase 11 blocked** | — |
+| Media / call rule + `<all_urls>` content scripts (Phase 11) | *(a playing `<video>`, an audible tab, or a live microphone/camera stream all count as not idle; a manual "I'm in a meeting" covers desktop-app calls; install warning documented in Profile and INSTALL.md)* | 11-01 |
+| Spec §46 amendment for Phase 11 (activity extension) | **confirmed in writing 5 Oct 2026** (decision 11-01: domain-level site time included) | 11-01 |
+| Idle prompt (`idle_prompt_seconds`, Phase 11) | *(default 120 s; prompt with four buttons; `idle_pause_minutes` stays the unanswered auto-pause, at the idle start)* | 11-05 |
+| Activity retention (`activity_retention_days`, Phase 11) | *(default 90; `hq:prune-activity` nightly 03:30)* | 11-05 |
 
 ---
 
@@ -1498,6 +1500,36 @@ and the UPDATE would have been refused.
 - **Three follow-ups the pass opened itself**, all in §C.3: the same-card board race (12-46),
   eight project screens still on the client-side tone map (12-55), and a withdrawal that does not
   quieten the approver's unread row (12-59).
+
+## Phase 11 — Timer extension (5 Oct 2026) ✅ built, GATE F open
+
+The client confirmed the spec §46 amendment in writing on 5 Oct 2026 (decision 11-01, `docs/decisions.md`),
+asking for three things: website-domain time while the timer runs, an idle prompt after about two minutes
+that does not fire during video or calls, and one timer shared by the extension and the dashboard. Built
+in six dispatches (`.claude/dispatch/ledger.md` 001–007) against the contract `docs/extension-api.md`:
+
+- **Backend:** `laravel/sanctum` 4.3 (decision 11-02); tables `personal_access_tokens`, `devices`,
+  `activity_samples`, `activity_sites`, `idle_decisions`; `time_entries` rollup columns; `/api/extension/*`
+  and `/api/timer/*` for remote timer users only (`EnsureRemoteTimerUser` + abilities `timer:read-tasks`,
+  `timer:track`, `timer:heartbeat`); `ActivityService` (idempotent heartbeats, ownership rule 11-04,
+  rollups), `IdleRule` (server auto-pause at the idle start), `hq:prune-activity`; Profile pairing code
+  and device revoke; Admin revoke; revoke on deactivation.
+- **Extension:** `apps/timer-extension/` (Manifest V3, plain modules, no build): worker on `chrome.alarms`,
+  pure classifier / idle clock / site tracker / formula / queue (61 unit tests), two content scripts that
+  send two booleans only, popup, prompt window (four buttons; "Timer paused at HH:MM" after the server
+  pause), options, icons from the project mark, `INSTALL.md`, `npm run package` → `dist/…zip`.
+- **Web:** dashboard card carries the four controls and "left today" (decision 11-03); Profile → Connect
+  timer extension (remote users only); Employee → Time → My activity; Admin → Time → Activity (per employee,
+  per day: state timeline + website table); no score, no ranking, no categories.
+- **Proof:** Pest `tests/Feature/Extension` (65 tests) + matrix rows; Playwright run with the extension
+  loaded (`apps/timer-extension/tests/e2e/run.mjs`, record in `.claude/dispatch/e2e-extension-2026-10-05.md`):
+  parity within 2 s both ways, call / video / idle classification, the four prompt buttons, server
+  auto-pause and resume — 22 ok; the audible-tab rule is **not verified in headless** and real Google Meet /
+  YouTube are **not verified** (manual checklist in that record). Known limits: a call in a desktop app is
+  not seen (use "I'm in a meeting"); any audible tab counts as media (music too).
+
+**GATE F:** load the unpacked folder on your Windows machine (Chrome and Edge), pair from Profile, run the
+manual checklist, and confirm the wording of every invented string listed in the 5 Oct report.
 
 ## Post-launch — Android app and push notifications (1 Oct 2026) ✅
 

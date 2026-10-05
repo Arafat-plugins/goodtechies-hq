@@ -2,6 +2,7 @@
 
 use App\Models\Client;
 use App\Models\Conversation;
+use App\Models\Device;
 use App\Models\Employee;
 use App\Models\EmployeeSalary;
 use App\Models\Expense;
@@ -136,6 +137,9 @@ function matrixParameters(): array
         // notification rows make theirs.
         '{timeEntry}' => matrixTimeEntryId(),
 
+        // A timer extension paired by Tapu (Phase 11), made here like the entry above.
+        '{device}' => matrixDeviceId(),
+
         // Attendance (Phase 4). Tapu's EMPLOYEE record — not his user — so the
         // `attendance/{employee?}` row states Part C's rule in one line: he reads his own
         // month, an Admin reads everybody's, and for everyone else it is ABSENT rather than
@@ -263,6 +267,28 @@ function matrixTimeEntryId(): string
             ->forEmployee($tapu->employee)
             ->onTask(Task::where('title', MATRIX_TASK)->firstOrFail())
             ->create()->id;
+    }
+
+    return $id;
+}
+
+/**
+ * A timer extension device belonging to Tapu, created once and remembered (Phase 11).
+ */
+function matrixDeviceId(): string
+{
+    static $id = null;
+
+    if ($id === null || ! Device::whereKey($id)->exists()) {
+        $tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
+
+        $id = (string) Device::query()->create([
+            'user_id' => $tapu->id,
+            'kind' => 'extension',
+            'name' => 'Chrome on MATRIX-PC',
+            'install_uuid' => (string) Str::uuid(),
+            'paired_at' => now(),
+        ])->id;
     }
 
     return $id;
@@ -636,6 +662,10 @@ function permissionMatrix(): array
     // Phase 4's timer: Tapu and nobody else. See the block of rows this pair labels.
     $timer = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403];
     $timerAction = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 403];
+    // Phase 11's timer extension API: JSON throughout, 401 for a guest, 403 `role_not_allowed`
+    // for everybody who is not a remote timer user. Body-less writes stop at validation (422).
+    $api = ['guest' => 401, 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403];
+    $apiAction = ['guest' => 401, 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 422, 'ACCOUNTANT' => 403];
 
     $consumed = ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404];
     $consumedByManager = ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 302, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404];
@@ -908,6 +938,7 @@ function permissionMatrix(): array
         // — is asserted in that same file, because every role that could show it here is
         // refused by the surface first.
         ['GET', 'admin/time', $admin],
+        ['GET', 'admin/time/activity/{employee?}', $admin],
         // These two run in order against ONE entry, and that is deliberate rather than
         // incidental: the Admin's approve lands (302), and the Admin's reject then arrives
         // body-less and stops at the Form Request's missing `reason` — also 302, and proof both
@@ -1070,6 +1101,7 @@ function permissionMatrix(): array
         // the matrix's entry belongs to Tapu and every other role is refused before the lookup.
         // It is asserted directly in tests/Feature/Employee/TimeEndpointsTest.php.
         ['GET', 'employee/time', $timer],
+        ['GET', 'employee/time/activity', $timer],
         // JSON, and 200 for Tapu whether or not a timer is going: "nothing is running" is an
         // answer, not an error.
         ['GET', 'employee/time/current', $timer],
@@ -1090,6 +1122,27 @@ function permissionMatrix(): array
         // Tapu's own entry. Every field is required, so his cell is the validation redirect and
         // the other cells are the gate.
         ['PUT', 'employee/time/entries/{timeEntry}', $timerAction],
+
+        // The timer extension (Phase 11, docs/extension-api.md §2). The exchange has no auth —
+        // the code is the credential — so a body-less request is 422 for everybody. The matrix
+        // signs in through the session guard, which Sanctum accepts as a transient token: so
+        // Tapu reaches every route, and `disconnect` answers 404 because a transient token is
+        // no paired device. Real bearer tokens are exercised in tests/Feature/Extension/.
+        ['POST', 'api/extension/exchange', ['guest' => 422, 'ADMIN' => 422, 'MANAGER' => 422, 'EMPLOYEE' => 422, 'REMOTE_EMPLOYEE' => 422, 'ACCOUNTANT' => 422]],
+        ['POST', 'api/extension/disconnect', ['REMOTE_EMPLOYEE' => 404] + $api],
+        ['GET', 'api/timer/state', $api],
+        ['GET', 'api/timer/tasks', $api],
+        ['POST', 'api/timer/start', $apiAction],
+        ['POST', 'api/timer/pause', $apiAction],
+        ['POST', 'api/timer/resume', $apiAction],
+        ['POST', 'api/timer/stop', $apiAction],
+        ['POST', 'api/timer/heartbeat', $apiAction],
+        ['POST', 'api/timer/idle-decision', $apiAction],
+        // Pairing from Profile: remote timer users only. The device is Tapu's, so it is absent
+        // (404) to everybody else; the Admin's own route disconnects it from the employee page.
+        ['POST', 'profile/extension/code', ['guest' => '302 /login', 'ADMIN' => 403, 'MANAGER' => 403, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403]],
+        ['DELETE', 'profile/extension/devices/{device}', ['guest' => '302 /login', 'ADMIN' => 404, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 302, 'ACCOUNTANT' => 404]],
+        ['DELETE', 'admin/employees/{employee}/extension-devices/{device}', $adminAction],
 
         // Employee surface — the weekly timesheet (Phase 4). The same cell shape as the ten
         // timer rows above, and for the same reason: `TimeEntryPolicy::viewAny` wants
@@ -1296,6 +1349,8 @@ function permissionMatrix(): array
         // person holding the phone at the door needs a sentence.
         ['POST', 'attendance/clock-in', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
         ['POST', 'attendance/clock-out', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
+        // The last tab's pagehide beacon: marks only, for the same people who clock (client doc 2026-10-05).
+        ['POST', 'attendance/leaving', ['guest' => '302 /login', 'ADMIN' => 204, 'MANAGER' => 204, 'EMPLOYEE' => 204, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
 
         // Shared — the task timer for everyone who works tasks (flow F3, decision 12-73). No
         // surface, like the clock: an Admin and Yaseen press the same ▶. `{task}` is another of
@@ -1420,6 +1475,14 @@ function permissionMatrix(): array
             'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403,
         ], ['{conversation}' => 'group:matrix']],
         ['DELETE', 'messages/groups/{conversation}/members/{user}', $groupWrite(200), ['{conversation}' => 'group:matrix']],
+        // Client doc 2026-10-05: deleting the whole group, ADMIN only like every group write.
+        // The ADMIN cell runs first and CONSUMES the group, so every cell after it finds no
+        // group to bind (404); the 403 a member without `messages.manage` gets while the group
+        // exists is asserted in tests/Feature/Messages/GroupTest.php.
+        ['DELETE', 'messages/groups/{conversation}', [
+            'guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 404, 'EMPLOYEE' => 404,
+            'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404,
+        ], ['{conversation}' => 'group:matrix']],
 
         // Meetings (Phase 7). Shared, like Messages and Leave, and gated on `meetings.use`, so
         // *"the Accountant has no meetings"* is a capability refusing them rather than a role
@@ -1543,6 +1606,8 @@ it('enforces the role × route matrix', function () {
             // Every cell starts from a clean guard, session and rate limiter
             // (the login and two-factor limiters would otherwise count all six cells).
             $this->app['auth']->forgetGuards();
+            // The first `auth:sanctum` cell makes sanctum the default guard for the rest of the test.
+            $this->app['auth']->shouldUse('web');
             $this->flushSession();
             Cache::flush();
 

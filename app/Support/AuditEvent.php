@@ -80,6 +80,11 @@ enum AuditEvent: string
     // be one log entry per session recording that the software worked.
     case TimeEntryApproved = 'time_entry.approved';
     case TimeEntryRejected = 'time_entry.rejected';
+    // Phase 11: a timer extension paired or revoked (a bearer token minted or deleted), and an
+    // answer to the idle prompt — or the server's own auto-pause — on a running entry.
+    case ExtensionPaired = 'extension.paired';
+    case ExtensionRevoked = 'extension.revoked';
+    case TimerIdleDecision = 'timer.idle_decision';
     // Part C §4 does not name attendance, and that is an omission rather than a decision: the
     // list it gives is "events that must be recorded", and an attendance record is what Phase 9
     // pays somebody from. An Admin correcting one is the same shape of act as changing a salary
@@ -151,6 +156,7 @@ enum AuditEvent: string
     case GroupCreated = 'message_group.created';
     case GroupUpdated = 'message_group.updated';
     case GroupMembersChanged = 'message_group.members_changed';
+    case GroupDeleted = 'message_group.deleted';
 
     /*
     |--------------------------------------------------------------------------
@@ -272,10 +278,14 @@ enum AuditEvent: string
             self::GroupCreated => 'Message group created',
             self::GroupUpdated => 'Message group updated',
             self::GroupMembersChanged => 'Message group members changed',
+            self::GroupDeleted => 'Message group deleted',
 
             self::TimeEntryEdited => 'Time entry edited',
             self::TimeEntryApproved => 'Time entry approved',
             self::TimeEntryRejected => 'Time entry rejected',
+            self::ExtensionPaired => 'Timer extension connected',
+            self::ExtensionRevoked => 'Timer extension disconnected',
+            self::TimerIdleDecision => 'Idle time decided',
             self::AttendanceEdited => 'Attendance corrected',
 
             self::LeaveApproved => 'Leave approved',
@@ -342,11 +352,15 @@ enum AuditEvent: string
             self::MessageDeleted,
             self::GroupCreated,
             self::GroupUpdated,
-            self::GroupMembersChanged => self::GROUP_TASKS,
+            self::GroupMembersChanged,
+            self::GroupDeleted => self::GROUP_TASKS,
 
             self::TimeEntryEdited,
             self::TimeEntryApproved,
             self::TimeEntryRejected,
+            self::ExtensionPaired,
+            self::ExtensionRevoked,
+            self::TimerIdleDecision,
             self::AttendanceEdited => self::GROUP_TIME,
 
             self::LeaveApproved,

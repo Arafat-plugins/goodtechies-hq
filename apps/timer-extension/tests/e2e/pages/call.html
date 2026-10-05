@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>e2e call</title></head>
+<body>
+<p id="state">waiting</p>
+<script>
+    // A live microphone track, as a web call holds one
+    // (Chromium runs with --use-fake-ui-for-media-stream --use-fake-device-for-media-stream).
+    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        window.__stream = stream;
+        const track = stream.getAudioTracks()[0];
+        document.getElementById('state').textContent = track && track.readyState === 'live' ? 'live' : 'ended';
+    }, (error) => {
+        document.getElementById('state').textContent = 'error: ' + error.name;
+    });
+</script>
+</body>
+</html>

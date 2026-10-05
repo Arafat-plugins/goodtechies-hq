@@ -3,6 +3,7 @@
 use App\Http\ErrorResponses;
 use App\Http\Middleware\ContentSecurityPolicy;
 use App\Http\Middleware\EnsureActiveUser;
+use App\Http\Middleware\EnsureRemoteTimerUser;
 use App\Http\Middleware\EnsureSurface;
 use App\Http\Middleware\EnsureTwoFactorEnrolled;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -14,12 +15,16 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
 use Illuminate\Session\TokenMismatchException;
+use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\Exceptions\MissingAbilityException;
+use Laravel\Sanctum\Http\Middleware\CheckAbilities;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
@@ -66,6 +71,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'active' => EnsureActiveUser::class,
             'surface' => EnsureSurface::class,
             'two-factor' => EnsureTwoFactorEnrolled::class,
+            'remote-timer' => EnsureRemoteTimerUser::class,
+            'abilities' => CheckAbilities::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -79,6 +86,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // a 401 the client turns into a "your session has ended" dialog over the page instead.
         // A full-page GET keeps the redirect (with the intended URL) it always had.
         $exceptions->render(function (AuthenticationException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json(['error' => 'token_invalid', 'message' => 'Reconnect the timer extension from your Profile.'], 401);
+            }
+
             if (! $request->hasHeader('X-Inertia') && ! $request->expectsJson()) {
                 return null;
             }
@@ -87,6 +98,29 @@ return Application::configure(basePath: dirname(__DIR__))
                 'message' => 'Your session has ended.',
                 'reason' => 'session',
             ], 401);
+        });
+
+        // Like the TokenMismatchException below, the framework has already mapped Sanctum's
+        // MissingAbilityException (an AuthorizationException) to an HttpException(403) by the
+        // time render callbacks run, so it is recognised by what it wraps.
+        $exceptions->render(function (HttpException $e, Request $request) {
+            if (! $request->is('api/*') || ! $e->getPrevious() instanceof MissingAbilityException) {
+                return null;
+            }
+
+            return response()->json(['error' => 'ability_missing', 'message' => 'This token may not do that.'], 403);
+        });
+
+        $exceptions->render(function (ValidationException $e, Request $request) {
+            if (! $request->is('api/*')) {
+                return null;
+            }
+
+            return response()->json([
+                'error' => 'validation_failed',
+                'message' => $e->getMessage(),
+                'errors' => $e->errors(),
+            ], 422);
         });
 
         // The framework has already mapped a TokenMismatchException to an HttpException(419)

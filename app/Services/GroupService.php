@@ -216,6 +216,51 @@ class GroupService
         });
     }
 
+    /**
+     * Client doc 2026-10-05 item 8: delete the group — its messages, reactions, mentions and
+     * attachment rows go with it (every one of those foreign keys cascades from the
+     * conversation). The audit row keeps who deleted what, with the member list and the
+     * message count; the stored attachment files and the picture leave the disk only once the
+     * delete has committed.
+     */
+    public function delete(User $actor, Conversation $group): void
+    {
+        $paths = DB::transaction(function () use ($actor, $group): array {
+            Conversation::query()->whereKey($group->getKey())->lockForUpdate()->first();
+
+            $messageIds = DB::table('messages')->where('conversation_id', $group->getKey())->pluck('id');
+            $paths = DB::table('files')->whereIn('message_id', $messageIds)->pluck('path')->filter()->values()->all();
+
+            if ($group->avatar_path !== null) {
+                $paths[] = $group->avatar_path;
+            }
+
+            $this->audit->record(
+                AuditEvent::GroupDeleted,
+                $group,
+                [
+                    'name' => $group->title,
+                    'member_ids' => $this->memberIds($group),
+                    'messages' => $messageIds->count(),
+                ],
+                null,
+                $actor,
+            );
+
+            $id = (int) $group->getKey();
+            $group->delete();
+
+            // Open screens re-read; the thread they had is now a 404 and they leave it.
+            ConversationActivity::dispatch($id, 0, 'group');
+
+            return $paths;
+        });
+
+        foreach ($paths as $path) {
+            Storage::delete($path);
+        }
+    }
+
     /*
     |--------------------------------------------------------------------------
     | The pieces

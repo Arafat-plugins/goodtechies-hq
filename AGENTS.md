@@ -37,6 +37,8 @@ UI surfaces (Admin, Employee, Accountant) and **privacy by role is enforced on t
 | `resources/css/app.css` | Tailwind v4 plus the shadcn token variables (the only colour source) | tokens only via a DESIGN.md brief |
 | `tests/Feature/`, `tests/Unit/`, `tests/Permissions/` | Pest tests; `Permissions/` holds the role × route matrix with its route-coverage guard | every brief |
 | `deploy/` | nginx, supervisor, `install.sh`, `deploy.sh`, `sql/roles.sql`, `.env.production.example` | new worker, env key or channel |
+| `apps/timer-extension/` | The Chrome/Edge timer extension (Phase 11): `src/` is the unpacked extension (MV3, plain ES modules, no build), `tests/` its Node unit tests, `tests/e2e/` the Playwright run, `scripts/` icons + zip, `INSTALL.md` the user guide. Contract: `docs/extension-api.md` | an extension brief |
+| `routes/api.php`, `app/Http/Controllers/Api/` | The extension API only (Sanctum bearer tokens, abilities `timer:*`, `EnsureRemoteTimerUser`). Nothing else lives under `/api` | the contract changes |
 | `docs/` | Master prompt, `decisions.md`, `runbooks/`, `design-refs/` (client images) | docs briefs |
 | `vendor/`, `node_modules/`, `public/build/`, `storage/`, `bootstrap/cache/` | **Generated or vendored** | never |
 
@@ -117,7 +119,7 @@ overloaded so asking for one is a compile error rather than a 404 found in stagi
 - **`PageHeader.vue` and `PlaceholderPanel.vue` no longer exist** — Phase 0.5 deleted them. `PageShell` replaces the first; `Card` + `EmptyState` replaces the second. Do not reintroduce either.
 - **Read `DESIGN.md` before writing any Tailwind class.** It carries every token with its light and dark value, the real signature of every shared component, and the 20 things that are never allowed. It is generated from `app.css`, which wins if the two ever disagree.
 - **Route file ownership:** `routes/auth.php`, `admin.php`, `employee.php`, `accountant.php`, `shared.php`. The schedule lives in `routes/console.php`.
-- **Services:** `AuditLogger`, `ActivityLogger`, `SettingsService`, `EmployeeAdministrationService`, `TwoFactorService`, `SessionService`, `ClientService`, `ProjectService`, `ProjectFinanceService`, and from Phase 2 `TaskService`, `TaskReviewers`, `TagService`, `FileService`, `ConversationService`, `NotificationService`.
+- **Services:** `AuditLogger`, `ActivityLogger`, `SettingsService`, `EmployeeAdministrationService`, `TwoFactorService`, `SessionService`, `ClientService`, `ProjectService`, `ProjectFinanceService`, and from Phase 2 `TaskService`, `TaskReviewers`, `TagService`, `FileService`, `ConversationService`, `NotificationService`. Phase 11: `ExtensionPairingService` (codes, Sanctum tokens, revoke), `ActivityService` (heartbeat samples + sites, idempotent; rollups; timeline), `IdleRule` (server auto-pause at the idle start).
 - **Serializers:** `ProjectResource`, `ClientResource`, and from Phase 2 `TaskResource`, `TagResource`, `FileResource`, `MessageResource`, `NotificationResource` — the only way each of those leaves the server. A project's **status changes only** through `POST …/status`, `…/archive`, `…/unarchive`; `PUT /admin/projects/{id}` ignores a `status` key by design. `TaskResource` puts the checklist, links and dependencies behind `whenLoaded` and `available_transitions` behind a `task_detail` attribute, so a list payload is not a detail payload.
 - **Policies:** `EmployeePolicy`, `ProjectPolicy` (view, create, update, archive, unarchive, cancel, manageMembers, viewCommercial, viewFinance, updateFinance), `ClientPolicy`, and from Phase 2 `TaskPolicy`, `TagPolicy`, `FilePolicy`, `ConversationPolicy`, `MessagePolicy`, `NotificationPolicy` (all extending `Policy`). `Project::visibleTo($user)` and `Task::visibleTo($user)` scope every list.
 - **Events / listeners (Phase 2):** `TaskAssigned`, `TaskReassigned`, `TaskStatusChanged`, `TaskCommented`, `TaskSubmittedForReview`, `TaskCompleted`, `TaskDeleted`, `TaskBecameOverdue`, `ProjectCancelled` → the one `NotificationDispatcher` listener. **A move to In review fires `TaskSubmittedForReview` and a move to Completed fires `TaskCompleted` *instead of* `TaskStatusChanged`, never as well** — `TaskService::transition()` picks one.
@@ -169,6 +171,7 @@ overloaded so asking for one is a compile error rather than a 404 found in stagi
 | Type-check (Vue/TS) | `npx vue-tsc --noEmit` |
 | Test | **`php vendor/bin/pest`** (all) · `php vendor/bin/pest --group=permissions`. **Not `php artisan test`** — it runs in parallel here and deadlocks on migration DDL; see *Known-failing baseline* below, which also says why two agents must not run the suite at once |
 | Build | `npm run build` |
+| Test (extension) | `cd apps/timer-extension && npm test` (Node 22 `--test`, 61 pure-function tests) · `npm run test:ui` (popup/prompt/options size, Playwright) · `npm run test:e2e` (real Chromium with the extension against the dev server on port 8000 — writes to the dev database) · `npm run package` → `dist/goodtechies-timer-0.1.0.zip` |
 | Test (JS helpers) | `npm run test:js` → `node --experimental-strip-types --test "tests/js/**/*.test.ts"` (Node 22's own runner, no dependency; pure-TS helpers such as `lib/dueCountdown.ts`, cases shared with Pest via `tests/fixtures/`). A bare directory (`--test tests/js/`) is **not** accepted by Node 22 — pass the glob |
 | Migrate (dev) | `php artisan migrate:fresh --seed --database=pgsql_migrator` |
 | Dev server | `npm run build && php artisan serve --host=127.0.0.1 --port=8000` (run it in the background and kill it when done) |
@@ -187,6 +190,21 @@ three from Phase 8, four from Phase 10's search slice, six from Phase 10's repor
 from Phase 12's admin-tools and cutover slices, and **NINE as of the polish pass**.
 `vendor/bin/pint --test`: passed. `npx vue-tsc --noEmit`: passed. `npm run build`: passed. If
 your number is not 2776, that is a finding, not drift.
+
+**Measured again 5 Oct 2026 (Phase 11 close), nine parts + Extension: 3235 tests.** Six failures
+reproduce **at BASE `30b6dff`** in a worktree with its own vendor copy, so they are pre-existing and not
+Phase 11's: `Unit/DesignVocabularyTest` (the Phase 0 `PlaceholderPanel.vue` still exists in the GitHub
+copy and carries `shadow-xs`), `Database/WorkSeederTest` Absent + HalfDay (the month-to-date window on
+5 Oct holds three weekdays — the date-collision pattern below), `Leave/LeaveServiceTest` "fires one event
+per act", `Attendance` "does not skip a day covered only by a pending request", and
+`Surfaces/ShellLandingTest` "documented props" (the Admin row lacks `workingNow`, which decision 12-73
+added). `Backup` "ships SESSION_SECURE_COOKIE" fails only because `deploy/.env.production.example` is
+not in the GitHub copy. `Finance/AccountantProjectEndpointTest` "names no seeded client" failed once in
+a part run and passes alone — flaky, order-dependent. Phase 11 moved two literals (`settings=11` →
+`13` in `SeedersTest` and `VerifyBackupTest`) and allowed the extension-device DELETE in
+`EmployeeEndpointsTest`'s no-destroy guard. **A worktree needs its own `vendor/` copy** (`cp -a`, then
+`composer dump-autoload`): a symlinked vendor binds `Tests\` to the main checkout and every Pest file
+errors with "undefined method seed()".
 
 **How the previous baseline was checked rather than replaced.** The polish agent measured 602 on
 part 6 against the 565 written here and reported the 37 as a possible finding rather than
@@ -219,7 +237,7 @@ php vendor/bin/pest tests/Feature/{Console,Reports}                             
 php vendor/bin/pest tests/Feature/Admin                                                      # 338
 php vendor/bin/pest tests/Feature/{Employee,Auth,Middleware,Profile,Backup} tests/Feature/ScheduleTest.php tests/Feature/ExampleTest.php   # 233
 php vendor/bin/pest tests/Feature/{Services,Surfaces}                                        # 461
-php vendor/bin/pest tests/Feature/{Search,Team,Realtime}                                     # 141
+php vendor/bin/pest tests/Feature/{Search,Team,Realtime,Extension}                           # 141 + 65 (Phase 11)
 php vendor/bin/pest tests/Feature/{Shared,Finance,Payroll}                                   # 391
 php vendor/bin/pest tests/Feature/{Meetings,Messages,Tasks}                                  # 200
 ```
@@ -333,4 +351,9 @@ Invariants: ≤ 1 open entry per employee (index); office/Admin entries never co
 Stale (decision 12-75): an entry never counts past its last heartbeat — `TimerService::stop()` (⏹, clock-out, ▶ elsewhere) ends a RUNNING entry silent ≥ `heartbeat_timeout_minutes` AT that heartbeat, flagged; `hq:repair-task-timer-overruns` (run by `start-hq.bat`) re-ends old breakdown rows only; client timestamps are normalised to the app zone (`notInTheFuture`)
 The sweep runs without a scheduler: `SweepAbandonedTimers` (web, signed-in, before Inertia/controller) → `TimerSweep::runIfDue()` (`Cache::add('timer-sweep', 60 s)`, once a minute app-wide) → `TimerService::sweep()` (one `exists`, then both watchdog rules); tests move time with live heartbeats (`TIMER_at`) — `tests/Feature/Tasks/StaleTaskTimerTest.php`
 Test: php vendor/bin/pest tests/Feature/Tasks/TaskTimerFlowTest.php
+### F4 extension-timer
+Trigger: the paired extension (`apps/timer-extension/src/background/worker.js`) — `chrome.alarms` tick once a minute, `POST /api/timer/heartbeat` (`HeartbeatController`, `HeartbeatRequest`), `POST /api/timer/idle-decision`, and the API `start/pause/resume/stop` (`Api/TimerController`, same `TimerService` as F3)
+Steps: content scripts post `{videoPlaying, streamLive}` → worker classifies the minute (`lib/classifier.js`: active > locked→idle > call > media > idle) and sums the active tab's domain seconds (`lib/sites.js`) → sample queued in `chrome.storage.local` → heartbeat batch → `ActivityService::storeSamples` (unique on entry+minute; `extension` overwrites `web`, never the reverse — decision 11-04) → `IdleRule::apply` (N consecutive idle minutes → `TimerService::pause(at: idleStart)` + `idle_pending_from`) → `BuildsTimerState` returns `activity.pending_idle` → both clients show the same figure from `elapsed_seconds + (now + offset − server_time)` (`docs/extension-api.md` §4)
+Invariants: only `tracking_mode = remote_timer` + `timer.use` users can pair or call `/api/*` (403 `role_not_allowed`); a token opens no web route; a sample holds a validated bare host or `''`, never a path, query, title or content (`SiteHost`, `HeartbeatRequest` refuses keys `url`/`title`/`hostname`); nothing is stored for a paused or stopped entry (409 `entry_not_running` + state); `(entry, idle_from)` decisions are idempotent; `resume()`/`stop()` clear `pending_idle`; no score, ranking or category anywhere
+Test: php vendor/bin/pest tests/Feature/Extension · cd apps/timer-extension && npm test · npm run test:e2e
 <!-- /dispatch:map -->

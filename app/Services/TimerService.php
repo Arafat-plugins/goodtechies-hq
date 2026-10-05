@@ -253,6 +253,7 @@ class TimerService
             'paused_at' => $at,
             'last_heartbeat_at' => $this->latest($entry->last_heartbeat_at, $at),
         ])->save();
+        app(ActivityService::class)->rollup($entry);
 
         $this->announce($entry, everyViewer: false);
 
@@ -276,6 +277,8 @@ class TimerService
             'paused_seconds' => (int) $entry->paused_seconds + (int) $entry->paused_at->diffInSeconds($at),
             'paused_at' => null,
             'last_heartbeat_at' => $this->latest($entry->last_heartbeat_at, $at),
+            'idle_pending_from' => null,
+            'idle_auto_paused_at' => null,
         ])->save();
 
         $this->announce($entry, everyViewer: false);
@@ -320,7 +323,10 @@ class TimerService
             // An entry the timer measured is approved by the system the moment it stops. Only a
             // hand-written or hand-corrected one has to be signed off.
             'approved_at' => $entry->approved_at ?? Carbon::now(),
+            'idle_pending_from' => null,
+            'idle_auto_paused_at' => null,
         ])->save();
+        app(ActivityService::class)->rollup($entry);
 
         if ($flagReason !== null) {
             $this->flag($entry, $flagReason);

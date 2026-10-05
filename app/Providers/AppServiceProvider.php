@@ -28,6 +28,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // The extension API is the only `/api/*`; `sanctum/csrf-cookie` is for SPAs and is not registered — Sanctum 4.3 reads this flag in its own boot.
+        config(['sanctum.routes' => false]);
+
         // Settings are cached for the lifetime of one request or job.
         $this->app->scoped(SettingsService::class);
 

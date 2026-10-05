@@ -50,6 +50,7 @@ it('schedules the recurring sweep, the two task reminders, the payroll draft, th
         'backup:run --only-db' => '0 2 * * *',
         'backup:monitor' => '0 3 * * *',
         'hq:verify-backup' => '0 4 * * 0',
+        'hq:prune-activity' => '30 3 * * *',
     ]);
 
     $events->each(fn (Event $event) => expect($event->withoutOverlapping)->toBeTrue()

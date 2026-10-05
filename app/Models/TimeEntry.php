@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
@@ -84,6 +85,8 @@ class TimeEntry extends Model
             'paused_seconds' => 'integer',
             'duration_seconds' => 'integer',
             'counts_toward_hours' => 'boolean',
+            'idle_pending_from' => 'datetime',
+            'idle_auto_paused_at' => 'datetime',
         ];
     }
 
@@ -133,6 +136,30 @@ class TimeEntry extends Model
     public function editor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'edited_by');
+    }
+
+    /**
+     * @return HasMany<ActivitySample, $this>
+     */
+    public function activitySamples(): HasMany
+    {
+        return $this->hasMany(ActivitySample::class);
+    }
+
+    /**
+     * @return HasMany<ActivitySite, $this>
+     */
+    public function activitySites(): HasMany
+    {
+        return $this->hasMany(ActivitySite::class);
+    }
+
+    /**
+     * @return HasMany<IdleDecision, $this>
+     */
+    public function idleDecisions(): HasMany
+    {
+        return $this->hasMany(IdleDecision::class);
     }
 
     /* ------------------------------------------------------------ the three states */

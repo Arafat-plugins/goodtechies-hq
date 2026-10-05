@@ -1,0 +1,42 @@
+/* prompt.css — the idle prompt window, opened by the worker at 440 × 400. Must fit without a scrollbar. */
+
+.prompt {
+    padding: var(--s-5) var(--s-6);
+}
+
+h1 {
+    font-size: 18px;
+    font-weight: 700;
+}
+
+h1 + p {
+    margin-top: var(--s-2);
+}
+
+#inactive {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+#pauses-at {
+    margin-top: var(--s-1);
+}
+
+#paused p {
+    margin-top: var(--s-2);
+}
+
+.choices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    margin-top: var(--s-4);
+}
+
+.choices button {
+    width: 100%;
+}
+
+.error {
+    margin-top: var(--s-3);
+}

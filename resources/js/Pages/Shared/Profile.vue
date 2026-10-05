@@ -7,6 +7,7 @@ import ProfileDetailsForm, { type ProfileDetails } from '@/Components/Profile/Pr
 import PushNotificationsCard, { type PushSettings } from '@/Components/Profile/PushNotificationsCard.vue';
 import SessionsCard, { type ActiveSession } from '@/Components/Profile/SessionsCard.vue';
 import SoundCard from '@/Components/Profile/SoundCard.vue';
+import TimerExtensionCard, { type ExtensionStatus } from '@/Components/Profile/TimerExtensionCard.vue';
 import TwoFactorCard, { type TwoFactorStatus } from '@/Components/Profile/TwoFactorCard.vue';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
@@ -33,6 +34,7 @@ defineProps<{
     sessions: ActiveSession[];
     loginHistory: LoginAttempt[];
     push: PushSettings;
+    extension: ExtensionStatus;
 }>();
 </script>
 
@@ -52,6 +54,7 @@ defineProps<{
                 <TwoFactorCard class="order-2" :two-factor="twoFactor" />
                 <SoundCard class="order-6" />
                 <PushNotificationsCard class="order-7" :push="push" />
+                <TimerExtensionCard v-if="extension.available" class="order-8" :extension="extension" />
             </div>
         </div>
     </PageShell>

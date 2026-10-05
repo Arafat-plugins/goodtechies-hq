@@ -17,6 +17,7 @@ use App\Support\Weekday;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
@@ -499,6 +500,110 @@ class AttendanceService
 
             return $record;
         });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Closing the last tab clocks out (client doc 2026-10-05, item 1)
+    |--------------------------------------------------------------------------
+    |
+    | The last goodERP tab's `pagehide` beacon (`POST /attendance/leaving`) only MARKS the
+    | moment. Any sign of life afterwards — a full page load, the presence ping, the task-timer
+    | heartbeat, all of which a reload or another open tab sends at once — cancels the mark.
+    | `clockOutLeft()` (the timer sweep, every minute) clocks out AT the marked moment once the
+    | mark is LEAVING_GRACE_SECONDS old and still standing. The same shape as
+    | `TimerService::markLeaving()` / `stopLeft()`.
+    */
+
+    public const LEAVING_GRACE_SECONDS = 60;
+
+    private const LEAVING_INDEX = 'attendance-leaving:index';
+
+    private static function leavingKey(int $employeeId): string
+    {
+        return "attendance-leaving:{$employeeId}";
+    }
+
+    public function markLeaving(Employee $employee, ?CarbonInterface $at = null): void
+    {
+        if (! $this->clocks($employee) || ! $this->isClockedIn($employee)) {
+            return;
+        }
+
+        $id = (int) $employee->getKey();
+
+        Cache::put(self::leavingKey($id), ($at === null ? Carbon::now() : Carbon::parse($at))->toIso8601String(), 900);
+
+        // The sweep reads this index first, so a minute with nobody leaving costs no query.
+        $index = Cache::get(self::LEAVING_INDEX, []);
+        Cache::put(self::LEAVING_INDEX, array_values(array_unique([...(is_array($index) ? $index : []), $id])), 900);
+    }
+
+    /** A page of this person's is alive: they did not leave. */
+    public function stillHere(?Employee $employee): void
+    {
+        if ($employee !== null) {
+            Cache::forget(self::leavingKey((int) $employee->getKey()));
+        }
+    }
+
+    /**
+     * Clock out everybody whose last tab closed at least LEAVING_GRACE_SECONDS ago with no sign
+     * of life since — at the moment it closed.
+     *
+     * @return list<int> employee ids clocked out
+     */
+    public function clockOutLeft(?CarbonInterface $now = null): array
+    {
+        $now = $now === null ? Carbon::now() : Carbon::parse($now);
+
+        $index = Cache::get(self::LEAVING_INDEX, []);
+        $employeeIds = array_values(array_filter(is_array($index) ? $index : [], 'is_int'));
+
+        // Nearly every minute nobody has left: no query at all.
+        if ($employeeIds === []) {
+            return [];
+        }
+
+        $marks = Cache::many(array_map(fn (int $id): string => self::leavingKey($id), $employeeIds));
+        $done = [];
+        $waiting = [];
+
+        foreach ($employeeIds as $employeeId) {
+            $raw = $marks[self::leavingKey($employeeId)] ?? null;
+
+            if (! is_string($raw)) {
+                continue;
+            }
+
+            $mark = Carbon::parse($raw)->setTimezone(config('app.timezone'));
+
+            if ($mark->copy()->addSeconds(self::LEAVING_GRACE_SECONDS)->greaterThan($now)) {
+                $waiting[] = $employeeId;
+
+                continue;
+            }
+
+            Cache::forget(self::leavingKey($employeeId));
+
+            $employee = Employee::query()->find($employeeId);
+
+            if ($employee === null) {
+                continue;
+            }
+
+            try {
+                $this->clockOut($employee, $mark);
+                $done[] = $employeeId;
+            } catch (AttendanceStateException) {
+                // Already clocked out, or the mark is from before the clock-in: nothing to do.
+            }
+        }
+
+        // Only marks still inside their grace stay indexed; cancelled and spent ones drop out.
+        $waiting === [] ? Cache::forget(self::LEAVING_INDEX) : Cache::put(self::LEAVING_INDEX, $waiting, 900);
+
+        return $done;
     }
 
     /**

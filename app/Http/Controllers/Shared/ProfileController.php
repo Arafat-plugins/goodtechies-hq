@@ -4,11 +4,14 @@ namespace App\Http\Controllers\Shared;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Profile\UpdateProfileRequest;
+use App\Models\Device;
 use App\Models\LoginHistory;
+use App\Models\TimeEntry;
 use App\Services\SessionService;
 use DateTimeZone;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -64,6 +67,17 @@ class ProfileController extends Controller
                     'at' => $row->created_at?->toIso8601String(),
                 ])
                 ->all(),
+            'extension' => [
+                'available' => Gate::allows('track', TimeEntry::class),
+                'devices' => $user->devices()->active()->get()
+                    ->map(fn (Device $d): array => [
+                        'id' => $d->id,
+                        'name' => $d->name,
+                        'paired_at' => $d->paired_at?->toIso8601String(),
+                        'last_seen_at' => $d->last_seen_at?->toIso8601String(),
+                    ])
+                    ->values(),
+            ],
         ]);
     }
 

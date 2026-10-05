@@ -20,6 +20,7 @@ import { rememberEmoji } from '@/Components/Messages/emoji';
 import MentionPicker from '@/Components/Messages/MentionPicker.vue';
 import MessageRow from '@/Components/Messages/MessageRow.vue';
 import { rememberThread } from '@/Components/Messages/opening';
+import { useTyping } from '@/Components/Messages/typing';
 import ReplyQuote from '@/Components/Messages/ReplyQuote.vue';
 import VoiceRecorder from '@/Components/Messages/VoiceRecorder.vue';
 import LiveIndicator from '@/Components/Realtime/LiveIndicator.vue';
@@ -395,6 +396,75 @@ function field(): HTMLTextAreaElement | undefined {
     return bodyEl.value?.$el as HTMLTextAreaElement | undefined;
 }
 
+/* ------------------------------------------------------------------ type anywhere (polish 022) */
+
+/**
+ * Polish 022: in the Messages page (`scroll`), the composer is where typing goes — Telegram
+ * desktop's behaviour. Opening a chat puts the caret in it on a computer (not on a phone, where
+ * focusing would throw the keyboard over the conversation), and a printable key pressed anywhere
+ * on the page that is not already a text field, a dialog or a menu moves focus to the composer
+ * first, so the character lands there instead of nowhere.
+ */
+function prefersKeyboard(): boolean {
+    return typeof window !== 'undefined' && (window.matchMedia?.('(pointer: fine)').matches ?? false);
+}
+
+function focusComposer(): void {
+    if (!thread.value.can_post) {
+        return;
+    }
+
+    const el = field();
+
+    if (el === undefined || el.disabled) {
+        return;
+    }
+
+    el.focus({ preventScroll: true });
+
+    const at = el.value.length;
+
+    el.setSelectionRange?.(at, at);
+}
+
+const TYPING_ELSEWHERE =
+    'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
+
+function onTypeAnywhere(event: KeyboardEvent): void {
+    if (!props.scroll || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
+        return;
+    }
+
+    // Printable characters only: not Tab, Enter, arrows, Escape or a function key.
+    if (event.key.length !== 1) {
+        return;
+    }
+
+    const target = event.target instanceof HTMLElement ? event.target : null;
+
+    if (target?.closest(TYPING_ELSEWHERE)) {
+        return;
+    }
+
+    // Space on a button or a link is that control's own key.
+    if (event.key === ' ' && target?.closest('button, a, [role="button"]')) {
+        return;
+    }
+
+    // An open dialog or menu anywhere (they render in a portal) keeps the keyboard.
+    if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) {
+        return;
+    }
+
+    focusComposer();
+}
+
+function focusComposerOnOpen(): void {
+    if (props.scroll && prefersKeyboard()) {
+        void nextTick(focusComposer);
+    }
+}
+
 function grow(): void {
     const el = field();
 
@@ -448,6 +518,22 @@ const DRAFT_SAVE_MS = 400;
 
 const page = usePage();
 const userId = computed(() => (page.props.auth as { user?: { id?: number } | null } | undefined)?.user?.id ?? null);
+
+/* ------------------------------------------------------------------ typing (polish 023) */
+
+const typing = useTyping(
+    () => thread.value.conversation_id,
+    () => {
+        const user = (page.props.auth as { user?: { id?: number; name?: string } | null } | undefined)?.user;
+
+        return user?.id ? { id: user.id, name: user.name ?? '' } : null;
+    },
+);
+
+function onComposerInput(): void {
+    grow();
+    typing.noteTyping(body.value.trim() !== '');
+}
 
 function draftKeyFor(conversationId: number | null | undefined): string | null {
     return messageDraftKey(userId.value, conversationId);
@@ -1542,6 +1628,7 @@ watch(
             thread.value = payload;
 
             void load();
+            focusComposerOnOpen();
 
             return;
         }
@@ -1552,6 +1639,23 @@ watch(
         thread.value = mergeRead(thread.value, payload);
         keepAtBottom(wasAtBottom);
     },
+);
+
+// Polish 023: a message from somebody who was typing ends their "typing…" at once.
+watch(
+    () => thread.value.messages.at(-1)?.id,
+    () => typing.forget(thread.value.messages.at(-1)?.author?.id),
+);
+
+// The typing bubble is the last row of the list: keep a reader who was at the bottom there.
+watch(
+    () => typing.typers.value.length,
+    () => {
+        const wasAtBottom = atBottom();
+
+        void nextTick(() => keepAtBottom(wasAtBottom));
+    },
+    { flush: 'pre' },
 );
 
 // A thread switch (or a refusal) changes which conversation is on screen.
@@ -1657,6 +1761,8 @@ onMounted(() => {
 
     restoreDraft();
     window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('keydown', onTypeAnywhere);
+    focusComposerOnOpen();
 });
 
 onBeforeUnmount(() => {
@@ -1675,6 +1781,7 @@ onBeforeUnmount(() => {
 
     flushDraft();
     window.removeEventListener('pagehide', onPageHide);
+    document.removeEventListener('keydown', onTypeAnywhere);
 });
 
 /* ------------------------------------------------------------------ writing */
@@ -1708,6 +1815,7 @@ function post(): void {
 
     // Nothing at all: let the server say its own sentence, as before, but without a ghost row.
     if (carrying === null && text.trim() === '') {
+        typing.stopTyping();
         void send({ tempId: null, text, people: [...mentions.picked.value], named: mentions.ids(), carrying, file, clip, replyTo });
 
         return;
@@ -1724,6 +1832,7 @@ function post(): void {
         replyTo,
     };
 
+    typing.stopTyping();
     appendLocal(optimistic(outgoing));
 
     if (carrying === null) {
@@ -2310,6 +2419,24 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                             />
                         </li>
                     </template>
+
+                    <!--
+                        Polish 023: "is typing…" — a bubble of three dots where their next message
+                        will appear, with the words beside it so it is never colour or motion alone.
+                    -->
+                    <li v-if="typing.typers.value.length > 0" class="flex min-w-0 items-end gap-2 py-1" data-testid="typing-indicator">
+                        <span
+                            class="inline-flex h-8 items-center gap-1 rounded-2xl rounded-bl-sm border bg-card px-3 shadow-flat"
+                            aria-hidden="true"
+                        >
+                            <span class="typing-dot size-1.5 rounded-full bg-muted-foreground" />
+                            <span class="typing-dot size-1.5 rounded-full bg-muted-foreground [animation-delay:150ms]" />
+                            <span class="typing-dot size-1.5 rounded-full bg-muted-foreground [animation-delay:300ms]" />
+                        </span>
+                        <span class="min-w-0 truncate pb-1 text-xs text-muted-foreground" role="status">
+                            {{ typing.label.value }}
+                        </span>
+                    </li>
                 </ol>
             </div>
 
@@ -2520,7 +2647,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         :aria-invalid="fieldError ? true : undefined"
                         rows="1"
                         class="max-h-29 min-h-8 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-1.5 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
-                        @input="grow"
+                        @input="onComposerInput"
                         @keydown.enter="onEnter"
                         @keydown.esc="onComposerEscape"
                     />
@@ -2614,7 +2741,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                             rows="1"
                             :placeholder="(placeholder ?? (isAnnouncements ? 'Tell everybody.' : 'Say something.')) || undefined"
                             class="max-h-40 min-h-9 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-2 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
-                            @input="grow"
+                            @input="onComposerInput"
                             @keydown.enter="onEnter"
                             @keydown.esc="onComposerEscape"
                         />

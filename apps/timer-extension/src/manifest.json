@@ -1,0 +1,51 @@
+{
+    "manifest_version": 3,
+    "name": "goodERP Timer",
+    "version": "0.1.0",
+    "description": "While your timer is running, this extension records which website domain you are on (for example docs.google.com) and how long, whether you are active, and whether a video or a call is playing. It never records page addresses, page titles, page content, what you type, or screenshots. When the timer is paused or stopped, nothing is recorded.",
+    "minimum_chrome_version": "116",
+    "permissions": ["idle", "alarms", "storage", "tabs", "notifications"],
+    "host_permissions": [
+        "https://erp.goodtechies.com/*",
+        "http://127.0.0.1:8000/*",
+        "http://localhost:8000/*"
+    ],
+    "optional_host_permissions": ["https://*/*", "http://*/*"],
+    "background": {
+        "service_worker": "background/worker.js",
+        "type": "module"
+    },
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "all_frames": true,
+            "run_at": "document_idle",
+            "js": ["content/media-detector.js"]
+        },
+        {
+            "matches": ["<all_urls>"],
+            "all_frames": true,
+            "run_at": "document_start",
+            "world": "MAIN",
+            "js": ["content/stream-hook.js"]
+        }
+    ],
+    "action": {
+        "default_popup": "popup/popup.html",
+        "default_title": "goodERP Timer",
+        "default_icon": {
+            "16": "icons/icon-16.png",
+            "32": "icons/icon-32.png",
+            "48": "icons/icon-48.png",
+            "128": "icons/icon-128.png"
+        }
+    },
+    "icons": {
+        "16": "icons/icon-16.png",
+        "32": "icons/icon-32.png",
+        "48": "icons/icon-48.png",
+        "128": "icons/icon-128.png"
+    },
+    "options_page": "options/options.html",
+    "incognito": "not_allowed"
+}

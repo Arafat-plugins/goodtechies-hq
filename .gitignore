@@ -45,3 +45,7 @@ start-hq.log
 /android/app/build/
 *.jks
 *.keystore
+
+# Timer extension build output (apps/timer-extension/scripts/package.sh)
+/apps/timer-extension/dist/
+/.claude/dispatch/shots/

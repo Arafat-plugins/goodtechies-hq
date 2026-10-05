@@ -89,6 +89,9 @@ class TaskTimerController extends Controller
             $this->timer->heartbeat($entry);
         }
 
+        // Client doc 2026-10-05: a page of theirs is alive, so a closed-tab mark is cancelled.
+        app(\App\Services\AttendanceService::class)->stillHere($request->user()?->employee);
+
         return response()->json([
             'server_time' => Carbon::now()->toIso8601String(),
             'running' => $entry === null ? null : [

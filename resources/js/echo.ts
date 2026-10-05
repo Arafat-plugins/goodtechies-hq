@@ -272,3 +272,88 @@ export function joinPresence(channel: string, handlers: PresenceHandlers): () =>
         leave = null;
     };
 }
+
+/* ------------------------------------------------------------------ whispers (polish 023) */
+
+/** One end of a client-to-client event on a private channel ("whisper"). */
+export interface WhisperLink {
+    /** Send to everybody else subscribed to the channel. A no-op while the socket is not up. */
+    send: (event: string, data: Record<string, unknown>) => void;
+    /** Re-attach after the channel was left and joined again (a hidden tab, a reconnect). */
+    rearm: () => void;
+    stop: () => void;
+}
+
+interface WhisperChannel {
+    listenForWhisper: (event: string, callback: (data: unknown) => void) => unknown;
+    stopListeningForWhisper: (event: string, callback?: (data: unknown) => void) => unknown;
+    whisper: (event: string, data: unknown) => unknown;
+}
+
+/**
+ * Polish 023 (typing indicator): a whisper is relayed by Reverb from one subscriber of a private
+ * channel to the others WITHOUT touching PHP — no request, no queue job, no database — which is
+ * why it is the fast path for something as chatty as "is typing". Reverb only relays it from a
+ * connection that is subscribed (`accept_client_events_from: members`), and subscribing to
+ * `conversation.{id}` is the ConversationPolicy-backed auth callback, so only people who may read
+ * the conversation can say or hear anything on it.
+ *
+ * It does not LEAVE the channel when stopped: the thread's own subscription (`listenPrivate`)
+ * owns that. It only removes its listener, and `rearm()` binds again if the channel object was
+ * replaced in the meantime. On a polling build every call is a no-op.
+ */
+export function linkWhisper(channel: string, event: string, onWhisper: (data: unknown) => void): WhisperLink {
+    let stopped = false;
+    let client: EchoClient | null = null;
+    let bound: WhisperChannel | null = null;
+
+    const handler = (data: unknown): void => onWhisper(data);
+
+    const subscription = (): WhisperChannel | null =>
+        client === null ? null : (client.private(channel) as unknown as WhisperChannel);
+
+    const rearm = (): void => {
+        if (stopped || client === null) {
+            return;
+        }
+
+        const current = subscription();
+
+        if (current !== null && current !== bound) {
+            current.listenForWhisper(event, handler);
+            bound = current;
+        }
+    };
+
+    void echo().then((connection) => {
+        client = connection;
+        rearm();
+    });
+
+    return {
+        send(name, data) {
+            if (stopped || client === null || connectionState.value !== 'connected') {
+                return;
+            }
+
+            try {
+                rearm();
+                subscription()?.whisper(name, data);
+            } catch {
+                // Not subscribed yet, or the socket just dropped: a typing hint is not worth an error.
+            }
+        },
+        rearm,
+        stop() {
+            stopped = true;
+
+            try {
+                bound?.stopListeningForWhisper(event, handler);
+            } catch {
+                // Already gone with the channel.
+            }
+
+            bound = null;
+        },
+    };
+}

@@ -41,6 +41,9 @@ class TimerSweep
             }
 
             $this->timer->sweep();
+
+            // Client doc 2026-10-05: clock out whoever closed their last tab a minute ago.
+            app(AttendanceService::class)->clockOutLeft();
         } catch (Throwable $e) {
             report($e);
 

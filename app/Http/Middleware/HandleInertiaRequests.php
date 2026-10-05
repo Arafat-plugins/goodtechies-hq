@@ -158,6 +158,9 @@ class HandleInertiaRequests extends Middleware
             return null;
         }
 
+        // Client doc 2026-10-05: a page of theirs is loading, so a closed-tab mark is cancelled.
+        $attendance->stillHere($employee);
+
         return ['clocked_in' => $attendance->isClockedIn($employee)];
     }
 

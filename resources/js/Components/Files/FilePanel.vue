@@ -428,6 +428,14 @@ function choose(event: Event): void {
     serverError.value = null;
     failedToSend.value = false;
     pickedError.value = file === null ? null : rejectionFor(file);
+
+    // Client doc 2026-10-05 item 6: the task's "+" opened the picker and then waited for a
+    // second press on an Upload button further down, so picking a file looked like it did
+    // nothing. In the compact (task) panel a new file goes up the moment it is chosen; a new
+    // VERSION of an existing file keeps its explicit Upload, because that replaces something.
+    if (props.compact && file !== null && pickedError.value === null && target.value === 'new') {
+        upload();
+    }
 }
 
 function replace(file: FileSummary): void {

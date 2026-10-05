@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>e2e tone</title></head>
+<body>
+<p id="state">starting</p>
+<script>
+    // A 440 Hz oscillator into the speakers, started on load
+    // (Chromium runs with --autoplay-policy=no-user-gesture-required).
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    osc.frequency.value = 440;
+    osc.connect(ctx.destination);
+    osc.start();
+    ctx.resume().then(() => { document.getElementById('state').textContent = ctx.state; });
+    window.__ctx = ctx;
+</script>
+</body>
+</html>

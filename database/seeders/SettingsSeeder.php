@@ -23,6 +23,8 @@ class SettingsSeeder extends Seeder
         'notification_group_window_minutes' => 2,
         'idle_pause_minutes' => 5,
         'idle_flag_percent' => 25,
+        'idle_prompt_seconds' => 120,
+        'activity_retention_days' => 90,
         'backup_last_verified_at' => null,
     ];
 

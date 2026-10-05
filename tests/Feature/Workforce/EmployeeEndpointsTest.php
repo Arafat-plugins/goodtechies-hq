@@ -597,9 +597,13 @@ it('never deletes: no destroy route exists for an employee or a user', function 
         ->filter(fn (string $uri): bool => str_starts_with($uri, 'admin/employees') || str_contains($uri, 'users'))
         ->values();
 
-    // The one DELETE under `admin/employees` is a project-permission GRANT, which is a live
-    // privilege and not a person. Nothing can delete the employee or the user.
-    expect($destroys->all())->toBe(['admin/employees/{employee}/permissions/{grant}']);
+    // The two DELETEs under `admin/employees` are a project-permission GRANT and a paired
+    // timer-extension DEVICE (Phase 11) — both live privileges, neither a person. Nothing can
+    // delete the employee or the user.
+    expect($destroys->all())->toBe([
+        'admin/employees/{employee}/permissions/{grant}',
+        'admin/employees/{employee}/extension-devices/{device}',
+    ]);
 });
 
 it('reactivates without restoring the sessions it ended', function (): void {

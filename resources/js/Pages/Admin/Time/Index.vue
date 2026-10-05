@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
+import { Head, Link } from '@inertiajs/vue3';
 import { CircleCheck, FolderKanban, Inbox, ListChecks, Users } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import DateStepper from '@/Components/DateStepper.vue';
@@ -14,6 +14,7 @@ import type { WorkingNowRow } from '@/Components/Timer/taskTimer';
 import { workingNowPing } from '@/Components/Timer/taskTimer';
 import WorkingNowPanel from '@/Components/Timer/WorkingNowPanel.vue';
 import EmptyState from '@/Components/EmptyState.vue';
+import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import { ATTENDANCE_POLL_MS } from '@/Components/Realtime/live';
 import { useLiveProps, useLiveTaskProps } from '@/Components/Realtime/reload';
@@ -114,6 +115,12 @@ useLiveTaskProps(['working_now'], { accept: workingNowPing });
         :description="`${date.label} · week of ${week.label}`"
         :breadcrumb="[{ label: 'Workforce' }, { label: 'Time' }]"
     >
+        <template #actions>
+            <Button as-child variant="outline">
+                <Link href="/admin/time/activity">Activity</Link>
+            </Button>
+        </template>
+
         <!-- Polish 007: the day (with its month) between the arrows, at the start of the page. -->
         <DateStepper
             :label="`${date.label} · week of ${week.label}`"

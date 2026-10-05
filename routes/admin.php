@@ -1,11 +1,13 @@
 <?php
 
+use App\Http\Controllers\Admin\ActivityController;
 use App\Http\Controllers\Admin\AttendanceController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\ClientFileController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\EmployeeController;
+use App\Http\Controllers\Admin\EmployeeExtensionDeviceController;
 use App\Http\Controllers\Admin\FileController;
 use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\LeaveBalanceController;
@@ -437,6 +439,12 @@ Route::prefix('admin')
                 ->whereNumber('employee')
                 ->whereNumber('grant')
                 ->name('permissions.destroy');
+
+            // Phase 11: disconnect one of this person's timer extensions.
+            Route::delete('/{employee}/extension-devices/{device}', [EmployeeExtensionDeviceController::class, 'destroy'])
+                ->whereNumber('employee')
+                ->whereNumber('device')
+                ->name('extension-devices.destroy');
         })->middleware('can:'.Permission::RolesManage->value);
 
         // Admin → Workforce → Work Schedule. The working week is per employee and editable,
@@ -469,6 +477,7 @@ Route::prefix('admin')
         // has already refused every other shell before either is asked.
         Route::prefix('time')->name('time.')->group(function () {
             Route::get('/', [TimeController::class, 'index'])->name('index');
+            Route::get('/activity/{employee?}', [ActivityController::class, 'show'])->whereNumber('employee')->name('activity');
             Route::post('/entries/{timeEntry}/approve', [TimeController::class, 'approve'])->name('approve');
             Route::post('/entries/{timeEntry}/reject', [TimeController::class, 'reject'])->name('reject');
         });

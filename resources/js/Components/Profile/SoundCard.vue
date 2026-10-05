@@ -17,7 +17,7 @@ import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
 import { Label } from '@/Components/ui/label';
 import { Switch } from '@/Components/ui/switch';
-import { playChime, readSoundEnabled, writeSoundEnabled } from '@/lib/sound';
+import { playNotification, readSoundEnabled, writeSoundEnabled } from '@/lib/sound';
 
 const page = usePage();
 const uid = useId();
@@ -51,11 +51,11 @@ const enabled = computed<boolean>({
                     <span class="min-w-0 text-sm">{{ enabled ? 'On' : 'Off' }}</span>
                 </div>
                 <p :id="hintId" class="text-xs text-muted-foreground">
-                    On by default. Plays a short chime when something new arrives while goodERP is open. Saved on this device.
+                    On by default. Plays a sound when something new arrives while goodERP is open. Saved on this device.
                 </p>
             </div>
             <div>
-                <Button type="button" variant="outline" @click="playChime()">
+                <Button type="button" variant="outline" @click="playNotification()">
                     <Volume2 aria-hidden="true" />
                     Play a test sound
                 </Button>

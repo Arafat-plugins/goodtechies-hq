@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
+import { Head, Link } from '@inertiajs/vue3';
 import { Flag, Pencil, Plus, Timer as TimerIcon } from '@lucide/vue';
 import { onMounted, ref, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
@@ -93,6 +93,9 @@ useLiveProps(['timer', 'days', 'flagged_count'], { intervalMs: ATTENDANCE_POLL_M
                 <Button type="button" variant="outline" @click="addByHand">
                     <Plus aria-hidden="true" />
                     Add time by hand
+                </Button>
+                <Button as-child variant="outline">
+                    <Link href="/employee/time/activity">My activity</Link>
                 </Button>
             </template>
 

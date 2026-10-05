@@ -176,13 +176,60 @@ function onBeforeUnload(event: BeforeUnloadEvent): void {
     event.returnValue = '';
 
     if (askAboutClock.value) {
-        // Runs only if the page survived the prompt — the person chose to stay.
-        setTimeout(() => openClockOutDialog(), 0);
+        offerClockOutIfStaying();
     }
 }
 
+/**
+ * Polish 019: the clock-out dialog is for somebody who pressed *Stay* on the browser's box.
+ *
+ * It used to open on a 0 ms timer — which also fires when the person pressed *Reload* or
+ * *Leave*, because the old page stays on screen until the new one arrives, so the dialog
+ * flashed up on every reload. Nothing tells a page which button was pressed, so it waits for
+ * proof that the page is still in use: the person's next click or key on it (or 8 s passing
+ * with the page still here). A `pagehide` — the page really going — cancels it.
+ */
+let pendingOffer: (() => void) | null = null;
+
+function offerClockOutIfStaying(): void {
+    pendingOffer?.();
+
+    const armedAt = Date.now();
+    const onUse = (): void => {
+        if (Date.now() - armedAt >= 300) {
+            done();
+            openClockOutDialog();
+        }
+    };
+    const fallback = setTimeout(() => {
+        done();
+        openClockOutDialog();
+    }, 8000);
+    const done = (): void => {
+        clearTimeout(fallback);
+        window.removeEventListener('pointerdown', onUse, true);
+        window.removeEventListener('keydown', onUse, true);
+        window.removeEventListener('pagehide', done);
+        pendingOffer = null;
+    };
+
+    window.addEventListener('pointerdown', onUse, true);
+    window.addEventListener('keydown', onUse, true);
+    window.addEventListener('pagehide', done);
+    pendingOffer = done;
+}
+
+/**
+ * Client doc 2026-10-05 item 1: closing the last goodERP tab while clocked in clocks out. The
+ * beacon only marks the moment; the server clocks out AT it a minute later unless a page of
+ * this person's comes back (a reload does, at once). "Leave Without Clocking Out" opts out.
+ */
+const ATTENDANCE_LEAVING_URL = '/attendance/leaving';
+
 function onPageHide(): void {
-    if (!anyRunning.value || typeof navigator.sendBeacon !== 'function' || isInAppNavigation()) {
+    const clockOutOnClose = clockedIn.value && !leaveAllowed.value;
+
+    if ((!anyRunning.value && !clockOutOnClose) || typeof navigator.sendBeacon !== 'function' || isInAppNavigation()) {
         return;
     }
 
@@ -191,7 +238,11 @@ function onPageHide(): void {
         return;
     }
 
-    const urls = [...(taskTimerOpen.value ? [taskTimerRoutes.leaving] : []), ...(remoteTimerRunning.value ? [timerRoutes.leaving] : [])];
+    const urls = [
+        ...(taskTimerOpen.value ? [taskTimerRoutes.leaving] : []),
+        ...(remoteTimerRunning.value ? [timerRoutes.leaving] : []),
+        ...(clockOutOnClose ? [ATTENDANCE_LEAVING_URL] : []),
+    ];
 
     for (const url of urls) {
         const data = new FormData();

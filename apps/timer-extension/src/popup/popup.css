@@ -1,0 +1,189 @@
+/* popup.css — the toolbar popup: fixed 320 px wide, natural height up to 560 px, no scrollbar. */
+
+.popup {
+    max-height: 560px;
+    padding: var(--s-3) var(--s-3) var(--s-2);
+}
+
+.popup > * + * {
+    margin-top: var(--s-2);
+}
+
+.popup .stack > * + * {
+    margin-top: var(--s-2);
+}
+
+.popup input,
+.popup select,
+.popup button:not(.link) {
+    min-height: 32px;
+    padding-top: var(--s-1);
+    padding-bottom: var(--s-1);
+}
+
+.popup label {
+    margin-bottom: 2px;
+}
+
+.bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2);
+}
+
+.brand {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+h2 {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-1);
+    padding: 2px var(--s-2);
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.chip::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+}
+
+.chip[data-state="running"]::before {
+    background: var(--primary);
+}
+
+.disclosure {
+    padding: var(--s-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.disclosure-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2);
+    margin-bottom: var(--s-1);
+}
+
+.disclosure h2 {
+    font-size: 13px;
+}
+
+.popup button.small {
+    min-height: 24px;
+    padding: 2px var(--s-2);
+    font-size: 12px;
+}
+
+.full {
+    width: 100%;
+}
+
+.code {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+}
+
+details {
+    font-size: 13px;
+}
+
+summary {
+    cursor: pointer;
+    color: var(--primary);
+    font-weight: 600;
+}
+
+details p {
+    margin-top: var(--s-1);
+}
+
+.task-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.counter {
+    font-size: 36px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+}
+
+.row {
+    display: flex;
+    gap: var(--s-2);
+}
+
+.row > button {
+    flex: 1 1 0;
+}
+
+.today {
+    font-size: 13px;
+}
+
+.left-line {
+    font-weight: 600;
+}
+
+.meeting-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2);
+    padding: var(--s-2) var(--s-3);
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-weight: 600;
+}
+
+.foot {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: var(--s-2);
+    border-top: 1px solid var(--border);
+}
+
+.foot .link {
+    display: inline-flex;
+    gap: var(--s-1);
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.foot .link span {
+    text-decoration: underline;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

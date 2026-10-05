@@ -3,7 +3,7 @@ import { Link } from '@inertiajs/vue3';
 import { ArrowRight, Timer } from '@lucide/vue';
 import { computed } from 'vue';
 import { formatDuration, timerRoutes, useTimer } from '@/Components/Timer/timer';
-import { Button } from '@/Components/ui/button';
+import TimerControls from '@/Components/Timer/TimerControls.vue';
 import { Card } from '@/Components/ui/card';
 
 /**
@@ -12,10 +12,12 @@ import { Card } from '@/Components/ui/card';
  * Decision 0.5-5 made the timer this page's hero, and until Phase 4 this card was a disabled
  * button reading "Arrives in Phase 4". It is not a placeholder any more.
  *
- * **It carries no controls.** `TimerBar` is on every page of this shell and owns start, pause
- * and stop; a second set of buttons here would be a second thing to keep in step with the
- * running session, and the two would disagree the first time one of them missed a replay.
- * This card answers "how am I doing today" and links to the page that answers "on what".
+ * **It carries the same controls as `TimerBar`, not a second timer** (decision 11-03). The
+ * client asked for the buttons on the dashboard card itself; both the card and the bar mount
+ * the one `TimerControls` over the one `useTimer()` store, so they cannot disagree — a start
+ * here is the start the bar shows, and the "left today" line below the figure ticks from the
+ * same elapsed value. This card answers "how am I doing today" and links to the page that
+ * answers "on what".
  *
  * The figures are the server's. `counted` is what `approved_at is not null` says; `pending` is
  * the rest — recorded, not yet counted, because `manual_time_requires_approval` is on. Showing
@@ -39,6 +41,11 @@ const total = computed(
 const targetLabel = computed(() =>
     props.targetSeconds === null ? null : formatDuration(props.targetSeconds),
 );
+
+/** What is left of the day's target, from the same `total` — so it ticks with the figure above. */
+const leftSeconds = computed(() =>
+    props.targetSeconds === null ? null : Math.max(0, props.targetSeconds - total.value),
+);
 </script>
 
 <template>
@@ -56,6 +63,11 @@ const targetLabel = computed(() =>
                 </span>
             </p>
 
+            <p v-if="leftSeconds !== null" class="text-sm tabular-nums text-muted-foreground">
+                <template v-if="leftSeconds > 0">{{ formatDuration(leftSeconds) }} left today</template>
+                <template v-else>Target reached</template>
+            </p>
+
             <!--
                 Said in words rather than shown as a tint: hours waiting on an approval are not
                 a lesser kind of hour, they are hours nobody has signed off yet, and that
@@ -66,13 +78,15 @@ const targetLabel = computed(() =>
             </p>
         </div>
 
-        <div class="shrink-0">
-            <Button as-child variant="outline">
-                <Link :href="timerRoutes.index">
-                    My time
-                    <ArrowRight aria-hidden="true" />
-                </Link>
-            </Button>
+        <div class="flex min-w-0 flex-col gap-2 sm:items-end">
+            <TimerControls variant="bar" :tasks="timer.tasks.value" />
+            <Link
+                :href="timerRoutes.index"
+                class="inline-flex items-center gap-1 rounded-sm text-sm font-medium text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring"
+            >
+                My time
+                <ArrowRight class="size-4" aria-hidden="true" />
+            </Link>
         </div>
     </Card>
 </template>

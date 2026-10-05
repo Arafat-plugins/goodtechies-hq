@@ -19,6 +19,9 @@ class PresenceController extends Controller
         /** @var User $user */
         $user = $request->user();
 
+        // Client doc 2026-10-05: a page of theirs is alive, so a closed-tab mark is cancelled.
+        app(\App\Services\AttendanceService::class)->stillHere($user->employee);
+
         if ($user->last_seen_at === null || $user->last_seen_at->lt(now()->subSeconds(30))) {
             $user->forceFill(['last_seen_at' => now()])->saveQuietly();
         }

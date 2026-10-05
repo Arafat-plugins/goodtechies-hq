@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
 import { computed, nextTick, ref, watch } from 'vue';
+import EstimateInput from '@/Components/Tasks/EstimateInput.vue';
 import type { TaskNamedRef, TaskOption } from '@/Components/Tasks/TaskList.vue';
 import { BIRTH_STATUSES } from '@/Components/Tasks/taskBoard';
 import { focusField } from '@/Components/Tasks/taskDetail';
@@ -68,7 +69,7 @@ const form = useForm<{
     priority: string;
     start_date: string;
     due_date: string;
-    estimated_minutes: string;
+    estimated_minutes: number | null;
     assignee_ids: number[];
     primary_assignee_id: string;
 }>({
@@ -79,7 +80,7 @@ const form = useForm<{
     priority: DEFAULT_PRIORITY,
     start_date: '',
     due_date: '',
-    estimated_minutes: '',
+    estimated_minutes: null,
     assignee_ids: [],
     primary_assignee_id: '',
 });
@@ -169,8 +170,7 @@ function submit(): void {
             priority: data.priority,
             start_date: data.start_date === '' ? null : data.start_date,
             due_date: data.due_date === '' ? null : data.due_date,
-            estimated_minutes:
-                data.estimated_minutes.trim() === '' ? null : Number(data.estimated_minutes),
+            estimated_minutes: data.estimated_minutes,
             assignee_ids: data.assignee_ids,
             primary_assignee_id:
                 data.primary_assignee_id === '' ? null : Number(data.primary_assignee_id),
@@ -338,12 +338,10 @@ function submit(): void {
                             </div>
 
                             <div class="flex min-w-0 flex-col gap-2">
-                                <Label for="quick-task-estimate">Estimate (minutes)</Label>
-                                <Input
+                                <Label for="quick-task-estimate">Estimate</Label>
+                                <EstimateInput
                                     id="quick-task-estimate"
                                     v-model="form.estimated_minutes"
-                                    type="number"
-                                    min="0"
                                     :disabled="form.processing"
                                 />
                                 <p v-if="form.errors.estimated_minutes" class="text-xs text-destructive">

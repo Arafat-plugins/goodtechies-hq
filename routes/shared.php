@@ -17,9 +17,10 @@ use App\Http\Controllers\Shared\PayrollController;
 use App\Http\Controllers\Shared\PayslipController;
 use App\Http\Controllers\Shared\PresenceController;
 use App\Http\Controllers\Shared\ProfileController;
+use App\Http\Controllers\Shared\ProfileExtensionController;
 use App\Http\Controllers\Shared\ProfilePasswordController;
-use App\Http\Controllers\Shared\ProfileThemeController;
 use App\Http\Controllers\Shared\ProfileSessionController;
+use App\Http\Controllers\Shared\ProfileThemeController;
 use App\Http\Controllers\Shared\ProfileTwoFactorController;
 use App\Http\Controllers\Shared\PushSubscriptionController;
 use App\Http\Controllers\Shared\SalaryController;
@@ -85,6 +86,13 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
     // {session} is the raw session id, not a bound model.
     Route::delete('/profile/sessions/{session}', [ProfileSessionController::class, 'destroy'])
         ->name('profile.sessions.destroy');
+
+    // Timer extension pairing (Phase 11, docs/extension-api.md §2). Remote timer users only.
+    Route::post('/profile/extension/code', [ProfileExtensionController::class, 'code'])
+        ->name('profile.extension.code');
+    Route::delete('/profile/extension/devices/{device}', [ProfileExtensionController::class, 'destroyDevice'])
+        ->whereNumber('device')
+        ->name('profile.extension.devices.destroy');
 
     // Push notifications on this device (Profile). JSON for the two subscription calls, because
     // the browser's PushManager — not a form — produces what is posted.
@@ -227,6 +235,10 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
                 ->middleware('throttle:posting')
                 ->whereNumber(['conversation', 'user'])
                 ->name('groups.members.remove');
+            Route::delete('/groups/{conversation}', [GroupController::class, 'destroy'])
+                ->middleware('throttle:posting')
+                ->whereNumber('conversation')
+                ->name('groups.destroy');
             Route::get('/groups/{conversation}/avatar', [GroupController::class, 'avatar'])
                 ->whereNumber('conversation')
                 ->name('groups.avatar');
@@ -268,6 +280,8 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
         ->name('attendance.show');
     Route::post('/attendance/clock-in', [AttendanceController::class, 'clockIn'])->name('attendance.clock-in');
     Route::post('/attendance/clock-out', [AttendanceController::class, 'clockOut'])->name('attendance.clock-out');
+    // Client doc 2026-10-05 item 1: the last tab's pagehide beacon (see AttendanceController::leaving).
+    Route::post('/attendance/leaving', [AttendanceController::class, 'leaving'])->name('attendance.leaving');
 
     // The task timer for everyone who works tasks (flow F3, decision 12-73): ▶ on a board card
     // or in the drawer, then ⏸ / resume / ⏹ on whatever is open. Shared for the clock's reason —

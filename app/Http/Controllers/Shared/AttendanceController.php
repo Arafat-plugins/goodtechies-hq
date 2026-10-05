@@ -13,6 +13,7 @@ use App\Support\AttendanceStatus;
 use Closure;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
@@ -143,6 +144,27 @@ class AttendanceController extends Controller
     public function clockOut(Request $request): RedirectResponse
     {
         return $this->clock($request, fn (Employee $employee): AttendanceRecord => $this->attendance->clockOut($employee));
+    }
+
+    /**
+     * Client doc 2026-10-05 item 1: the `pagehide` beacon from the last goodERP tab of somebody
+     * clocked in. It only marks the moment; `AttendanceService::clockOutLeft()` clocks out AT it
+     * once a minute has passed with no page of theirs alive (a reload cancels it at once). The
+     * beacon carries the CSRF token as `_token` — `sendBeacon` cannot set headers.
+     */
+    public function leaving(Request $request): HttpResponse
+    {
+        $employee = $request->user()?->employee;
+
+        if ($employee === null) {
+            throw new NotFoundHttpException;
+        }
+
+        Gate::authorize('clock', [AttendanceRecord::class, $employee]);
+
+        $this->attendance->markLeaving($employee);
+
+        return response()->noContent();
     }
 
     /**

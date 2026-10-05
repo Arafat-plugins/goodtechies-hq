@@ -75,6 +75,19 @@ class GroupController extends Controller
     }
 
     /**
+     * Client doc 2026-10-05 item 8: delete the group, for a holder of `messages.manage`.
+     */
+    public function destroy(GroupMembersRequest $request, Conversation $conversation): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+
+        $this->groups->delete($actor, $this->visibleGroup($request, $conversation));
+
+        return response()->json(['deleted' => true]);
+    }
+
+    /**
      * The group's picture, for its members only. 404 when there is none.
      */
     public function avatar(Request $request, Conversation $conversation): StreamedResponse

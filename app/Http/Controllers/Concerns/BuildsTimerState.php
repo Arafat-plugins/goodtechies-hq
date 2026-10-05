@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Concerns;
 
 use App\Http\Resources\TimeEntryResource;
+use App\Models\ActivitySample;
 use App\Models\Employee;
 use App\Models\Task;
 use App\Models\TimeEntry;
@@ -41,6 +42,13 @@ trait BuildsTimerState
         $running = $timer->current($employee);
         $today = Carbon::today();
 
+        $lastSample = $running === null
+            ? null
+            : ActivitySample::query()
+                ->where('time_entry_id', $running->getKey())
+                ->orderByDesc('minute_at')
+                ->first(['minute_at', 'source']);
+
         return [
             'server_time' => Carbon::now()->toIso8601String(),
 
@@ -66,6 +74,20 @@ trait BuildsTimerState
             // told "your timer stops after 5 minutes offline" is not surprised by a flag.
             'heartbeat_timeout_minutes' => (int) $settings->get('heartbeat_timeout_minutes'),
             'manual_time_requires_approval' => (bool) $settings->get('manual_time_requires_approval'),
+
+            // Phase 11 (docs/extension-api.md §4): what the extension's idle prompt needs, and
+            // whether the server has already auto-paused the running entry.
+            'activity' => [
+                'idle_prompt_seconds' => (int) $settings->get('idle_prompt_seconds'),
+                'idle_pause_minutes' => (int) $settings->get('idle_pause_minutes'),
+                'meeting_default_minutes' => 60,
+                'pending_idle' => $running?->idle_pending_from === null ? null : [
+                    'idle_from' => $running->idle_pending_from->toIso8601String(),
+                    'auto_paused_at' => $running->idle_auto_paused_at?->toIso8601String(),
+                ],
+                'last_sample_minute' => $lastSample?->minute_at?->toIso8601String(),
+                'last_sample_source' => $lastSample?->source,
+            ],
         ];
     }
 

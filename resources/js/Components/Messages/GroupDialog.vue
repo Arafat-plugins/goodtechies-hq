@@ -64,6 +64,8 @@ const selected = ref<number[]>([]);
 const filter = ref('');
 const busy = ref(false);
 const confirmingRemoval = ref<number | null>(null);
+/** Client doc 2026-10-05 item 8: the second press that actually deletes the group. */
+const confirmingDelete = ref(false);
 const members = ref<{ id: number; name: string }[]>([]);
 const status = ref('');
 
@@ -124,6 +126,7 @@ function reset(): void {
 watch(open, (isOpen) => {
     if (isOpen) {
         reset();
+        confirmingDelete.value = false;
     } else {
         setPreview(null);
     }
@@ -340,6 +343,24 @@ function removeMember(member: { id: number; name: string }): void {
     );
 }
 
+/** Delete the whole group (DELETE /messages/groups/{id}), then back to the inbox. */
+function deleteGroup(): void {
+    const group = props.group;
+
+    if (group === null) {
+        return;
+    }
+
+    void run(
+        () => messageRequest('DELETE', `/messages/groups/${group.id}`, null),
+        () => {
+            confirmingDelete.value = false;
+            open.value = false;
+            router.visit('/messages', { preserveScroll: false });
+        },
+    );
+}
+
 function submit(): void {
     if (editing.value) {
         saveDetails();
@@ -534,10 +555,35 @@ function submit(): void {
                 </div>
 
                 <DialogFooter class="border-t p-4">
-                    <Button type="button" variant="outline" @click="open = false">
+                    <div
+                        v-if="editing"
+                        :class="confirmingDelete ? 'flex w-full min-w-0 flex-wrap items-center justify-end gap-2' : 'mr-auto flex min-w-0 items-center'"
+                    >
+                        <Button
+                            v-if="!confirmingDelete"
+                            type="button"
+                            variant="ghost"
+                            class="text-destructive hover:text-destructive"
+                            :disabled="busy"
+                            @click="confirmingDelete = true"
+                        >
+                            <Trash2 aria-hidden="true" />
+                            Delete group
+                        </Button>
+                        <template v-else>
+                            <span class="mr-auto min-w-0 text-sm text-destructive">Delete the group and all its messages?</span>
+                            <Button type="button" variant="destructive" size="sm" :disabled="busy" @click="deleteGroup">
+                                Delete
+                            </Button>
+                            <Button type="button" variant="ghost" size="sm" :disabled="busy" @click="confirmingDelete = false">
+                                Keep
+                            </Button>
+                        </template>
+                    </div>
+                    <Button v-if="!confirmingDelete" type="button" variant="outline" @click="open = false">
                         {{ editing ? 'Close' : 'Cancel' }}
                     </Button>
-                    <Button type="submit" :disabled="busy">
+                    <Button v-if="!confirmingDelete" type="submit" :disabled="busy">
                         {{ editing ? 'Save' : 'Create group' }}
                     </Button>
                 </DialogFooter>

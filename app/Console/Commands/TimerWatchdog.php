@@ -42,6 +42,13 @@ class TimerWatchdog extends Command
         $stopped = $timer->stopAbandoned();
         $paused = $timer->pauseOverlongSessions();
 
+        // Client doc 2026-10-05: clock out whoever closed their last goodERP tab.
+        $clockedOut = app(\App\Services\AttendanceService::class)->clockOutLeft();
+
+        if ($clockedOut !== []) {
+            $this->info(sprintf('%d clocked out after closing their last tab.', count($clockedOut)));
+        }
+
         if ($stopped === [] && $paused === []) {
             $this->info('No timers needed attention.');
 

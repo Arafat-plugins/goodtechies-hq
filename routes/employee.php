@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Employee\ActivityController;
 use App\Http\Controllers\Employee\DashboardController;
 use App\Http\Controllers\Employee\FileController;
 use App\Http\Controllers\Employee\MyTaskController;
@@ -99,6 +100,7 @@ Route::prefix('employee')
         // same thing, and a chance to name somebody else's.
         Route::prefix('time')->name('time.')->group(function () {
             Route::get('/', [TimeController::class, 'index'])->name('index');
+            Route::get('/activity', [ActivityController::class, 'index'])->name('activity');
 
             // JSON, polled by the persistent bar beside whatever page the person is on. An
             // Inertia visit would re-render that page every minute.

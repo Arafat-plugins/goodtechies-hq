@@ -7,6 +7,7 @@ use App\Http\Requests\Employees\StoreEmployeeRequest;
 use App\Http\Requests\Employees\UpdateEmployeeRoleRequest;
 use App\Http\Requests\Employees\UpdateEmployeeTrackingModeRequest;
 use App\Http\Resources\EmployeeResource;
+use App\Models\Device;
 use App\Models\Employee;
 use App\Models\Project;
 use App\Models\User;
@@ -218,6 +219,20 @@ class EmployeeController extends Controller
             // Request would then refuse. MANAGER is not in `roleOptions()` (Part C §1).
             'roleOptions' => $mayChangeRole ? $this->roleOptions() : null,
             'trackingModeOptions' => $mayChangeTracking ? $this->trackingModeOptions() : null,
+            // Phase 11: the person's connected timer extensions, with a revoke per row. Null — no
+            // card — unless they are on the remote timer and the requester may revoke, which is
+            // the same check the revoke route makes (`EmployeePolicy::deactivate`).
+            'extensionDevices' => $subject->tracking_mode === TrackingMode::RemoteTimer
+                && $user !== null && Gate::forUser($user)->allows('deactivate', $subject)
+                ? $subject->user->devices()->active()->get()
+                    ->map(fn (Device $d): array => [
+                        'id' => $d->id,
+                        'name' => $d->name,
+                        'paired_at' => $d->paired_at?->toIso8601String(),
+                        'last_seen_at' => $d->last_seen_at?->toIso8601String(),
+                    ])
+                    ->values()
+                : null,
             // Present on exactly one response in the life of an account: the redirect after
             // `store()`. Absent on every ordinary visit, absent on a reload, and absent for a
             // second Admin looking at the same record at the same moment — it is flash data

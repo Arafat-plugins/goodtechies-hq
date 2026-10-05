@@ -70,3 +70,7 @@ Schedule::command('backup:clean')->dailyAt('01:30')->withoutOverlapping();
 Schedule::command('backup:run --only-db')->dailyAt('02:00')->withoutOverlapping();
 Schedule::command('backup:monitor')->dailyAt('03:00')->withoutOverlapping();
 Schedule::command('hq:verify-backup')->weeklyOn(0, '04:00')->withoutOverlapping();
+
+// Phase 11 (docs/extension-api.md §8): per-minute activity rows past `activity_retention_days`
+// go; the rollup columns on `time_entries` stay.
+Schedule::command('hq:prune-activity')->dailyAt('03:30')->withoutOverlapping();

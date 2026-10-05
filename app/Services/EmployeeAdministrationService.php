@@ -490,6 +490,8 @@ class EmployeeAdministrationService
             $user->setRememberToken(Str::random(60));
             $user->save();
 
+            app(ExtensionPairingService::class)->revokeAllFor($user, $actor);
+
             $this->audit->record(
                 AuditEvent::EmployeeDeactivated,
                 $employee,
