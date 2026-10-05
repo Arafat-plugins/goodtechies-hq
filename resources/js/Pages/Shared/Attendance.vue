@@ -12,9 +12,9 @@ import type {
     AttendanceStatusOption,
     AttendanceSummaryRow,
 } from '@/Components/Attendance/attendance';
-import { attendanceRoutes } from '@/Components/Attendance/attendance';
+import { attendanceRoutes, attendanceStatusIcon } from '@/Components/Attendance/attendance';
+import CountChip from '@/Components/CountChip.vue';
 import PageShell from '@/Components/PageShell.vue';
-import StatusBadge from '@/Components/StatusBadge.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import { ATTENDANCE_POLL_MS } from '@/Components/Realtime/live';
@@ -173,11 +173,12 @@ useLiveProps(['today', 'days', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
             <!-- Counts of days per status. A count, never a rating. -->
             <ul v-if="summary.length" class="flex flex-wrap gap-2">
                 <li v-for="row in summary" :key="row.key">
-                    <StatusBadge
+                    <CountChip
                         v-if="row.tone"
                         :status="row.tone"
-                        :label="`${row.label}: ${row.count}`"
-                        size="sm"
+                        :label="row.label"
+                        :count="row.count"
+                        :icon="attendanceStatusIcon(row.key)"
                     />
                 </li>
             </ul>

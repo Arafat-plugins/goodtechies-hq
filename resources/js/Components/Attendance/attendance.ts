@@ -1,3 +1,5 @@
+import { CalendarDays, Clock, Hourglass, House, Moon, Plane, User, UserX } from '@lucide/vue';
+import type { Component } from 'vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 
 /**
@@ -118,6 +120,22 @@ export interface AttendanceStatusOption {
     value: AttendanceStatusKey;
     label: string;
     tone: StatusKey;
+}
+
+/** The icon each status carries on its count chip (polish 015). An icon, never a colour. */
+export const ATTENDANCE_STATUS_ICON: Record<AttendanceStatusKey, Component> = {
+    present: User,
+    late: Clock,
+    half_day: Hourglass,
+    absent: UserX,
+    leave: Plane,
+    holiday: CalendarDays,
+    remote: House,
+    off_day: Moon,
+};
+
+export function attendanceStatusIcon(key: string): Component | undefined {
+    return (ATTENDANCE_STATUS_ICON as Record<string, Component>)[key];
 }
 
 export interface AttendanceSummaryRow {

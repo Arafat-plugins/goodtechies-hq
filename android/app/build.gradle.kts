@@ -20,8 +20,8 @@ android {
         minSdk = 23
         targetSdk = 35
         // Bump BOTH for every new APK (only needed when the shell itself changes — see README).
-        versionCode = 5
-        versionName = "1.0.4"
+        versionCode = 6
+        versionName = "1.0.5"
     }
 
     signingConfigs {

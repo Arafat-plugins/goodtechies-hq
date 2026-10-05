@@ -114,7 +114,7 @@ class ContentSecurityPolicy
      * between an edit to that script and a theme that stops applying before first paint with
      * nothing but a console message to say so.
      */
-    public const THEME_SCRIPT_HASH = 'sha256-n4DYsrYMv9q7eOMa/jk0I9mO4OL5S/RlQhCKHd/WPdA=';
+    public const THEME_SCRIPT_HASH = 'sha256-23n0ZlX2HsArnvsj8hhmNTee7fndsT6DlE+ybPDRpps=';
 
     /** Where the Inter webfont and its stylesheet come from. */
     private const FONT_ORIGIN = 'https://fonts.bunny.net';

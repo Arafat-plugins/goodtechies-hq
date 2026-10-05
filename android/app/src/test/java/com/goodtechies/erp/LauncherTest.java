@@ -213,4 +213,39 @@ public class LauncherTest {
             a.recycle();
         }
     }
+
+    /** The WebView screen's theme, read the way WebView reads it for prefers-color-scheme. */
+    private static boolean webViewThemeIsLight() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        ActivityInfo info = context.getPackageManager().getActivityInfo(
+                new ComponentName(context, WebViewFallbackActivity.class), 0);
+        android.content.res.TypedArray a = context.getTheme().obtainStyledAttributes(
+                info.theme, new int[] {android.R.attr.isLightTheme});
+        try {
+            return a.getBoolean(0, true);
+        } finally {
+            a.recycle();
+        }
+    }
+
+    @Test
+    @Config(sdk = 34, qualifiers = "night")
+    public void theWebViewScreenIsDarkWhenThePhoneIsInDarkMode() throws Exception {
+        // Chrome already follows the phone; the WebView must too, or the site flips theme
+        // depending on which of the two opened it (the client: dark, then light, then dark).
+        assertTrue("the WebView screen tells the site 'light' on a phone in dark mode", !webViewThemeIsLight());
+    }
+
+    @Test
+    @Config(sdk = 34, qualifiers = "notnight")
+    public void theWebViewScreenIsLightWhenThePhoneIsInLightMode() throws Exception {
+        assertTrue("the WebView screen tells the site 'dark' on a phone in light mode", webViewThemeIsLight());
+    }
+
+    @Test
+    @Config(sdk = 35, qualifiers = "night")
+    public void onAndroid15TheWebViewScreenFollowsDarkModeAndStaysBelowTheStatusBar() throws Exception {
+        assertTrue(!webViewThemeIsLight());
+        theWebViewScreenStaysBelowTheStatusBarOnAndroid15();
+    }
 }

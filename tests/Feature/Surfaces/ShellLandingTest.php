@@ -160,6 +160,8 @@ it('shares only the documented auth.user keys', function () {
                 // carry no timer at all rather than a disabled one. The screens read this and
                 // never a role; see HandleInertiaRequests.
                 'canTrackTime' => false,
+                // 2026-10-05: Light / Dark / System on the account; null until chosen once.
+                'theme' => null,
             ])
             ->where('greetingName', 'Shahadat')
             ->where('app.name', config('app.name'))
@@ -167,7 +169,7 @@ it('shares only the documented auth.user keys', function () {
             ->where('flash.error', null));
 
     expect(array_keys($response->inertiaProps('auth.user')))
-        ->toBe(['id', 'name', 'email', 'role', 'surface', 'trackingMode', 'twoFactorEnabled', 'canTrackTime']);
+        ->toBe(['id', 'name', 'email', 'role', 'surface', 'trackingMode', 'twoFactorEnabled', 'canTrackTime', 'theme']);
     assertNoSecretsInPayload($response);
 })->group('phase0');
 

@@ -840,7 +840,7 @@ class AttendanceService
      * say who is doing well (Part H §1).
      *
      * @param  Collection<int, array<string, mixed>>  $rows
-     * @return list<array{key: string, label: string, count: int}>
+     * @return list<array{key: string, label: string, tone: string, count: int}>
      */
     public function rosterSummary(Collection $rows): array
     {
@@ -849,6 +849,7 @@ class AttendanceService
         return array_map(fn (AttendanceStatus $status): array => [
             'key' => $status->value,
             'label' => $status->label(),
+            'tone' => $status->tone(),
             'count' => (int) $counts->get($status->value, 0),
         ], AttendanceStatus::cases());
     }

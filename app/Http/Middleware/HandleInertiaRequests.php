@@ -280,7 +280,7 @@ class HandleInertiaRequests extends Middleware
     /**
      * The only user fields every page receives. Secrets and hashes never go here.
      *
-     * @return array{id: int, name: string, email: string, role: string|null, surface: string|null, trackingMode: string|null, twoFactorEnabled: bool, canTrackTime: bool}|null
+     * @return array{id: int, name: string, email: string, role: string|null, surface: string|null, trackingMode: string|null, twoFactorEnabled: bool, canTrackTime: bool, theme: string|null}|null
      */
     private function sharedUser(Request $request): ?array
     {
@@ -307,6 +307,9 @@ class HandleInertiaRequests extends Middleware
             // component is a second copy of the rule, and the copy is the one nobody updates.
             // An office employee therefore gets no timer UI at all, not a disabled one.
             'canTrackTime' => Gate::forUser($user)->allows('track', TimeEntry::class),
+            // 2026-10-05: Light / Dark / System on the account, so every browser agrees. `null`
+            // until the person has chosen once.
+            'theme' => in_array($user->theme, ['light', 'dark', 'system'], true) ? $user->theme : null,
         ];
     }
 }

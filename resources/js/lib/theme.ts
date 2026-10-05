@@ -13,6 +13,9 @@ import type { Ref } from 'vue';
  * Storage is wrapped the same way `sidebarState.ts` wraps it: private mode throws on
  * write, blocked cookies throw on read, and neither is a reason for the shell to break —
  * the viewer simply gets `system` on every load.
+ *
+ * Since 2026-10-05 the choice is also kept on the account (`users.theme`, printed by
+ * `app.blade.php` as `<html data-theme>`), and the account wins over this browser's copy.
  */
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -27,21 +30,53 @@ export function isThemeMode(value: unknown): value is ThemeMode {
     return value === 'light' || value === 'dark' || value === 'system';
 }
 
+/**
+ * The account's choice, as `app.blade.php` printed it on `<html data-theme>` (2026-10-05), or
+ * `null` when the person has never chosen. It is read from the document rather than from the
+ * Inertia props so the very first paint and this module agree without waiting for a page.
+ */
+function readAccount(): ThemeMode | null {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+
+    const raw = document.documentElement.getAttribute('data-theme');
+
+    return isThemeMode(raw) ? raw : null;
+}
+
+function readLocal(): ThemeMode | null {
+    try {
+        const raw = window.localStorage.getItem(THEME_KEY);
+
+        return isThemeMode(raw) ? raw : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * The account first, then this browser. The account is what makes the Android app's two
+ * browsers (Chrome and its WebView backup screen, each with its own storage) and every other
+ * device open in the same theme — the client saw the app open dark, then light, then dark.
+ */
 function readStored(): ThemeMode {
     if (typeof window === 'undefined') {
         return 'system';
     }
 
-    try {
-        const raw = window.localStorage.getItem(THEME_KEY);
+    const account = readAccount();
 
-        return isThemeMode(raw) ? raw : 'system';
-    } catch {
-        return 'system';
+    if (account !== null) {
+        writeLocal(account);
+
+        return account;
     }
+
+    return readLocal() ?? 'system';
 }
 
-function writeStored(mode: ThemeMode): void {
+function writeLocal(mode: ThemeMode): void {
     if (typeof window === 'undefined') {
         return;
     }
@@ -51,6 +86,43 @@ function writeStored(mode: ThemeMode): void {
     } catch {
         /* Private mode: the choice just does not survive this session. */
     }
+}
+
+function csrfToken(): string {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+/**
+ * Saves the choice on the account (`PUT /profile/theme`). Best effort: a failure leaves this
+ * browser's own copy, which is what the app did before, and the next choice tries again. Only
+ * the signed-in shell's user menu calls this, so there is always an account to save to.
+ */
+function saveToAccount(mode: ThemeMode): void {
+    if (typeof window === 'undefined' || typeof fetch !== 'function') {
+        return;
+    }
+
+    void fetch('/profile/theme', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-XSRF-TOKEN': csrfToken(),
+        },
+        body: JSON.stringify({ theme: mode }),
+    })
+        .then((response) => {
+            if (response.ok) {
+                document.documentElement.setAttribute('data-theme', mode);
+            }
+        })
+        .catch(() => {
+            /* Offline: this browser keeps it; the account catches up on the next choice. */
+        });
 }
 
 function mediaQuery(): MediaQueryList | null {
@@ -107,6 +179,12 @@ export function useTheme(): Ref<ThemeMode> {
         // document right in any context where that script did not run.
         applyTheme(mode.value);
         watchSystem();
+
+        // A choice made before the account kept one (only in this browser) moves onto the
+        // account once, so the person's other browsers and devices pick it up.
+        if (readAccount() === null && mode.value !== 'system') {
+            saveToAccount(mode.value);
+        }
     }
 
     return mode;
@@ -114,6 +192,7 @@ export function useTheme(): Ref<ThemeMode> {
 
 export function setTheme(next: ThemeMode): void {
     mode.value = next;
-    writeStored(next);
+    writeLocal(next);
     applyTheme(next);
+    saveToAccount(next);
 }

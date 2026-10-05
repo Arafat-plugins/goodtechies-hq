@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}"@if (in_array(auth()->user()?->theme, ['light', 'dark', 'system'], true)) data-theme="{{ auth()->user()->theme }}"@endif>
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,16 +13,22 @@
         <link rel="manifest" href="/manifest.json">
         <meta name="theme-color" content="#FCFDFE" media="(prefers-color-scheme: light)">
         <meta name="theme-color" content="#0A0D12" media="(prefers-color-scheme: dark)">
+        {{-- Polish 016: the public VAPID key, for the "get a popup" card on every screen. Public by design. --}}
+        <meta name="vapid-public-key" content="{{ config('webpush.vapid.public_key') }}">
 
         {{-- Theme, before first paint. This runs synchronously in <head>, ahead of the
              stylesheet and the bundle, so the document is already `dark` (or not) the
              first time anything is painted and a reload never flashes the wrong theme.
-             `hq.theme` is written by resources/js/lib/theme.ts; `system` is the default
-             and is resolved here against the OS preference. --}}
+             The account's choice (`data-theme` on <html>, 2026-10-05) wins, so Chrome and
+             the Android app's own WebView agree; otherwise `hq.theme`, written by
+             resources/js/lib/theme.ts. `system` is the default and is resolved here against
+             the OS preference. The script is the same bytes for everybody: its CSP hash
+             (ContentSecurityPolicy::THEME_SCRIPT_HASH) depends on that. --}}
         <script>
             (function () {
                 try {
-                    var stored = window.localStorage.getItem('hq.theme');
+                    var stored = document.documentElement.getAttribute('data-theme')
+                        || window.localStorage.getItem('hq.theme');
                     var mode = stored === 'light' || stored === 'dark' ? stored : 'system';
                     var dark = mode === 'dark' || (mode === 'system'
                         && window.matchMedia('(prefers-color-scheme: dark)').matches);

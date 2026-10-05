@@ -570,11 +570,21 @@ export function sendMessage(
     url: string,
     data: FormData,
     csrf: string,
-    onProgress?: (percent: number) => void,
+    onProgress?: UploadProgress,
     timeoutMs = 0,
+    stallMs = 0,
 ): Promise<MessageSendResult> {
-    return messageRequest('POST', url, data, csrf, onProgress, timeoutMs);
+    return messageRequest('POST', url, data, csrf, onProgress, timeoutMs, stallMs);
 }
+
+/** Percent sent, plus the bytes behind it (polish 017: "1.2 of 3.7 MB"). */
+export type UploadProgress = (percent: number, loaded: number, total: number) => void;
+
+/**
+ * Polish 017: an upload that stops moving. Rejected with this BEFORE the body has fully left the
+ * device, so the server cannot have stored anything and sending it again can never duplicate it.
+ */
+export const UPLOAD_STALLED = 'upload-stalled';
 
 /**
  * The same request `sendMessage()` makes, for any verb (brief 010: edit, delete, react, groups).
@@ -586,11 +596,35 @@ export function messageRequest(
     url: string,
     data: FormData | Record<string, unknown> | null,
     csrf: string = xsrfToken(),
-    onProgress?: (percent: number) => void,
+    onProgress?: UploadProgress,
     timeoutMs = 0,
+    stallMs = 0,
 ): Promise<MessageSendResult> {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+
+        // Polish 017: a body that has not moved for `stallMs` is aborted and rejected as
+        // UPLOAD_STALLED, so a dead connection never leaves "Uploading… 15%" on screen forever.
+        let uploaded = false;
+        let sentAll = false;
+        let stalled = false;
+        let watchdog: ReturnType<typeof setTimeout> | null = null;
+        const stopWatchdog = (): void => {
+            if (watchdog !== null) {
+                clearTimeout(watchdog);
+                watchdog = null;
+            }
+        };
+        const armWatchdog = (): void => {
+            stopWatchdog();
+
+            if (stallMs > 0 && !uploaded) {
+                watchdog = setTimeout(() => {
+                    stalled = true;
+                    xhr.abort();
+                }, stallMs);
+            }
+        };
 
         xhr.open(method, url);
         xhr.withCredentials = true;
@@ -605,14 +639,25 @@ export function messageRequest(
             xhr.setRequestHeader('Content-Type', 'application/json');
         }
 
-        if (onProgress !== undefined) {
+        if (onProgress !== undefined || stallMs > 0) {
             xhr.upload.onprogress = (event) => {
-                if (event.lengthComputable && event.total > 0) {
-                    onProgress(Math.round((event.loaded / event.total) * 100));
+                armWatchdog();
+                sentAll = event.lengthComputable && event.total > 0 && event.loaded >= event.total;
+
+                if (onProgress !== undefined && event.lengthComputable && event.total > 0) {
+                    onProgress(Math.round((event.loaded / event.total) * 100), event.loaded, event.total);
                 }
+            };
+            // Chrome fires `upload.load` even when the connection dies mid-body (seen with the
+            // network going offline at 16%), so "all of it went" is taken from the last progress
+            // event, not from this one.
+            xhr.upload.onload = () => {
+                uploaded = sentAll;
+                stopWatchdog();
             };
         }
 
+        xhr.onloadend = stopWatchdog;
         xhr.onload = () => {
             let json: unknown = null;
 
@@ -624,11 +669,13 @@ export function messageRequest(
 
             resolve({ status: xhr.status, json });
         };
-        xhr.onerror = () => reject(new Error('network'));
+        // A connection that drops while the body is still going up is as safe to resend as a stall.
+        xhr.onerror = () => reject(new Error(stallMs > 0 && !uploaded ? UPLOAD_STALLED : 'network'));
         xhr.ontimeout = () => reject(new Error('timeout'));
-        xhr.onabort = () => reject(new Error('abort'));
+        xhr.onabort = () => reject(new Error(stalled || (stallMs > 0 && !uploaded) ? UPLOAD_STALLED : 'abort'));
 
         xhr.send(data === null ? null : isForm ? (data as FormData) : JSON.stringify(data));
+        armWatchdog();
     });
 }
 

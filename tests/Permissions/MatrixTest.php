@@ -1270,6 +1270,8 @@ function permissionMatrix(): array
         ['POST', 'push/subscriptions', $everyone(302)],
         ['DELETE', 'push/subscriptions', $everyone(302)],
         ['PUT', 'profile/push', $everyone(302)],
+        // 2026-10-05: Light / Dark / System on the person's own account; no id in the URL.
+        ['PUT', 'profile/theme', $everyone(302)],
 
         // Shared — somebody's attendance, and the clock (Phase 4). No surface, like the bell
         // and the file download below: clocking in is a fact about the person and not about

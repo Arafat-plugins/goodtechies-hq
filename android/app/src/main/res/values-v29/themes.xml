@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The in-app WebView screen follows the phone's dark mode, like Chrome does (1.0.5).
+         With a Light-only theme the WebView told the site "light" while Chrome told it "dark",
+         so goodERP opened dark, then light, then dark again, depending on which of the two
+         the app used that time. -->
+    <style name="Theme.GoodErp.WebView" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

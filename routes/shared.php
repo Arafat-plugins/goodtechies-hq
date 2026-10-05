@@ -18,6 +18,7 @@ use App\Http\Controllers\Shared\PayslipController;
 use App\Http\Controllers\Shared\PresenceController;
 use App\Http\Controllers\Shared\ProfileController;
 use App\Http\Controllers\Shared\ProfilePasswordController;
+use App\Http\Controllers\Shared\ProfileThemeController;
 use App\Http\Controllers\Shared\ProfileSessionController;
 use App\Http\Controllers\Shared\ProfileTwoFactorController;
 use App\Http\Controllers\Shared\PushSubscriptionController;
@@ -71,6 +72,10 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
     Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::put('/profile/password', ProfilePasswordController::class)->name('profile.password.update');
+    // Light / Dark / System on the account (2026-10-05): every browser and device opens the same.
+    Route::put('/profile/theme', ProfileThemeController::class)
+        ->middleware('throttle:30,1')
+        ->name('profile.theme.update');
 
     Route::delete('/profile/two-factor', [ProfileTwoFactorController::class, 'destroy'])
         ->name('profile.two-factor.destroy');

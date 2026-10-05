@@ -13,7 +13,8 @@
  * Full-page navigations that fail offline get the small static /offline.html instead of the
  * browser's error page. Bump CACHE when offline.html or PRECACHE changes.
  *
- * Push: shows what the server sent (App\Services\PushService) and opens its link when tapped.
+ * Push: shows what the server sent (App\Services\PushService) and opens its link when tapped —
+ * only when no goodERP window is focused and visible (polish 016).
  */
 const CACHE = 'gooderp-offline-v1';
 const ASSETS = 'gooderp-assets-v1';
@@ -238,6 +239,22 @@ self.addEventListener('push', (event) => {
 
     event.waitUntil(
         (async () => {
+            // Polish 016: the popup is for when goodERP is NOT what the person is looking at.
+            // A focused, visible goodERP window already shows it in the app (badge, bell, chime),
+            // so the system popup is skipped there. Chrome allows a push with no notification
+            // only while a window of the site is focused, which is exactly this case.
+            const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+            const lookingAtGoodErp = windows.some(
+                (client) =>
+                    new URL(client.url).origin === self.location.origin &&
+                    client.focused &&
+                    client.visibilityState === 'visible',
+            );
+
+            if (lookingAtGoodErp) {
+                return;
+            }
+
             const options = {
                 body: data.body || '',
                 icon: (await avatarFor(data.sender)) || '/brand/icon-192.png',

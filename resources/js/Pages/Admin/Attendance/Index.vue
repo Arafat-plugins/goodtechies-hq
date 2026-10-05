@@ -9,8 +9,9 @@ import type {
     AttendanceStatusOption,
     AttendanceSummaryRow,
 } from '@/Components/Attendance/attendance';
-import { attendanceRoutes, formatMinutes, formatShift, noStatusLabel } from '@/Components/Attendance/attendance';
+import { attendanceRoutes, attendanceStatusIcon, formatMinutes, formatShift, noStatusLabel } from '@/Components/Attendance/attendance';
 import EmptyState from '@/Components/EmptyState.vue';
+import CountChip from '@/Components/CountChip.vue';
 import DateStepper from '@/Components/DateStepper.vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
@@ -106,11 +107,12 @@ useLiveProps(['rows', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
             <!-- Counts of people per status. Never a ranking. -->
             <ul v-if="summary.length" class="flex flex-wrap gap-2">
                 <li v-for="row in summary" :key="row.key">
-                    <StatusBadge
+                    <CountChip
                         v-if="row.tone"
                         :status="row.tone"
-                        :label="`${row.label}: ${row.count}`"
-                        size="sm"
+                        :label="row.label"
+                        :count="row.count"
+                        :icon="attendanceStatusIcon(row.key)"
                     />
                 </li>
             </ul>

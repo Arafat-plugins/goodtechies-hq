@@ -2,8 +2,11 @@
 <resources>
     <!-- Android 15 draws apps edge to edge by default, which put goodERP's top bar under the
          clock and Wi-Fi icons. The WebView screen keeps the classic layout: the page starts
-         below the status bar and ends above the navigation buttons. -->
-    <style name="Theme.GoodErp.WebView" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+         below the status bar and ends above the navigation buttons.
+         Dark mode follows the phone, as on Android 10-14 (values-v29, 1.0.5). -->
+    <style name="Theme.GoodErp.WebView" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
         <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
     </style>
 </resources>

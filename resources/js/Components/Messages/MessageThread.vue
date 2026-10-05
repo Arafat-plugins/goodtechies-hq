@@ -51,6 +51,7 @@ import {
     renderThread,
     sendMessage,
     threadLayout,
+    UPLOAD_STALLED,
     useMentions,
 } from '@/Components/Messages/messages';
 import type { VoiceClip } from '@/Components/Messages/voice';
@@ -63,6 +64,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Comp
 import { clearDraft, messageDraftKey, readDraft, writeDraft } from '@/lib/drafts';
 import { windowFocused } from '@/lib/attention';
 import { backoff, fetchWithTimeout, reportNetworkFailure, reportNetworkSuccess, TOO_LARGE_TEXT } from '@/lib/net';
+import { formatBytes, shrinkImage } from '@/lib/shrinkImage';
 import { playMessageSent } from '@/lib/sound';
 import { isSessionLive, reportResponse, sessionState } from '@/lib/session';
 import { useUnsavedGuard } from '@/lib/unsavedGuard';
@@ -323,6 +325,9 @@ const replyingTo = ref<ThreadMessage | null>(null);
  * the one that goes. Said here and not also as a toast (brief 009: the send is a JSON request).
  */
 const sendProgress = ref<number | null>(null);
+/** Polish 017: the bytes behind the percent, and the line under the bar ("trying again…"). */
+const sendBytes = ref<{ loaded: number; total: number } | null>(null);
+const uploadNote = ref<string | null>(null);
 const sendFailed = ref<'voice' | 'file' | null>(null);
 
 const SEND_FAILED_TEXT = {
@@ -1750,6 +1755,13 @@ let tempSeq = 0;
 const outbox = new Map<number, Outgoing>();
 /** A text-only send gives up after this long and offers a retry; an upload is never timed out. */
 const TEXT_SEND_TIMEOUT_MS = 30_000;
+/**
+ * Polish 017: an upload whose bytes have not moved for this long is cut and sent again, up to
+ * UPLOAD_ATTEMPTS times in all, before the composer offers *Try again*. A stall is always caught
+ * before the body has fully left, so a resend can never make a second copy of the message.
+ */
+const UPLOAD_STALL_MS = 20_000;
+const UPLOAD_ATTEMPTS = 3;
 
 function optimistic(outgoing: Outgoing): ThreadMessage {
     return {
@@ -1852,7 +1864,8 @@ async function send(outgoing: Outgoing): Promise<void> {
         data.append('kind', 'voice');
         data.append('duration', String(clip.seconds));
     } else if (file !== null) {
-        data.append('file', file);
+        // Polish 017: a big photo or screenshot goes up as a far smaller JPEG.
+        data.append('file', await shrinkImage(file));
     }
 
     if (tempId !== null) {
@@ -1866,20 +1879,16 @@ async function send(outgoing: Outgoing): Promise<void> {
         posting.value = true;
         sendFailed.value = null;
         sendProgress.value = 0;
+        sendBytes.value = null;
+        uploadNote.value = null;
     }
 
     const stillHere = (): boolean => thread.value.conversation_id === conversationId;
 
     try {
-        const result = await sendMessage(
-            props.routes.store,
-            data,
-            csrfToken(),
-            carrying === null ? undefined : (percent) => {
-                sendProgress.value = percent;
-            },
-            carrying === null ? TEXT_SEND_TIMEOUT_MS : 0,
-        );
+        const result = carrying === null
+            ? await sendMessage(props.routes.store, data, csrfToken(), undefined, TEXT_SEND_TIMEOUT_MS)
+            : await uploadWithRetries(data);
 
         if (result.status >= 500) {
             reportNetworkFailure();
@@ -1987,9 +1996,64 @@ async function send(outgoing: Outgoing): Promise<void> {
         if (carrying !== null) {
             posting.value = false;
             sendProgress.value = null;
+            sendBytes.value = null;
+            uploadNote.value = null;
         }
     }
 }
+
+/**
+ * Polish 017: the upload, with the stall watchdog and quiet resends. Only a stall (or a drop
+ * while the body was still going up) is resent; anything after the body arrived is reported as
+ * before, because by then the server may already have stored the message.
+ */
+async function uploadWithRetries(data: FormData) {
+    for (let attempt = 1; ; attempt++) {
+        try {
+            return await sendMessage(
+                props.routes.store,
+                data,
+                csrfToken(),
+                (percent, loaded, total) => {
+                    sendProgress.value = percent;
+                    sendBytes.value = { loaded, total };
+
+                    if (loaded > 0 && uploadNote.value !== null && percent < 100) {
+                        uploadNote.value = null;
+                    }
+                },
+                0,
+                UPLOAD_STALL_MS,
+            );
+        } catch (error) {
+            if (!(error instanceof Error) || error.message !== UPLOAD_STALLED || attempt >= UPLOAD_ATTEMPTS) {
+                throw error;
+            }
+
+            uploadNote.value = `The connection stopped — trying again (${attempt + 1} of ${UPLOAD_ATTEMPTS})…`;
+            sendProgress.value = 0;
+            sendBytes.value = null;
+            await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+        }
+    }
+}
+
+/** "Uploading 1.2 of 3.7 MB · 32%", then "Sending…" once every byte is up. */
+const uploadLine = computed(() => {
+    if (sendProgress.value === null) {
+        return '';
+    }
+
+    if (sendProgress.value >= 100) {
+        return 'Sending…';
+    }
+
+    const bytes = sendBytes.value;
+
+    return bytes === null
+        ? `Uploading… ${sendProgress.value}%`
+        : `Uploading ${formatBytes(bytes.loaded)} of ${formatBytes(bytes.total)} · ${sendProgress.value}%`;
+});
 
 /** The 422 sentence about `reply_to_id`, when that is what was refused. */
 function replyRefusal(json: unknown): string | null {
@@ -2353,9 +2417,10 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                 <!-- How far the attachment or voice note has got; the words carry the number. -->
                 <div v-if="sendProgress !== null" class="flex min-w-0 flex-col gap-1">
                     <p :id="progressId" class="text-xs text-muted-foreground tabular-nums">
-                        Uploading… {{ sendProgress }}%
+                        {{ uploadLine }}
                     </p>
                     <Progress :model-value="sendProgress" :aria-labelledby="progressId" />
+                    <p v-if="uploadNote" class="text-xs text-muted-foreground" aria-live="polite">{{ uploadNote }}</p>
                 </div>
 
                 <!-- No answer, or a 5xx. The composer was not reset: the same bytes go again. -->

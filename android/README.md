@@ -72,6 +72,15 @@ cd android
 gradlew.bat testDebugUnitTest
 ```
 
+## Dark mode (1.0.5)
+
+The site follows Light / Dark / System. On **System** it asks the browser which the phone wants.
+Chrome always answered with the phone's setting, but until 1.0.5 the app's own WebView screen
+answered "light" (its theme was Light-only), so the app opened dark or light depending on which
+of the two it used that time. Since 1.0.5 the WebView screen's theme is DayNight
+(`res/values-v29`, `res/values-v35`), so both answer the same. A Light or Dark choice from the
+user menu is also saved on the account (`users.theme`), so every browser and device agrees.
+
 ## Installing on a phone
 
 Copy the APK to the phone and open it. Android asks once to allow installs from that source

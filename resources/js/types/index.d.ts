@@ -23,6 +23,8 @@ export interface AuthUser {
      * decisions 2-28 and 2-31 were both recorded about, and it is the copy that goes stale.
      */
     canTrackTime: boolean;
+    /** Light / Dark / System as saved on the account (2026-10-05); `null` until first chosen. */
+    theme: 'light' | 'dark' | 'system' | null;
 }
 
 export interface SharedProps {
