@@ -81,6 +81,7 @@ import ClockOutOnLeaveDialog from '@/Components/Attendance/ClockOutOnLeaveDialog
 import { clockedIn, leaveAllowed, openClockOutDialog, syncClockFromPage } from '@/Components/Attendance/clockState';
 import { beatTaskTimer, taskTimerRoutes, useTaskTimer } from '@/Components/Timer/taskTimer';
 import { remoteTimerRunning, timerRoutes } from '@/Components/Timer/timer';
+import { installLeaveIntent, isDownloading, isInAppNavigation } from '@/lib/leaveIntent';
 
 /**
  * The heartbeat for an office/Admin task timer — flow F3. Renders nothing.
@@ -165,7 +166,9 @@ function formToken(): string {
 }
 
 function onBeforeUnload(event: BeforeUnloadEvent): void {
-    if (!guardActive.value) {
+    // Polish 018: downloading a file, or moving to another goodERP page by a full load (a link,
+    // or a click that a deploy turned into one), is not leaving goodERP — no "Leave site?".
+    if (!guardActive.value || isDownloading() || isInAppNavigation()) {
         return;
     }
 
@@ -179,7 +182,7 @@ function onBeforeUnload(event: BeforeUnloadEvent): void {
 }
 
 function onPageHide(): void {
-    if (!anyRunning.value || typeof navigator.sendBeacon !== 'function') {
+    if (!anyRunning.value || typeof navigator.sendBeacon !== 'function' || isInAppNavigation()) {
         return;
     }
 
@@ -209,6 +212,7 @@ function guard(running: boolean): void {
     }
 
     if (running && !guarding) {
+        installLeaveIntent();
         window.addEventListener('beforeunload', onBeforeUnload);
         window.addEventListener('pagehide', onPageHide);
         guarding = true;

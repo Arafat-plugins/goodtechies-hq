@@ -262,6 +262,7 @@ const meta = computed(() => {
             v-else-if="!stale && !rendersVoice && !rendersImage"
             :href="file.url"
             :target="file.is_previewable ? '_blank' : undefined"
+            :download="file.is_previewable ? undefined : file.name"
             rel="noopener noreferrer"
             :title="file.name"
             class="group/file flex min-w-0 items-center gap-2.5 rounded-md p-1 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"

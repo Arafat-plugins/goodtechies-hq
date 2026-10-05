@@ -1,5 +1,6 @@
 import { router } from '@inertiajs/vue3';
 import { onScopeDispose } from 'vue';
+import { installLeaveIntent, isDownloading, isInertiaVisitInFlight } from '@/lib/leaveIntent';
 
 /**
  * Unsaved input is never thrown away without asking (reliability slice 3).
@@ -44,7 +45,9 @@ export function anyUnsaved(): boolean {
 }
 
 function onBeforeUnload(event: BeforeUnloadEvent): void {
-    if (confirmedLeave || !anyUnsaved()) {
+    // Polish 018: a download does not leave the page, and an Inertia click that the server
+    // turned into a full load (409 after a deploy) already passed the in-app check below.
+    if (confirmedLeave || isDownloading() || isInertiaVisitInFlight() || !anyUnsaved()) {
         return;
     }
 
@@ -64,6 +67,7 @@ function install(): void {
         return;
     }
 
+    installLeaveIntent();
     window.addEventListener('beforeunload', onBeforeUnload);
 
     removeBefore = router.on('before', (event) => {
