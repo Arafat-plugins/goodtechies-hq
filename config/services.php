@@ -62,4 +62,13 @@ return [
         'driver' => env('GOOGLE_CALENDAR_DRIVER', 'manual'),
     ],
 
+    /*
+    | Push to the goodERP Android app (Firebase Cloud Messaging, 2026-10-05): the path to the
+    | Firebase service-account JSON key on THIS server. Never commit the key. Empty = off, and
+    | Web Push carries on as before. See App\Services\AppPushService.
+    */
+    'fcm' => [
+        'credentials' => env('FCM_CREDENTIALS'),
+    ],
+
 ];

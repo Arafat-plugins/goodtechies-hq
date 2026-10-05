@@ -82,6 +82,15 @@
                 android:resource="@xml/filepaths" />
         </provider>
 
+        <!-- 1.0.6: the app's own notifications (Firebase Cloud Messaging). -->
+        <service
+            android:name=".GoodErpMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <activity
             android:name="com.google.androidbrowserhelper.trusted.NotificationPermissionRequestActivity"
             android:exported="false"

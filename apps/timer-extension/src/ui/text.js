@@ -9,10 +9,9 @@ export const TEXT = Object.freeze({
     VERSION_LABEL: 'Version',
     VERSION: '0.1.0',
 
-    // Disclosure (first run in the popup; always on the options page)
+    // Disclosure (options page)
     DISCLOSURE_HEADING: 'What this extension records',
     DISCLOSURE: 'While your timer is running, this extension records which website domain you are on (for example docs.google.com) and how long, whether you are active, and whether a video or a call is playing. It never records page addresses, page titles, page content, what you type, or screenshots. When the timer is paused or stopped, nothing is recorded.',
-    DISCLOSURE_OK: 'Got it',
 
     // Pairing
     PAIR_HEADING: 'Connect this browser',
@@ -31,6 +30,8 @@ export const TEXT = Object.freeze({
     PERMISSION_DENIED: 'The extension was not allowed to reach that server, so it cannot connect.',
 
     // Timer
+    PROJECT_LABEL: 'Project',
+    NO_PROJECT: 'No project',
     TASK_LABEL: 'Task',
     TASK_PLACEHOLDER: 'Choose a task',
     NO_TASKS: 'There are no open tasks to time.',
@@ -44,10 +45,6 @@ export const TEXT = Object.freeze({
     TODAY_LABEL: 'Today',
     TODAY_OF: 'of',
     LEFT_TODAY: 'left today',
-    MEETING_BUTTON: "I'm in a meeting",
-    MEETING_LEFT: 'In a meeting · MM:SS left',
-    MEETING_CANCEL: 'Cancel',
-    SETTINGS: 'Settings',
 
     // Status and errors
     OFFLINE: 'Offline — changes are saved when the connection is back',
@@ -76,7 +73,7 @@ export const TEXT = Object.freeze({
     WARNING_HEADING: 'About the install warning',
     WARNING: `Chrome and Edge warn that this extension can "read and change all your data on all websites". That permission is what lets it notice a playing video or a live call on any page. It reads two yes/no facts from a page and the website's domain name, and nothing else.`,
     LIMITS_HEADING: 'Known limits',
-    LIMIT_DESKTOP_CALLS: "A call in a desktop app — Zoom, Teams, Discord desktop, or a phone — cannot be seen. Use I'm in a meeting in the popup, or the meeting button on the inactivity prompt.",
+    LIMIT_DESKTOP_CALLS: "A call in a desktop app — Zoom, Teams, Discord desktop, or a phone — cannot be seen. When the inactivity prompt appears, choose I was in a meeting or call (keep the time).",
     LIMIT_AUDIBLE: 'Any tab playing sound, music included, counts as media, so that time is not idle.',
     DEVICE_HEADING: 'This browser',
     PAIRED_AS: 'Connected as',

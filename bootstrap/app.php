@@ -7,6 +7,7 @@ use App\Http\Middleware\EnsureRemoteTimerUser;
 use App\Http\Middleware\EnsureSurface;
 use App\Http\Middleware\EnsureTwoFactorEnrolled;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\RememberAppPushToken;
 use App\Http\Middleware\SweepAbandonedTimers;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
@@ -42,11 +43,16 @@ return Application::configure(basePath: dirname(__DIR__))
         ['middleware' => ['web', 'auth', 'active', 'two-factor']],
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // 2026-10-05: the Android app writes this cookie itself (its Firebase token); Laravel
+        // did not encrypt it, so it must not try to decrypt it. See RememberAppPushToken.
+        $middleware->encryptCookies(except: [RememberAppPushToken::COOKIE]);
+
         $middleware->web(append: [
             // Brief 028: the timer watchdog's rules, at most once a minute, with or without a
             // scheduler. After the session (it needs the user), before Inertia's shared props
             // and the controller, so the page that triggers it already reads the result.
             SweepAbandonedTimers::class,
+            RememberAppPushToken::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);

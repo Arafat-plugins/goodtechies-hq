@@ -9,6 +9,7 @@ const $ = (id) => document.getElementById(id);
 let view = null;          // the worker's last view
 let reconnect = false;    // a reply said the token is gone
 let tasksLoaded = false;  // the task list is fetched once per "nothing running" stretch
+let taskList = [];        // the open tasks last fetched; the project picker filters them
 let formFilled = false;   // server/device fields are prefilled once, then left to the person
 let busy = false;
 
@@ -105,9 +106,6 @@ async function run(cmd, payload) {
 
 function setDisabled(on) {
     for (const el of document.querySelectorAll('main button, main input, main select')) {
-        if (el.id === 'settings' || el.id === 'disclosure-ok') {
-            continue;
-        }
         el.disabled = on;
     }
 }
@@ -171,7 +169,7 @@ function render() {
     tick();
 }
 
-/** The per-second part: counter, today, left today, meeting countdown. */
+/** The per-second part: counter, today, left today. */
 function tick() {
     if (!view?.token || !view.state) {
         return;
@@ -195,35 +193,63 @@ function tick() {
         el.textContent = left === null ? '' : `${fmt.formatDuration(left)} ${TEXT.LEFT_TODAY}`;
         el.hidden = left === null;
     }
-
-    const until = view.manualMeetingUntil;
-    const inMeeting = typeof until === 'number' && until > now;
-    $('meeting').hidden = inMeeting;
-    $('meeting-line').hidden = !inMeeting;
-    if (inMeeting) {
-        const rest = Math.ceil((until - now) / 1000);
-        const mmss = `${String(Math.floor(rest / 60)).padStart(2, '0')}:${String(rest % 60).padStart(2, '0')}`;
-        $('meeting-left').textContent = TEXT.MEETING_LEFT.replace('MM:SS', mmss);
-    }
 }
 
 async function loadTasks() {
-    const select = $('task');
     const reply = await send('getTasks').catch(() => null);
     handle(reply);
     const tasks = reply?.ok ? (reply.data?.tasks ?? []) : [];
+
+    // Project names A–Z ignoring case; tasks without a project ('' key) come last.
+    const keys = new Set(tasks.map((task) => task.project ?? ''));
+    const projects = [...keys]
+        .filter((key) => key !== '')
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    if (keys.has('')) {
+        projects.push('');
+    }
+    let chosen = projects[0];
+    try {
+        const stored = await chrome.storage.local.get('popup_project');
+        if (projects.includes(stored?.popup_project)) {
+            chosen = stored.popup_project;
+        }
+    } catch {
+        // Not remembered: the first project stays chosen.
+    }
+
+    taskList = tasks;
+    const picker = $('project');
+    picker.replaceChildren();
+    for (const key of projects) {
+        picker.add(new Option(key === '' ? TEXT.NO_PROJECT : key, key));
+    }
+    if (projects.length) {
+        picker.value = chosen;
+        fillTasksFor(chosen);
+    } else {
+        $('task').replaceChildren();
+    }
+    $('no-tasks').hidden = !reply?.ok || tasks.length > 0;
+    if (reply && reply.ok === false && !reply.offline) {
+        showError(errorText(reply));
+    }
+}
+
+/** Offer one project's tasks ('' = no project); a project with a single task has it preselected. */
+function fillTasksFor(projectKey) {
+    const select = $('task');
     select.replaceChildren();
     const placeholder = new Option(TEXT.TASK_PLACEHOLDER, '');
     placeholder.disabled = true;
     placeholder.selected = true;
     select.add(placeholder);
-    for (const task of tasks) {
-        const label = task.project ? `${task.title} — ${task.project}` : task.title;
-        select.add(new Option(label, String(task.id)));
+    const matching = taskList.filter((task) => (task.project ?? '') === projectKey);
+    for (const task of matching) {
+        select.add(new Option(task.title, String(task.id)));
     }
-    $('no-tasks').hidden = !reply?.ok || tasks.length > 0;
-    if (reply && reply.ok === false && !reply.offline) {
-        showError(errorText(reply));
+    if (matching.length === 1) {
+        select.value = String(matching[0].id);
     }
 }
 
@@ -295,35 +321,12 @@ function onStart(event) {
     run('start', { task_id: taskId });
 }
 
-// ---------------------------------------------------------------------------
-// Disclosure, shown once
-// ---------------------------------------------------------------------------
-
-async function showDisclosureOnce() {
-    let seen = false;
+async function onProjectChange(event) {
+    fillTasksFor(event.target.value);
     try {
-        const stored = await chrome.storage.local.get('disclosure_seen');
-        seen = stored?.disclosure_seen === true;
+        await chrome.storage.local.set({ popup_project: event.target.value });
     } catch {
-        seen = false;
-    }
-    if (seen) {
-        return;
-    }
-    $('disclosure').hidden = false;
-    // Once the person moves on to any control, the notice has been seen: hide it,
-    // so an error line or the help text never pushes the popup past 560 px.
-    const onFocus = (event) => {
-        if (!$('disclosure').contains(event.target)) {
-            $('disclosure').hidden = true;
-            document.removeEventListener('focusin', onFocus);
-        }
-    };
-    document.addEventListener('focusin', onFocus);
-    try {
-        await chrome.storage.local.set({ disclosure_seen: true });
-    } catch {
-        // Shown again next time; nothing else depends on it.
+        // Not remembered: the first project is chosen next time.
     }
 }
 
@@ -340,19 +343,13 @@ async function init() {
     });
     $('pair-form').addEventListener('submit', onConnect);
     $('start-form').addEventListener('submit', onStart);
+    $('project').addEventListener('change', onProjectChange);
     $('pause').addEventListener('click', () => run('pause'));
     $('resume').addEventListener('click', () => run('resume'));
     $('stop').addEventListener('click', () => run('stop'));
-    $('meeting').addEventListener('click', () => run('meeting', { minutes: 60 }));
-    $('meeting-cancel').addEventListener('click', () => run('meeting', { cancel: true }));
-    $('settings').addEventListener('click', () => chrome.runtime.openOptionsPage());
-    $('disclosure-ok').addEventListener('click', () => {
-        $('disclosure').hidden = true;
-    });
 
     const syncing = send('sync');
     handle(await send('getState'));
-    await showDisclosureOnce();
     every(1000, tick);
     every(5000, () => send('sync').then(handle, () => {}));
     handle(await syncing.catch(() => null));

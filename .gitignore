@@ -43,6 +43,9 @@ start-hq.log
 /android/.gradle/
 /android/build/
 /android/app/build/
+# Firebase app config for the Android app's notifications (1.0.6). Not a secret, but it names the
+# Firebase project; it stays on the PC that builds the APK.
+/android/app/google-services.json
 *.jks
 *.keystore
 

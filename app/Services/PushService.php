@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Http\Middleware\RememberAppPushToken;
 use App\Models\PushSubscription;
 use App\Models\User;
 use App\Support\PushCategory;
@@ -18,6 +19,8 @@ use Minishlink\WebPush\WebPush;
  */
 class PushService
 {
+    public function __construct(private readonly AppPushService $app) {}
+
     public function isConfigured(): bool
     {
         return filled(config('webpush.vapid.public_key')) && filled(config('webpush.vapid.private_key'));
@@ -39,7 +42,15 @@ class PushService
      */
     public function forgetAllDevices(User $user): int
     {
-        return PushSubscription::query()->where('user_id', $user->getKey())->delete();
+        $forgotten = PushSubscription::query()->where('user_id', $user->getKey())->delete()
+            + $this->app->forgetAllDevices($user);
+
+        // The app on THIS phone files its token again on the next request (2026-10-05).
+        if (app()->bound('session.store') && app('session.store')->isStarted()) {
+            app('session.store')->forget(RememberAppPushToken::SESSION_KEY);
+        }
+
+        return $forgotten;
     }
 
     /**
@@ -48,14 +59,30 @@ class PushService
      */
     public function send(User $user, PushCategory $category, array $message): int
     {
-        if (! $this->isConfigured() || ! $this->wants($user, $category)) {
+        if (! $this->wants($user, $category)) {
             return 0;
+        }
+
+        // 2026-10-05: the goodERP Android app's own notifications (Firebase), which reach the
+        // phone whether the app runs through Chrome or through its WebView backup screen.
+        $toApp = $this->app->send($user, $category, $message);
+
+        if (! $this->isConfigured()) {
+            return $toApp;
         }
 
         $subscriptions = PushSubscription::query()->where('user_id', $user->getKey())->get();
 
+        // When the app on the phone has just shown it, Chrome on an Android phone does not show
+        // it a second time. Computers keep their Web Push.
+        if ($toApp > 0) {
+            $subscriptions = $subscriptions->reject(
+                fn (PushSubscription $subscription): bool => str_contains((string) $subscription->user_agent, 'Android'),
+            );
+        }
+
         if ($subscriptions->isEmpty()) {
-            return 0;
+            return $toApp;
         }
 
         $client = $this->client();
@@ -70,7 +97,7 @@ class PushService
             ]), $payload, ['TTL' => 86400, 'urgency' => 'high']);
         }
 
-        $sent = 0;
+        $sent = $toApp;
 
         foreach ($client->flush() as $report) {
             if ($report->isSuccess()) {

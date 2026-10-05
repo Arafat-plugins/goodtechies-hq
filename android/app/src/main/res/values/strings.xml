@@ -2,5 +2,8 @@
 <resources>
     <string name="app_name">goodERP</string>
     <string name="launch_url">https://erp.goodtechies.com/</string>
+    <!-- The two notification channels people see in Android's app settings (1.0.6). -->
+    <string name="channel_messages">Messages</string>
+    <string name="channel_alerts">Alerts</string>
     <string name="asset_statements" translatable="false">[{ \"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": { \"namespace\": \"web\", \"site\": \"https://erp.goodtechies.com\" } }]</string>
 </resources>

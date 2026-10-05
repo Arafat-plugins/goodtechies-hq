@@ -57,7 +57,7 @@ The server address defaults to `https://erp.goodtechies.com`. `http://127.0.0.1:
 | `src/lib/api.js` | HTTP client and the route list |
 | `src/lib/storage.js` | `chrome.storage.local` wrappers and the stored shape's defaults |
 | `src/lib/badge.js` | Toolbar badge text and colour |
-| `src/popup/popup.{html,css,js}` | Toolbar popup: pairing, task picker, the timer, "I'm in a meeting" |
+| `src/popup/popup.{html,css,js}` | Toolbar popup: pairing, project → task picker, the timer |
 | `src/prompt/prompt.{html,css,js}` | The idle prompt window (440 × 400) and its auto-paused form |
 | `src/options/options.{html,css,js}` | Options page: server, what is recorded, limits, disconnect |
 | `src/ui/client.js` | `send()` to the worker, `every()` timer, the formula re-exported as `fmt` |
@@ -77,7 +77,7 @@ by `chrome.alarms`.
 ## Known limits
 
 - **A call in a desktop app cannot be seen.** Zoom, Teams or Discord as desktop apps, or a
-  phone call, happen outside the browser. During one, the person presses "I'm in a meeting"
-  in the extension, or picks the meeting button on the idle prompt.
+  phone call, happen outside the browser. The idle prompt's
+  **I was in a meeting or call (keep the time)** button covers such a call.
 - **Any tab playing sound counts as media.** Music playing in a tab keeps the minute from
   counting as idle, just like a video does.

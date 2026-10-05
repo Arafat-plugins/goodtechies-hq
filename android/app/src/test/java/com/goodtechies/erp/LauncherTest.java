@@ -29,6 +29,7 @@ import androidx.test.core.app.ApplicationProvider;
 import com.google.androidbrowserhelper.trusted.WebViewFallbackActivity;
 
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
@@ -61,6 +62,13 @@ public class LauncherTest {
         controller = Robolectric.buildActivity(LauncherActivity.class, homeScreenTap()).setup();
         shadowOf(Looper.getMainLooper()).idle();
         return controller.get();
+    }
+
+    /** Most tests are about the hand-over, on a phone where notifications were already allowed. */
+    @Before
+    public void notificationsAlreadyAllowed() {
+        shadowOf((Application) ApplicationProvider.getApplicationContext())
+                .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS);
     }
 
     /**
@@ -247,5 +255,116 @@ public class LauncherTest {
     public void onAndroid15TheWebViewScreenFollowsDarkModeAndStaysBelowTheStatusBar() throws Exception {
         assertTrue(!webViewThemeIsLight());
         theWebViewScreenStaysBelowTheStatusBarOnAndroid15();
+    }
+
+    @Test
+    public void onTheFirstStartItAsksForNotificationsAndOpensTheSiteAfterTheAnswer() {
+        Application app = ApplicationProvider.getApplicationContext();
+        shadowOf(app).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS);
+        app.getSharedPreferences("goodERP", Context.MODE_PRIVATE).edit().clear().commit();
+        installChrome();
+
+        LauncherActivity activity = tapTheIcon();
+
+        org.robolectric.shadows.ShadowActivity.PermissionsRequest asked =
+                shadowOf(activity).getLastRequestedPermission();
+        assertNotNull("did not ask for notifications", asked);
+        assertEquals(android.Manifest.permission.POST_NOTIFICATIONS, asked.requestedPermissions[0]);
+        // The only screen started so far is Android's own permission dialog.
+        Intent dialog = shadowOf(activity).getNextStartedActivity();
+        assertEquals("android.content.pm.action.REQUEST_PERMISSIONS", dialog.getAction());
+        assertNull("opened the site before the answer", shadowOf(activity).getNextStartedActivity());
+
+        activity.onRequestPermissionsResult(LauncherActivity.NOTIFICATION_PERMISSION_REQUEST,
+                new String[] {android.Manifest.permission.POST_NOTIFICATIONS},
+                new int[] {PackageManager.PERMISSION_DENIED});
+        shadowOf(Looper.getMainLooper()).idle();
+
+        Intent next = shadowOf(activity).getNextStartedActivity();
+        assertNotNull("the site never opened after the answer", next);
+        assertEquals(CHROME, next.getPackage());
+    }
+
+    @Test
+    public void itAsksOnlyOnce() {
+        Application app = ApplicationProvider.getApplicationContext();
+        shadowOf(app).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS);
+        app.getSharedPreferences("goodERP", Context.MODE_PRIVATE).edit()
+                .putBoolean("asked_for_notifications", true).commit();
+        installChrome();
+
+        LauncherActivity activity = tapTheIcon();
+
+        assertNull(shadowOf(activity).getLastRequestedPermission());
+        assertEquals(CHROME, shadowOf(activity).getNextStartedActivity().getPackage());
+    }
+
+    @Test
+    public void theTokenCookieIsForThisSiteOnlyAndHiddenFromScripts() {
+        String cookie = AppPush.cookieFor("abc:DEF-123_x");
+        assertTrue(cookie.startsWith("__Host-gerp_fcm=abc:DEF-123_x;"));
+        assertTrue("a __Host- cookie may not name a Domain", !cookie.contains("Domain"));
+        assertTrue(cookie.contains("Secure"));
+        assertTrue(cookie.contains("HttpOnly"));
+        assertTrue(cookie.contains("Path=/"));
+    }
+
+    @Test
+    public void aNotificationOnlyEverOpensGoodErp() {
+        assertEquals("https://erp.goodtechies.com/messages?conversation=4",
+                GoodErpMessagingService.siteUrl("/messages?conversation=4"));
+        assertEquals(LauncherActivity.SITE_URL, GoodErpMessagingService.siteUrl("https://evil.example/x"));
+        assertEquals(LauncherActivity.SITE_URL, GoodErpMessagingService.siteUrl("//evil.example/x"));
+        assertEquals(LauncherActivity.SITE_URL, GoodErpMessagingService.siteUrl(null));
+    }
+
+    @Test
+    public void aPushShowsInTheNotificationShadeWithItsChatsText() {
+        Application app = ApplicationProvider.getApplicationContext();
+        java.util.Map<String, String> data = new java.util.HashMap<>();
+        data.put("title", "Shahadat Hossain");
+        data.put("body", "Standup at 10");
+        data.put("url", "/messages?conversation=4");
+        data.put("tag", "conversation-4");
+        data.put("category", "messages");
+
+        GoodErpMessagingService.show(app, data);
+
+        android.app.NotificationManager manager = app.getSystemService(android.app.NotificationManager.class);
+        android.app.Notification shown = shadowOf(manager).getNotification("conversation-4", 0);
+        assertNotNull("nothing in the notification shade", shown);
+        assertEquals("Shahadat Hossain", shown.extras.getString(android.app.Notification.EXTRA_TITLE));
+        assertEquals("Standup at 10", shown.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString());
+        assertEquals(GoodErpMessagingService.CHANNEL_MESSAGES, shown.getChannelId());
+    }
+
+    @Test
+    public void aSecondMessageFromTheSameChatReplacesTheFirst() {
+        Application app = ApplicationProvider.getApplicationContext();
+        java.util.Map<String, String> data = new java.util.HashMap<>();
+        data.put("title", "Team");
+        data.put("tag", "conversation-1");
+        data.put("category", "messages");
+
+        data.put("body", "one");
+        GoodErpMessagingService.show(app, data);
+        data.put("body", "two");
+        GoodErpMessagingService.show(app, data);
+
+        android.app.NotificationManager manager = app.getSystemService(android.app.NotificationManager.class);
+        assertEquals(1, shadowOf(manager).size());
+    }
+
+    @Test
+    public void nothingIsShownWithoutPermission() {
+        Application app = ApplicationProvider.getApplicationContext();
+        shadowOf(app).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS);
+        java.util.Map<String, String> data = new java.util.HashMap<>();
+        data.put("title", "T");
+
+        GoodErpMessagingService.show(app, data);
+
+        android.app.NotificationManager manager = app.getSystemService(android.app.NotificationManager.class);
+        assertEquals(0, shadowOf(manager).size());
     }
 }

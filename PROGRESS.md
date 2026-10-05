@@ -1517,7 +1517,7 @@ in six dispatches (`.claude/dispatch/ledger.md` 001–007) against the contract 
 - **Extension:** `apps/timer-extension/` (Manifest V3, plain modules, no build): worker on `chrome.alarms`,
   pure classifier / idle clock / site tracker / formula / queue (61 unit tests), two content scripts that
   send two booleans only, popup, prompt window (four buttons; "Timer paused at HH:MM" after the server
-  pause), options, icons from the project mark, `INSTALL.md`, `npm run package` → `dist/…zip`.
+  pause), options, icons from the project mark; the popup is Project → Task → Start and the timer only (decision 11-06), `INSTALL.md`, `npm run package` → `dist/…zip`.
 - **Web:** dashboard card carries the four controls and "left today" (decision 11-03); Profile → Connect
   timer extension (remote users only); Employee → Time → My activity; Admin → Time → Activity (per employee,
   per day: state timeline + website table); no score, no ranking, no categories.
@@ -1526,7 +1526,7 @@ in six dispatches (`.claude/dispatch/ledger.md` 001–007) against the contract 
   parity within 2 s both ways, call / video / idle classification, the four prompt buttons, server
   auto-pause and resume — 22 ok; the audible-tab rule is **not verified in headless** and real Google Meet /
   YouTube are **not verified** (manual checklist in that record). Known limits: a call in a desktop app is
-  not seen (use "I'm in a meeting"); any audible tab counts as media (music too).
+  not seen (the prompt's "I was in a meeting or call" button covers it); any audible tab counts as media (music too).
 
 **GATE F:** load the unpacked folder on your Windows machine (Chrome and Edge), pair from Profile, run the
 manual checklist, and confirm the wording of every invented string listed in the 5 Oct report.

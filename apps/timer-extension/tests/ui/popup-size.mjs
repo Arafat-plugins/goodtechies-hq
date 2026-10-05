@@ -77,6 +77,7 @@ const FIXTURES = {
         { ...ACTIVITY, pending_idle: { idle_from: iso(NOW - 360000), auto_paused_at: iso(NOW - 60000) } },
         { idle_from: iso(NOW - 360000), windowId: 12, notificationId: null },
     ),
+    idle: pairedView(null, ACTIVITY, null),
 };
 
 const PAGES = [
@@ -90,13 +91,13 @@ function fakeChrome(view) {
     const tasks = [
         { id: 7, title: 'Homepage redesign: hero section and navigation', project: 'Woodford website' },
         { id: 8, title: 'Weekly report', project: null },
+        { id: 9, title: 'Invoice follow-up', project: 'Buffalo Modular' },
     ];
     const store = {};
     const reply = (cmd) => {
         switch (cmd) {
             case 'getState':
             case 'sync':
-            case 'meeting':
             case 'setServer':
                 return view;
             case 'getTasks':
@@ -177,6 +178,31 @@ for (const pageSpec of PAGES) {
                 failed++;
             }
             console.log(`${label} counter "${counter}" left "${left}" ${ok ? 'ok' : `want "${wantCounter}" "${wantLeft}"`}`);
+        }
+
+        if (pageSpec.name === 'popup' && fixtureName === 'idle') {
+            // Paired, nothing running: the project picker filters the task picker.
+            const pickers = () => page.evaluate(() => ({
+                projects: [...document.querySelectorAll('#project option')].map((o) => [o.textContent, o.value]),
+                project: document.querySelector('#project').value,
+                tasks: [...document.querySelectorAll('#task option')].filter((o) => !o.disabled).map((o) => o.textContent),
+                task: document.querySelector('#task').value,
+                removed: ['#meeting', '#settings', '#disclosure'].every((s) => document.querySelector(s) === null),
+            }));
+            const first = await pickers();
+            await page.selectOption('#project', '');
+            const none = await pickers();
+            const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+            const ok = same(first.projects, [['Buffalo Modular', 'Buffalo Modular'], ['Woodford website', 'Woodford website'], ['No project', '']])
+                && first.project === 'Buffalo Modular'
+                && same(first.tasks, ['Invoice follow-up']) && first.task === '9'
+                && same(none.tasks, ['Weekly report'])
+                && first.removed;
+            if (!ok) {
+                failed++;
+            }
+            const names = first.projects.map(([text]) => text).join(', ');
+            console.log(`${label} projects "${names}" task "${first.tasks.join(', ')}" no project "${none.tasks.join(', ')}" ${ok ? 'ok' : `got ${JSON.stringify({ first, none })}`}`);
         }
 
         await context.close();

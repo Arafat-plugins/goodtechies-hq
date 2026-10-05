@@ -5,4 +5,6 @@
     <color name="bar_dark">#0A0D12</color>
     <color name="splash_background">#FCFDFE</color>
     <color name="ic_launcher_background">#0A0D12</color>
+    <!-- The notification accent (goodERP orange, the brand colour). -->
+    <color name="brand">#F04E27</color>
 </resources>

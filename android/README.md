@@ -81,6 +81,26 @@ of the two it used that time. Since 1.0.5 the WebView screen's theme is DayNight
 (`res/values-v29`, `res/values-v35`), so both answer the same. A Light or Dark choice from the
 user menu is also saved on the account (`users.theme`), so every browser and device agrees.
 
+## Notifications inside the app (1.0.6, Firebase)
+
+Web Push reaches the app only while it runs through Chrome; the WebView backup screen has no Web
+Push, so nothing reached the notification shade there. Since 1.0.6 the app has its own
+notifications through Firebase Cloud Messaging, in both modes:
+
+- `AppPush.java` asks Firebase for this install's token at every start and writes it as the
+  `__Host-gerp_fcm` cookie for erp.goodtechies.com. The server (`RememberAppPushToken`) files it
+  under whoever is signed in on the phone; signing out forgets it.
+- `GoodErpMessagingService.java` receives the server's data messages and draws the notification
+  (one per chat, tap → that chat). Channels: Messages, Alerts.
+- The first start on Android 13+ asks "Allow notifications?" once, before opening the site.
+
+**Two files from the goodERP Firebase project, neither in Git:**
+
+| File | Where | What it is |
+| --- | --- | --- |
+| `google-services.json` | `android/app/` on the PC that builds the APK | The app's Firebase config. Without it the APK builds, but its notifications stay off. |
+| service-account key (`.json`) | on the VPS only, path in `FCM_CREDENTIALS` in `.env` | **Secret.** Lets the server send. Never commit it, never paste it in chat. |
+
 ## Installing on a phone
 
 Copy the APK to the phone and open it. Android asks once to allow installs from that source

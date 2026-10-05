@@ -66,27 +66,6 @@ h2 {
     background: var(--primary);
 }
 
-.disclosure {
-    padding: var(--s-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    font-size: 12px;
-    line-height: 1.35;
-}
-
-.disclosure-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s-2);
-    margin-bottom: var(--s-1);
-}
-
-.disclosure h2 {
-    font-size: 13px;
-}
-
 .popup button.small {
     min-height: 24px;
     padding: 2px var(--s-2);
@@ -144,36 +123,6 @@ details p {
 
 .left-line {
     font-weight: 600;
-}
-
-.meeting-line {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s-2);
-    padding: var(--s-2) var(--s-3);
-    border-radius: var(--radius);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    font-weight: 600;
-}
-
-.foot {
-    display: flex;
-    justify-content: flex-end;
-    padding-top: var(--s-2);
-    border-top: 1px solid var(--border);
-}
-
-.foot .link {
-    display: inline-flex;
-    gap: var(--s-1);
-    font-size: 13px;
-    text-decoration: none;
-}
-
-.foot .link span {
-    text-decoration: underline;
 }
 
 .visually-hidden {

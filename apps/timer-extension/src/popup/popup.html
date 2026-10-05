@@ -15,14 +15,6 @@
             <span id="status-chip" class="chip" hidden></span>
         </header>
 
-        <section id="disclosure" class="disclosure" aria-labelledby="disclosure-heading" hidden>
-            <div class="disclosure-head">
-                <h2 id="disclosure-heading" data-text="DISCLOSURE_HEADING"></h2>
-                <button type="button" id="disclosure-ok" class="secondary small" data-text="DISCLOSURE_OK"></button>
-            </div>
-            <p data-text="DISCLOSURE"></p>
-        </section>
-
         <p id="offline" class="notice" role="status" data-text="OFFLINE" hidden></p>
         <p id="error" class="error" role="alert" hidden></p>
 
@@ -55,6 +47,10 @@
         <section id="idle" class="stack" hidden>
             <form id="start-form" class="stack" novalidate>
                 <div>
+                    <label for="project" data-text="PROJECT_LABEL"></label>
+                    <select id="project" name="project"></select>
+                </div>
+                <div>
                     <label for="task" data-text="TASK_LABEL"></label>
                     <select id="task" name="task" required></select>
                 </div>
@@ -83,19 +79,7 @@
                 <p class="today-line time" data-today></p>
                 <p class="left-line time" data-left></p>
             </div>
-            <button type="button" id="meeting" class="secondary full" data-text="MEETING_BUTTON"></button>
-            <p id="meeting-line" class="meeting-line" hidden>
-                <span id="meeting-left" class="time"></span>
-                <button type="button" id="meeting-cancel" class="link" data-text="MEETING_CANCEL"></button>
-            </p>
         </section>
-
-        <footer class="foot">
-            <button type="button" id="settings" class="link">
-                <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-                <span data-text="SETTINGS"></span>
-            </button>
-        </footer>
     </main>
 </body>
 </html>

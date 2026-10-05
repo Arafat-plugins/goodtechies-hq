@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\RememberAppPushToken;
 use App\Http\Requests\Auth\LoginRequest;
+use App\Models\AppPushToken;
 use App\Models\User;
 use App\Services\TwoFactorService;
 use Illuminate\Auth\Events\Failed;
@@ -87,6 +89,16 @@ class LoginController extends Controller
 
     public function destroy(Request $request): RedirectResponse
     {
+        // 2026-10-05: signing out inside the Android app stops that phone's notifications.
+        $appToken = $request->cookies->get(RememberAppPushToken::COOKIE);
+
+        if (is_string($appToken) && $appToken !== '' && $request->user() !== null) {
+            AppPushToken::query()
+                ->where('user_id', $request->user()->getKey())
+                ->where('token', $appToken)
+                ->delete();
+        }
+
         Auth::guard('web')->logout();
 
         $request->session()->invalidate();

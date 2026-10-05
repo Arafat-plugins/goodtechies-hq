@@ -1,7 +1,11 @@
 package com.goodtechies.erp;
 
+import android.Manifest;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -34,21 +38,61 @@ public class LauncherActivity extends com.google.androidbrowserhelper.trusted.La
             openInWebView(new IllegalStateException("Chrome did not open within " + HANDOVER_TIMEOUT_MS + " ms"));
     private boolean fellBack;
 
+    /** 1.0.6: the one-time "Allow goodERP to send you notifications?" question (Android 13+). */
+    static final int NOTIFICATION_PERMISSION_REQUEST = 7301;
+    private static final String PREFS = "goodERP";
+    private static final String ASKED_FOR_NOTIFICATIONS = "asked_for_notifications";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         try {
             super.onCreate(savedInstanceState);
         } catch (RuntimeException e) {
             openInWebView(e);
-            return;
         }
-        if (!isFinishing()) {
-            handler.postDelayed(handoverWatchdog, HANDOVER_TIMEOUT_MS);
+    }
+
+    /**
+     * On the first start on Android 13+, ask for notifications before opening the site: the app's
+     * own notifications (Firebase) need it in Chrome mode and in WebView mode alike. Asked once;
+     * the site opens straight after the answer, whatever it is.
+     */
+    @Override
+    protected boolean shouldLaunchImmediately() {
+        if (!needsToAskForNotifications()) {
+            return true;
         }
+        prefs().edit().putBoolean(ASKED_FOR_NOTIFICATIONS, true).apply();
+        requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
+        return false;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST && !isFinishing()) {
+            launchTwa();
+        }
+    }
+
+    boolean needsToAskForNotifications() {
+        return Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                && !prefs().getBoolean(ASKED_FOR_NOTIFICATIONS, false);
+    }
+
+    private SharedPreferences prefs() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE);
     }
 
     @Override
     protected void launchTwa() {
+        if (isFinishing()) {
+            return;
+        }
+        // The hand-over clock starts when the hand-over does (not while the question is open).
+        handler.removeCallbacks(handoverWatchdog);
+        handler.postDelayed(handoverWatchdog, HANDOVER_TIMEOUT_MS);
         try {
             super.launchTwa();
         } catch (RuntimeException e) {

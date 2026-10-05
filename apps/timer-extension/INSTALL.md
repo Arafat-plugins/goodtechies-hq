@@ -64,15 +64,15 @@ The small badge on the icon shows your timer at a glance:
 
 ## 7. Disconnect
 
-Click the extension icon, then **Settings** at the bottom, and click **Disconnect**. You can
-also remove the device from your goodERP Profile. To remove the extension completely, open
-`chrome://extensions` (or `edge://extensions`) and click **Remove** on its card.
+Open chrome://extensions, click **Details** on goodERP Timer, then **Extension options**, and
+click **Disconnect**. You can also remove the device from your goodERP Profile. To remove the
+extension completely, open `chrome://extensions` (or `edge://extensions`) and click **Remove**
+on its card.
 
 ## 8. Two things it cannot see
 
 - **A call in a desktop app.** Zoom, Teams or Discord as desktop apps, or a phone call, happen
-  outside the browser, so the extension cannot see them. Before such a call, click
-  **I'm in a meeting** in the extension, or pick **I was in a meeting or call (keep the time)**
-  when the "Are you still working?" window appears.
+  outside the browser, so the extension cannot see them. The "Are you still working?" window's
+  **I was in a meeting or call (keep the time)** button covers such a call.
 - **Any tab playing sound counts as media.** Music playing in a tab, like a video, keeps that
   time from counting as idle.
