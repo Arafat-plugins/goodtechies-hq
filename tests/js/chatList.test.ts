@@ -84,7 +84,7 @@ test('rows without any message keep their order after the others', () => {
 test('formatListTime writes the time as Telegram does', () => {
     const now = new Date('2026-10-04T12:00:00+06:00');
 
-    assert.equal(formatListTime('2026-10-04T09:03:00+06:00', now), '09:03');
+    assert.equal(formatListTime('2026-10-04T09:03:00+06:00', now), '9:03 am');
     assert.equal(formatListTime('2026-10-03T09:00:00+06:00', now), 'Sat');
     assert.match(formatListTime('2026-09-20T09:00:00+06:00', now), /^20 Sep/);
     assert.ok(formatListTime('2025-09-20T09:00:00+06:00', now).includes('2025'));

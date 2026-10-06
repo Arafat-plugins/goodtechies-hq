@@ -91,8 +91,9 @@ export function moneyInputValue(amount: string | number | null | undefined): str
 
 <script setup lang="ts">
 import { Link, useForm } from '@inertiajs/vue3';
-import { CircleAlert, Loader2 } from '@lucide/vue';
-import { computed, watch } from 'vue';
+import { CircleAlert, Loader2, Pencil } from '@lucide/vue';
+import { computed, ref, watch } from 'vue';
+import ProjectTypeNamesDialog from '@/Components/Projects/ProjectTypeNamesDialog.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
@@ -116,7 +117,12 @@ const props = defineProps<{
     recurrenceFrequencies: Option[];
     billingFrequencies: Option[];
     submitLabel: string;
+    /** Polish 026: the built-in type names, and whether this person may rename them. */
+    projectTypeDefaults?: Record<string, string>;
+    canRenameProjectTypes?: boolean;
 }>();
+
+const renamingTypes = ref(false);
 
 const isEdit = computed(() => props.project !== undefined);
 
@@ -381,9 +387,23 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
                 </div>
 
                 <div class="flex min-w-0 flex-col gap-2">
-                    <Label for="project-type">
-                        Type <span class="text-destructive" aria-hidden="true">*</span>
-                    </Label>
+                    <div class="flex min-w-0 items-center justify-between gap-2">
+                        <Label for="project-type">
+                            Type <span class="text-destructive" aria-hidden="true">*</span>
+                        </Label>
+                        <Button
+                            v-if="canRenameProjectTypes"
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            class="-my-1.5 h-7 px-2 text-xs text-muted-foreground"
+                            :disabled="form.processing"
+                            @click="renamingTypes = true"
+                        >
+                            <Pencil class="size-3" aria-hidden="true" />
+                            Edit names
+                        </Button>
+                    </div>
                     <Select v-model="form.project_type" :disabled="form.processing">
                         <SelectTrigger
                             id="project-type"
@@ -399,6 +419,12 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
                         </SelectContent>
                     </Select>
                     <p v-if="errors.project_type" class="text-xs text-destructive">{{ errors.project_type }}</p>
+                    <ProjectTypeNamesDialog
+                        v-if="canRenameProjectTypes"
+                        v-model:open="renamingTypes"
+                        :types="projectTypes"
+                        :defaults="projectTypeDefaults ?? {}"
+                    />
                 </div>
 
                 <div class="flex min-w-0 flex-col gap-2">

@@ -21,6 +21,7 @@ import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { clock12 } from '@/lib/clock';
 
 /**
  * Shipped without a layout: this page and the schedule editor were the only two under
@@ -123,7 +124,7 @@ function summarise(row: ScheduleEditorRow): string {
         .map((key) => props.weekdays.find((day) => day.value === key)?.short ?? key)
         .join(', ');
 
-    const start = row.schedule.start_time ? `starts ${row.schedule.start_time}` : 'no start time';
+    const start = row.schedule.start_time ? `starts ${clock12(row.schedule.start_time)}` : 'no start time';
 
     return `${days || 'No working days'} · ${row.schedule.working_hours_per_day} h/day · ${start}`;
 }

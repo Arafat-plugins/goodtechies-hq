@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ProjectResource;
 use App\Models\Project;
 use App\Support\ProjectStatus;
+use App\Support\ProjectTaskList;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -58,6 +59,8 @@ class ProjectController extends Controller
 
         return Inertia::render('Employee/Projects/Show', [
             'project' => new ProjectResource($project),
+            // Client request 2026-10-06: the tasks on this project that are assigned to me.
+            'projectTasks' => fn (): array => ProjectTaskList::for($request->user(), $project, 'employee'),
         ]);
     }
 

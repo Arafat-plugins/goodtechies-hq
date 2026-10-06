@@ -1,6 +1,7 @@
 import { CalendarDays, Clock, Hourglass, House, Moon, Plane, User, UserX } from '@lucide/vue';
 import type { Component } from 'vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
+import { clock12 } from '@/lib/clock';
 
 /**
  * The attendance payloads, the endpoints that write them, and the formatters.
@@ -206,13 +207,13 @@ export function formatMinutes(minutes: number | null | undefined): string {
     return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
 
-/** `09:00 – 17:30`, `09:00 – still in`, or `—`. */
+/** `9:00 am – 5:30 pm`, `9:00 am – still in`, or `—`. */
 export function formatShift(day: Pick<AttendanceDay, 'clock_in' | 'clock_out'>): string {
     if (!day.clock_in) {
         return '—';
     }
 
-    return `${day.clock_in} – ${day.clock_out ?? 'still in'}`;
+    return `${clock12(day.clock_in)} – ${day.clock_out ? clock12(day.clock_out) : 'still in'}`;
 }
 
 /**

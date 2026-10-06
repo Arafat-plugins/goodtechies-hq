@@ -248,8 +248,11 @@ const bubbleClass = computed(() =>
           )
         : cn(
             'flex min-w-0 flex-col gap-1 rounded-2xl px-3 py-1.5',
+            // Polish 027: your own bubble sits one neutral step lighter (`--muted`) than everyone
+            // else's card, so it reads as yours at a glance. Neutral grey — the client turned
+            // down both the solid blue (2026-10-04) and a warm brand tint (2026-10-06).
             mine.value
-                ? 'rounded-br-md border bg-card text-foreground'
+                ? 'rounded-br-md border bg-muted text-foreground'
                 : 'rounded-bl-md border bg-card text-foreground',
             // The mention highlight has to survive on both fills, so it is a ring rather than a
             // left bar here: `--primary` on `--muted` is 4.71:1 and `--bubble-own-foreground` on

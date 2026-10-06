@@ -24,6 +24,12 @@ class SettingsService
     public const READ_ONLY = ['backup_last_verified_at'];
 
     /**
+     * Keys an admin edits on a screen of their own rather than Admin → Settings (polish 026:
+     * the project type names, renamed beside the Type box on the project form).
+     */
+    public const OWN_SCREEN = ['project_type_labels'];
+
+    /**
      * @var array<string, mixed>|null
      */
     private ?array $values = null;

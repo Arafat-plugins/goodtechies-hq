@@ -12,6 +12,7 @@ import {
 import StatusBadge, { statusToneClass } from '@/Components/StatusBadge.vue';
 import { Button } from '@/Components/ui/button';
 import { cn } from '@/lib/utils';
+import { clock12 } from '@/lib/clock';
 
 /**
  * One month of somebody's attendance — *"month calendar/list"*, and it is genuinely both.
@@ -178,7 +179,7 @@ function cellClass(day: AttendanceDay): string {
                     <!-- The word. Never a bare tint. -->
                     <span class="text-xs leading-tight font-medium">{{ label(day) }}</span>
 
-                    <span v-if="day.clock_in" class="text-xs tabular-nums opacity-80">{{ day.clock_in }}</span>
+                    <span v-if="day.clock_in" class="text-xs tabular-nums opacity-80">{{ clock12(day.clock_in) }}</span>
 
                     <span v-if="day.tracked_minutes !== null" class="text-xs tabular-nums opacity-80">
                         {{ formatMinutes(day.tracked_minutes) }}

@@ -698,6 +698,8 @@ function permissionMatrix(): array
         // `SettingsService::set()` is the only writer and it checks `settings.manage` itself, so
         // there are two refusals stacked here and they agree.
         ['PUT', 'admin/settings', $adminAction],
+        // Polish 026: renaming the project types. Body-less, so the Form Request refuses.
+        ['PUT', 'admin/project-types', $adminAction],
 
         // Admin → Notifications defaults (Phase 12). `notification_preferences` decides whether
         // the engine writes a row at all, so this is a configuration screen and wears

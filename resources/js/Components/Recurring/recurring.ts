@@ -336,7 +336,7 @@ export function logTone(entry: RecurringLogEntry): StatusKey {
 }
 
 const DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' });
-const DATE_TIME = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+const DATE_TIME = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: true });
 
 /**
  * A date the server computed, formatted for reading. It parses and prints; it never adds a day.

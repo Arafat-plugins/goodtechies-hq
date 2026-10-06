@@ -190,7 +190,7 @@ export function relativeTime(iso: string | null): string {
     return format.format(0, 'second');
 }
 
-const EXACT = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+const EXACT = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: true });
 
 /** The `title` behind the relative time, so "2 hours ago" can be resolved to a clock. */
 export function exactTime(iso: string | null): string | undefined {
@@ -283,7 +283,7 @@ const status = ref<BellStatus>('idle');
 const stale = ref(false);
 const lastReadAt = ref<number | null>(null);
 
-const CLOCK = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+const CLOCK = new Intl.DateTimeFormat('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true });
 
 /** `Couldn't refresh…` with the clock time of the last good read, or `null` while fresh. */
 const staleLine = computed(() => {

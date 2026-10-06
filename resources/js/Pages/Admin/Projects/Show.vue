@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Archive, ArchiveRestore, ListTodo, Pencil, Trash2 } from '@lucide/vue';
+import { Archive, ArchiveRestore, Pencil, Trash2 } from '@lucide/vue';
 import { computed, ref } from 'vue';
-import EmptyState from '@/Components/EmptyState.vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
 import { fileRoutes, internalFileRoutes } from '@/Components/Files/files';
 import MessageThread from '@/Components/Messages/MessageThread.vue';
@@ -11,6 +10,7 @@ import PageShell from '@/Components/PageShell.vue';
 import DeleteProjectDialog, { canForceDelete } from '@/Components/Projects/DeleteProjectDialog.vue';
 import FinanceCard from '@/Components/Projects/FinanceCard.vue';
 import MembersCard from '@/Components/Projects/MembersCard.vue';
+import ProjectTaskList, { type ProjectTasks } from '@/Components/Projects/ProjectTaskList.vue';
 import type { EmployeeOption, Option, Project } from '@/Components/Projects/ProjectForm.vue';
 import ProjectMetaList from '@/Components/Projects/ProjectMetaList.vue';
 import StatusActions from '@/Components/Projects/StatusActions.vue';
@@ -43,6 +43,8 @@ const props = defineProps<{
     discussionConversationId: number;
     /** Open task timers on this project (flow F3) — absent for anybody without `watchLive`. */
     workingNow?: WorkingNowRow[];
+    /** Client request 2026-10-06: every task on this project. */
+    projectTasks: ProjectTasks;
 }>();
 
 /** A `task.changed` kind `timer` frame re-reads `workingNow` alone (flow F1). */
@@ -293,22 +295,12 @@ function confirmArchiveToggle(): void {
                 real one, pre-filtered, and says so.
             -->
             <TabsContent value="tasks" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
-                <Card class="min-w-0 gap-4 p-6">
-                    <h2 class="text-sm font-medium">Tasks</h2>
-                    <EmptyState
-                        :icon="ListTodo"
-                        title="The tasks on this project"
-                        description="They live on the Tasks screens, where the List, the Board and the Calendar all read the same query. This opens them filtered to this project."
-                    >
-                        <template #action>
-                            <Button as-child size="sm">
-                                <Link :href="`/admin/tasks?project_id=${project.id}`">
-                                    Open this project’s tasks
-                                </Link>
-                            </Button>
-                        </template>
-                    </EmptyState>
-                </Card>
+                <ProjectTaskList
+                    :tasks="projectTasks"
+                    scope-label="All tasks"
+                    :all-href="`/admin/tasks?project_id=${project.id}`"
+                    show-assignees
+                />
             </TabsContent>
 
             <!--

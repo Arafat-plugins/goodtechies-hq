@@ -26,6 +26,10 @@ class SettingsSeeder extends Seeder
         'idle_prompt_seconds' => 120,
         'activity_retention_days' => 90,
         'backup_last_verified_at' => null,
+        // Polish 026: the Admin's own names for the project types, keyed by `ProjectType`
+        // value (`{"seo": "Search"}`). Empty means every type keeps its built-in name. Edited
+        // beside the Type box on the project form, not on Admin → Settings.
+        'project_type_labels' => [],
     ];
 
     /**

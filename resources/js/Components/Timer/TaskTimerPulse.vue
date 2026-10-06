@@ -7,18 +7,40 @@ let loop: ReturnType<typeof setInterval> | null = null;
 let askedThisLoad = false;
 
 /**
- * Brief 009 (follow-up to 008): is another goodERP tab open? Every tab says "alive" on the
- * `hq-tabs` BroadcastChannel every 5 s and remembers when ANOTHER tab last did. Closing one of
- * two tabs then skips the leaving beacon — the timer is still being kept alive next door.
+ * Brief 009 (follow-up to 008), reworked in polish 026: is another goodERP tab open?
+ *
+ * Every tab has an id and keeps a register of the OTHER tabs on the `hq-tabs` BroadcastChannel:
+ * `hello` when it opens (everybody already open answers `here`), `alive` every 5 s, and `bye`
+ * from `pagehide`. The register used to be a single "last heard 12 s ago" clock, and Chrome
+ * throttles a background tab's timers to once a minute — so with a second tab open behind this
+ * one, closing this one still raised "Leave site?" and sent the leaving beacon. A tab that said
+ * hello and has not said bye now counts as open for up to OTHER_TAB_STALE_MS without a beat,
+ * which only matters for a tab that crashed rather than closed.
+ *
  * Module state with a mount count, so a layout swap (two instances for a moment) never hears
  * itself as "another tab".
  */
 const TAB_ALIVE_MS = 5_000;
-const OTHER_TAB_FRESH_MS = 12_000;
+const OTHER_TAB_STALE_MS = 10 * 60_000;
+const tabId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+const otherTabs = new Map<string, number>();
 let tabChannel: BroadcastChannel | null = null;
 let tabTimer: ReturnType<typeof setInterval> | null = null;
 let tabMounts = 0;
-let otherTabAliveAt = 0;
+
+type TabFrame = { hello?: string; here?: string; alive?: string | number; bye?: string };
+
+function tabSay(frame: TabFrame): void {
+    try {
+        tabChannel?.postMessage(frame);
+    } catch {
+        // A closed channel: nothing to say.
+    }
+}
+
+function sayBye(): void {
+    tabSay({ bye: tabId });
+}
 
 function openTabChannel(): void {
     tabMounts += 1;
@@ -36,21 +58,35 @@ function openTabChannel(): void {
     }
 
     tabChannel.onmessage = (event: MessageEvent) => {
-        if (typeof (event.data as { alive?: unknown } | null)?.alive === 'number') {
-            otherTabAliveAt = Date.now();
+        const frame = (event.data ?? {}) as TabFrame;
+        const now = Date.now();
+
+        if (typeof frame.bye === 'string') {
+            otherTabs.delete(frame.bye);
+
+            return;
+        }
+
+        if (typeof frame.hello === 'string') {
+            otherTabs.set(frame.hello, now);
+            tabSay({ here: tabId });
+
+            return;
+        }
+
+        const id = frame.here ?? frame.alive;
+
+        if (typeof id === 'string') {
+            otherTabs.set(id, now);
+        } else if (typeof id === 'number') {
+            // A tab still running the old build: no id, so it can only be "somebody".
+            otherTabs.set('legacy', now);
         }
     };
 
-    const say = (): void => {
-        try {
-            tabChannel?.postMessage({ alive: Date.now() });
-        } catch {
-            // A closed channel: nothing to say.
-        }
-    };
-
-    say();
-    tabTimer = setInterval(say, TAB_ALIVE_MS);
+    tabSay({ hello: tabId });
+    tabTimer = setInterval(() => tabSay({ alive: tabId }), TAB_ALIVE_MS);
+    window.addEventListener('pagehide', sayBye);
 }
 
 function closeTabChannel(): void {
@@ -65,12 +101,23 @@ function closeTabChannel(): void {
         tabTimer = null;
     }
 
+    window.removeEventListener('pagehide', sayBye);
     tabChannel?.close();
     tabChannel = null;
 }
 
 function anotherTabAlive(): boolean {
-    return Date.now() - otherTabAliveAt < OTHER_TAB_FRESH_MS;
+    const now = Date.now();
+
+    for (const [id, seenAt] of otherTabs) {
+        if (now - seenAt < OTHER_TAB_STALE_MS) {
+            return true;
+        }
+
+        otherTabs.delete(id);
+    }
+
+    return false;
 }
 </script>
 
@@ -168,7 +215,8 @@ function formToken(): string {
 function onBeforeUnload(event: BeforeUnloadEvent): void {
     // Polish 018: downloading a file, or moving to another goodERP page by a full load (a link,
     // or a click that a deploy turned into one), is not leaving goodERP — no "Leave site?".
-    if (!guardActive.value || isDownloading() || isInAppNavigation()) {
+    // Polish 026: with another goodERP tab still open, closing this one is not leaving goodERP.
+    if (!guardActive.value || isDownloading() || isInAppNavigation() || anotherTabAlive()) {
         return;
     }
 

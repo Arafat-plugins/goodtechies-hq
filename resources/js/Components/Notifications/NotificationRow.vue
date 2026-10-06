@@ -110,9 +110,9 @@ const when = computed(() => props.row.updated_at ?? props.row.created_at);
             <Check class="size-4" aria-hidden="true" />
         </button>
 
-        <!-- Polish 012: a read row can be deleted from the bell and the Center. -->
+        <!-- Polish 012: a read row can be deleted from the Center (not from the bell — client 2026-10-06). -->
         <button
-            v-else
+            v-else-if="!compact"
             type="button"
             :aria-label="`Delete: ${row.summary}`"
             title="Delete"

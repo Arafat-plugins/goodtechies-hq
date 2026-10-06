@@ -204,7 +204,7 @@ export const RSVP_TONE: Record<MeetingRsvp, StatusKey> = {
 
 /* ------------------------------------------------------------------ formatting */
 
-const TIME = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+const TIME = new Intl.DateTimeFormat('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true });
 const DAY_AND_MONTH = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
 const FULL_DATE = new Intl.DateTimeFormat('en-GB', {
     weekday: 'long',

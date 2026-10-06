@@ -16,6 +16,8 @@ const props = defineProps<{
     clients: NamedRef[];
     assignableEmployees: EmployeeOption[];
     projectTypes: Option[];
+    projectTypeDefaults?: Record<string, string>;
+    canRenameProjectTypes?: boolean;
     statuses: Option[];
     priorities: Option[];
     billingTypes: Option[];
@@ -44,6 +46,8 @@ const internalFiles = computed(() => internalFileRoutes(project.value.id));
             :clients="clients"
             :assignable-employees="assignableEmployees"
             :project-types="projectTypes"
+            :project-type-defaults="projectTypeDefaults"
+            :can-rename-project-types="canRenameProjectTypes"
             :statuses="statuses"
             :priorities="priorities"
             :billing-types="billingTypes"

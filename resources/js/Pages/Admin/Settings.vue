@@ -88,7 +88,7 @@ const verifiedAt = computed(() => {
 
     return Number.isNaN(date.getTime())
         ? props.backup.lastVerifiedAt
-        : new Intl.DateTimeFormat('en-GB', { dateStyle: 'long', timeStyle: 'short' }).format(date);
+        : new Intl.DateTimeFormat('en-GB', { dateStyle: 'long', timeStyle: 'short', hour12: true }).format(date);
 });
 </script>
 

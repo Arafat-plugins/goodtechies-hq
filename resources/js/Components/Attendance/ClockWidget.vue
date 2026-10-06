@@ -9,6 +9,7 @@ import StatusBadge from '@/Components/StatusBadge.vue';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import { inlineUploadFailure } from '@/lib/net';
+import { clock12 } from '@/lib/clock';
 
 /**
  * Clock In / Clock Out, and today's status.
@@ -183,10 +184,10 @@ function retry(): void {
                 <span v-else class="text-sm text-muted-foreground">{{ statusLabel }}</span>
 
                 <span v-if="hasBreaks" class="text-sm tabular-nums text-muted-foreground">
-                    First in {{ sessions[0].clock_in }}<template v-if="today.clock_out"> · Last out {{ today.clock_out }}</template>
+                    First in {{ clock12(sessions[0].clock_in) }}<template v-if="today.clock_out"> · Last out {{ clock12(today.clock_out) }}</template>
                 </span>
                 <span v-else-if="today.clock_in" class="text-sm tabular-nums text-muted-foreground">
-                    In {{ today.clock_in }}<template v-if="today.clock_out"> · Out {{ today.clock_out }}</template>
+                    In {{ clock12(today.clock_in) }}<template v-if="today.clock_out"> · Out {{ clock12(today.clock_out) }}</template>
                 </span>
             </div>
 
@@ -202,7 +203,7 @@ function retry(): void {
             <template v-if="hasBreaks">
                 <ul aria-label="Today's sessions" class="flex flex-col gap-0.5 text-xs tabular-nums text-muted-foreground">
                     <li v-for="(s, i) in sessions" :key="i">
-                        {{ s.clock_in }} – {{ s.clock_out ?? 'now' }}<template v-if="s.minutes !== null"> · {{ formatMinutes(s.minutes) }}</template>
+                        {{ clock12(s.clock_in) }} – {{ s.clock_out ? clock12(s.clock_out) : 'now' }}<template v-if="s.minutes !== null"> · {{ formatMinutes(s.minutes) }}</template>
                     </li>
                 </ul>
                 <p class="text-xs text-muted-foreground">Breaks between sessions are not counted.</p>
@@ -211,7 +212,7 @@ function retry(): void {
 
         <!-- One primary control. Full width on a phone so it can be hit with a thumb. -->
         <div class="shrink-0" :class="isFinished ? 'flex flex-col gap-2 sm:items-end' : ''">
-            <p v-if="isFinished" class="text-sm text-muted-foreground">Clocked out at {{ today.clock_out }}.</p>
+            <p v-if="isFinished" class="text-sm text-muted-foreground">Clocked out at {{ clock12(today.clock_out) }}.</p>
 
             <Button
                 class="h-11 w-full sm:w-auto"

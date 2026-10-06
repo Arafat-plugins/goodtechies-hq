@@ -188,7 +188,7 @@ function openChat(id: number): void {
                                 v-if="unreadShown(entry.row) > 0"
                                 class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium tabular-nums text-primary-foreground"
                             >
-                                {{ entry.row.unread_count > 99 ? '99+' : entry.row.unread_count }}<span class="sr-only">{{ unreadLabel(entry.row) }}</span>
+                                {{ entry.row.unread_count }}<span class="sr-only">{{ unreadLabel(entry.row) }}</span>
                             </span>
                         </span>
                     </span>
@@ -227,7 +227,7 @@ function openChat(id: number): void {
                                     v-if="folderUnread(entry.rows) > 0"
                                     class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium tabular-nums text-primary-foreground"
                                 >
-                                    {{ folderUnread(entry.rows) > 99 ? '99+' : folderUnread(entry.rows) }}<span class="sr-only">{{ folderUnread(entry.rows) === 1 ? '1 unread message in projects' : `${folderUnread(entry.rows)} unread messages in projects` }}</span>
+                                    {{ folderUnread(entry.rows) }}<span class="sr-only">{{ folderUnread(entry.rows) === 1 ? '1 unread message in projects' : `${folderUnread(entry.rows)} unread messages in projects` }}</span>
                                 </span>
                             </span>
                         </span>
@@ -281,7 +281,7 @@ function openChat(id: number): void {
                                             v-if="unreadShown(row) > 0"
                                             class="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium tabular-nums text-primary-foreground"
                                         >
-                                            {{ row.unread_count > 99 ? '99+' : row.unread_count }}<span class="sr-only">{{ unreadLabel(row) }}</span>
+                                            {{ row.unread_count }}<span class="sr-only">{{ unreadLabel(row) }}</span>
                                         </span>
                                     </span>
                                 </span>

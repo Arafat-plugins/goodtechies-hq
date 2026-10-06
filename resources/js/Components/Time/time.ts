@@ -86,7 +86,7 @@ export function clockTime(iso: string | null | undefined): string {
 
     return Number.isNaN(at.getTime())
         ? '—'
-        : at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        : at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
 /** `Thu 25 Sep` — a work date, short. */

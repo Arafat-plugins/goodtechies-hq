@@ -294,7 +294,7 @@ export function formatListTime(value: string | null | undefined, now: Date = new
     const dayMs = 24 * 60 * 60 * 1000;
 
     if (date.getTime() >= startOfToday) {
-        return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(date);
+        return new Intl.DateTimeFormat('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true }).format(date);
     }
 
     if (date.getTime() >= startOfToday - 6 * dayMs) {
@@ -836,8 +836,9 @@ export function mergeThreadMessages(
 const DATE_TIME = new Intl.DateTimeFormat('en-GB', {
     day: 'numeric',
     month: 'short',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
+    hour12: true,
 });
 
 export function formatMessageTime(value: string | null | undefined): string {
@@ -879,7 +880,7 @@ export function initialsOf(name: string | null | undefined): string {
 
 /* -------------------------------------------------------------------- time, drawn */
 
-const CLOCK = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+const CLOCK = new Intl.DateTimeFormat('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true });
 const DAY = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-GB', {
     weekday: 'short',

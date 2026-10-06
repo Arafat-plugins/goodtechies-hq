@@ -21,6 +21,7 @@ import { useLiveProps } from '@/Components/Realtime/reload';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import type { TrackingMode } from '@/types';
 import { computed } from 'vue';
+import { clock12 } from '@/lib/clock';
 
 defineOptions({ layout: EmployeeLayout });
 
@@ -133,7 +134,7 @@ const scheduleSummary = computed(() => {
     }
 
     const days = props.schedule.days.join(', ') || 'No working days set';
-    const start = props.schedule.start_time ? `starts ${props.schedule.start_time}` : 'no start time';
+    const start = props.schedule.start_time ? `starts ${clock12(props.schedule.start_time)}` : 'no start time';
 
     return `${days} · ${props.schedule.hours_per_day} h/day · ${start}`;
 });

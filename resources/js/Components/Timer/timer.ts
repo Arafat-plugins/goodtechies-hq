@@ -215,7 +215,7 @@ export function formatTimeOfDay(iso: string | null | undefined): string {
 
     return Number.isNaN(date.getTime())
         ? '—'
-        : new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(date);
+        : new Intl.DateTimeFormat('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true }).format(date);
 }
 
 /* ------------------------------------------------------------------- the words */

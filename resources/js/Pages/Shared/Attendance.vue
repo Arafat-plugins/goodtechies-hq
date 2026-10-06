@@ -23,6 +23,7 @@ import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import EmployeeLayout from '@/Layouts/EmployeeLayout.vue';
 import type { SharedProps } from '@/types';
+import { clock12 } from '@/lib/clock';
 
 /**
  * Somebody's attendance: today's clock, and the month.
@@ -136,7 +137,7 @@ useLiveProps(['today', 'days', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
                 </p>
                 <p class="text-xs text-muted-foreground">
                     <template v-if="schedule.start_time">
-                        Starts {{ schedule.start_time }} — arriving more than
+                        Starts {{ clock12(schedule.start_time) }} — arriving more than
                         {{ schedule.late_grace_minutes }} minutes after that is Late.
                     </template>
                     <template v-else> No start time, so a day here is never Late. </template>

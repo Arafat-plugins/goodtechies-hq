@@ -393,7 +393,8 @@ export const messagesBadge = computed<{ text: string; label: string; count: numb
 
     return {
         count,
-        text: count > 9 ? '9+' : String(count),
+        // Client request 2026-10-06: the real number, never a 9+ cap.
+        text: String(count),
         label: count === 1 ? 'Messages, 1 unread' : `Messages, ${count} unread`,
     };
 });

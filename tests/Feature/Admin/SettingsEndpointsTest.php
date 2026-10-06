@@ -64,7 +64,7 @@ function settingsStored(string $key): mixed
 it('offers a field for every Part D §20 key except the read-only one', function () {
     $props = $this->actingAs($this->admin)->get('/admin/settings')->assertOk()->inertiaProps();
 
-    $editable = array_diff(array_keys(SettingsSeeder::DEFAULTS), SettingsService::READ_ONLY);
+    $editable = array_diff(array_keys(SettingsSeeder::DEFAULTS), SettingsService::READ_ONLY, SettingsService::OWN_SCREEN);
 
     expect(array_column($props['fields'], 'key'))->toBe(array_values($editable))
         // The read-only key is not a field. It is the backup health card, and nothing on this
@@ -266,7 +266,7 @@ it('keeps the Form Request table and the seeded key list in step', function () {
     // editable table can only ever be the seeded keys minus the read-only ones — no extra key
     // can appear in the form, and no key can quietly stop being editable.
     expect(array_keys(UpdateSettingsRequest::FIELDS))
-        ->toBe(array_values(array_diff(array_keys(SettingsSeeder::DEFAULTS), SettingsService::READ_ONLY)));
+        ->toBe(array_values(array_diff(array_keys(SettingsSeeder::DEFAULTS), SettingsService::READ_ONLY, SettingsService::OWN_SCREEN)));
 });
 
 /*

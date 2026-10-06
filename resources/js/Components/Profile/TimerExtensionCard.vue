@@ -115,7 +115,7 @@ async function copyCode(): Promise<void> {
     }
 }
 
-const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', hour12: true });
 
 function when(iso: string | null): string {
     if (iso === null) {

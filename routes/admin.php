@@ -20,6 +20,7 @@ use App\Http\Controllers\Admin\ProjectFinanceController;
 use App\Http\Controllers\Admin\ProjectMemberController;
 use App\Http\Controllers\Admin\ProjectPermissionController;
 use App\Http\Controllers\Admin\ProjectStatusController;
+use App\Http\Controllers\Admin\ProjectTypeController;
 use App\Http\Controllers\Admin\RecurringTaskController;
 use App\Http\Controllers\Admin\ReportController;
 use App\Http\Controllers\Admin\ScheduleController;
@@ -58,6 +59,12 @@ Route::prefix('admin')
         Route::put('/settings', [SettingsController::class, 'update'])
             ->middleware('can:settings.manage')
             ->name('settings.update');
+
+        // Polish 026: the Admin's own names for the project types (the `project_type_labels`
+        // setting), edited beside the Type box on the project form. Same gate as Settings.
+        Route::put('/project-types', [ProjectTypeController::class, 'update'])
+            ->middleware('can:settings.manage')
+            ->name('project-types.update');
 
         // Admin → Notifications: the agency-wide notification defaults
         // (`notification_preferences`, Part D §20 — *"global defaults set by Admin, Phase 12;

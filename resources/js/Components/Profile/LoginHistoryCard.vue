@@ -20,7 +20,7 @@ const props = defineProps<{
 }>();
 
 // Shown in the browser's own locale and timezone.
-const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', hour12: true });
 
 function formatWhen(iso: string): string {
     const date = new Date(iso);

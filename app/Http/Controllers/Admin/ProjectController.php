@@ -21,6 +21,7 @@ use App\Support\BillingType;
 use App\Support\Priority;
 use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
+use App\Support\ProjectTaskList;
 use App\Support\ProjectType;
 use App\Support\RoleName;
 use App\Support\UserStatus;
@@ -136,6 +137,8 @@ class ProjectController extends Controller
             'project' => new ProjectResource($project),
             'activity' => $this->activityFor($project),
             'assignableEmployees' => $this->assignableEmployees(),
+            // Client request 2026-10-06: every task on this project, listed on its Tasks tab.
+            'projectTasks' => fn (): array => ProjectTaskList::for($request->user(), $project, 'admin'),
 
             // The project's channel (Phase 6). Only its ID travels in the props: the Discussion
             // tab mounts the same thread component the Messages page does, and that component
@@ -299,6 +302,13 @@ class ProjectController extends Controller
             'billingTypes' => $this->options(BillingType::cases()),
             'recurrenceFrequencies' => $this->options(ProjectRecurrenceFrequency::cases()),
             'billingFrequencies' => $this->options(BillingFrequency::cases()),
+            // Polish 026: the Admin can rename the types beside the Type box.
+            'projectTypeDefaults' => array_column(
+                array_map(fn (ProjectType $type): array => [$type->value, $type->defaultLabel()], ProjectType::cases()),
+                1,
+                0,
+            ),
+            'canRenameProjectTypes' => Gate::allows('settings.manage'),
         ];
     }
 

@@ -303,7 +303,7 @@ export function statusLabel(employee: Pick<EmployeeRow, 'status' | 'status_label
 }
 
 const DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' });
-const DATE_TIME = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+const DATE_TIME = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: true });
 
 export function formatDate(value: string | null | undefined): string | null {
     if (!value) {

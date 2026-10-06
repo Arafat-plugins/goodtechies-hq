@@ -299,7 +299,7 @@ export function focusField(target: { $el?: unknown } | null | undefined): void {
 /* ------------------------------------------------------------------ formatting */
 
 const DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' });
-const DATE_TIME = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+const DATE_TIME = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: true });
 
 export function formatDate(value: string | null | undefined): string {
     if (!value) {

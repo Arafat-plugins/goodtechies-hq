@@ -236,7 +236,7 @@ export function iconFor(file: FileSummary): Component {
     return FileGlyph;
 }
 
-const DATE_TIME = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+const DATE_TIME = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: true });
 
 /**
  * Its own formatter rather than the tasks module's: files are mounted on three kinds of record
