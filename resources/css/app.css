@@ -28,6 +28,9 @@
     --brand-ink: oklch(0.1582 0.0118 260.6);        /* #0A0D12 — the logo's tile */
     --brand-tint: oklch(0.97 0.022 34.4);           /* #FFF0EB — active/selected row fill */
     --brand-tint-strong: oklch(0.94 0.045 34.4);    /* #FFE1D8 — hover on a selected row */
+    /* Polish 028: the fill of YOUR OWN chat bubble only (MessageRow). Neutral, two steps off
+     * the card so it reads as yours; nothing else uses it. */
+    --bubble-mine: oklch(0.93 0.008 260.6);         /* #E6E9EE */
 
     /* ── Neutral ramp — hue 260.6 (the logo ink's hue), chroma 0.006 ────────
      * 0.985 / 0.97 / 0.922 / 0.70 / 0.52 / 0.30. No neutral sits at the old
@@ -225,6 +228,7 @@
     --brand-ink: oklch(0.1582 0.0118 260.6);        /* #0A0D12 */
     --brand-tint: oklch(0.26 0.045 34.4);           /* #371B15 — active/selected row fill */
     --brand-tint-strong: oklch(0.32 0.070 34.4);    /* #512419 */
+    --bubble-mine: oklch(0.31 0.008 260.6);         /* #2D2F33 — own chat bubble only */
 
     /* ── Neutral ramp — same hue 260.6, mirrored ───────────────────────────
      * The canvas is the logo's tile exactly, not an approximation. */
@@ -377,6 +381,7 @@
     --color-brand-ink: var(--brand-ink);
     --color-brand-tint: var(--brand-tint);
     --color-brand-tint-strong: var(--brand-tint-strong);
+    --color-bubble-mine: var(--bubble-mine);
 
     --color-background: var(--background);
     --color-foreground: var(--foreground);
