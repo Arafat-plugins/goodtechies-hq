@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Video } from '@lucide/vue';
+import { router } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import { Button } from '@/Components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
@@ -34,6 +35,29 @@ const props = withDefaults(
 );
 
 const name = computed(() => `Join “${props.meeting.title}”`);
+
+/**
+ * Polish 030: pressing Join answers "Going" for you, so the room does not say "No answer yet"
+ * beside somebody who joined. Sent alongside the link opening in its new tab; a failure is
+ * silent — the meeting still opens.
+ */
+function markJoined(): void {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    const token = match ? decodeURIComponent(match[1]) : '';
+
+    void fetch(`/meetings/${props.meeting.id}/join`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        keepalive: true,
+        headers: { 'X-XSRF-TOKEN': token, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
+    })
+        .then((response) => {
+            if (response.ok) {
+                router.reload({ only: ['meeting', 'meetings'] });
+            }
+        })
+        .catch(() => undefined);
+}
 </script>
 
 <template>
@@ -48,6 +72,7 @@ const name = computed(() => `Join “${props.meeting.title}”`);
                     :variant="compact ? 'ghost' : 'outline'"
                     :size="compact ? 'icon-xs' : 'sm'"
                     :aria-label="name"
+                    @click="markJoined"
                 >
                     <Video aria-hidden="true" />
                     <span v-if="!compact">Join</span>

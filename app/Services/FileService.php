@@ -218,16 +218,19 @@ class FileService
     private const SVG_SCAN_BYTES = 1024 * 1024;
 
     /**
-     * How long a download link lives.
+     * How long a download link lives: until the start of the day after tomorrow.
      *
-     * Fifteen minutes. A link is minted when a page is rendered and used when somebody clicks
-     * it, which is seconds later; the rest of the window is for a slow reader and a slow
-     * connection. Long enough that nobody meets an expired link in normal use, short enough
-     * that one pasted into a chat log is dead before anybody scrolls back to it. The policy,
-     * not this number, is what stops the wrong person using it inside the window — see the
-     * class docblock.
+     * Polish 030. It was fifteen minutes, and a chat left open showed "Link expired" on every
+     * picture after a quarter of an hour — the client compared it with Telegram, where a picture
+     * once seen stays seen. The signature was never what kept a file private: the route is
+     * behind `auth` and FilePolicy runs on every fetch, so a link in the wrong hands is a 404 at
+     * any age. The expiry is only there so a link does not live for ever.
+     *
+     * Anchored to a day boundary on purpose: every link minted today for a file is the SAME
+     * URL, so the browser's cache (see `download()`) hits on every re-read of the chat and a
+     * picture is drawn from disk instead of fetched again. It lives between one and two days.
      */
-    public const URL_TTL_MINUTES = 15;
+    public const URL_TTL_DAYS = 2;
 
     /** The directory each kind of owner's files live under. */
     private const DIRECTORIES = [
@@ -542,7 +545,7 @@ class FileService
     /** When a URL minted now stops working. */
     public function expiry(): Carbon
     {
-        return now()->addMinutes(self::URL_TTL_MINUTES);
+        return now()->startOfDay()->addDays(self::URL_TTL_DAYS);
     }
 
     /**
@@ -579,9 +582,10 @@ class FileService
                 // has to be plain ASCII with no separators in it.
                 Str::of($file->name)->ascii()->replace(['"', '\\', '/'], '-')->value() ?: 'download',
             ),
-            // The URL is expiring and the content is private. Neither the browser nor anything
-            // between here and it should be keeping a copy.
-            'Cache-Control' => 'private, no-store, max-age=0',
+            // Private content: no shared cache may keep it. A picture or PDF shown inline is
+            // kept by the viewer's own browser for a day (polish 030), so a chat full of images
+            // re-opens instantly instead of fetching every one again; a download is not kept.
+            'Cache-Control' => $inline ? 'private, max-age=86400' : 'private, no-store, max-age=0',
             'X-Content-Type-Options' => 'nosniff',
             // An inline PDF or image is rendered in this origin. The sandbox and the empty
             // default source are what stop anything in it reaching the session that opened it.

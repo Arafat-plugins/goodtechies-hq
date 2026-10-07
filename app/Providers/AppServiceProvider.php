@@ -6,6 +6,7 @@ use App\Listeners\ConversationBroadcaster;
 use App\Listeners\MessagePusher;
 use App\Listeners\NotificationDispatcher;
 use App\Models\User;
+use App\Services\Calendar\CalendarApiOneWay;
 use App\Services\Calendar\CalendarLink;
 use App\Services\Calendar\ManualLink;
 use App\Services\SettingsService;
@@ -61,10 +62,11 @@ class AppServiceProvider extends ServiceProvider
 
             return match ($driver) {
                 'manual' => new ManualLink,
+                // Polish 030: goodERP creates the event and its Meet link through the agency's
+                // connected Google account (Admin → Settings → Connect Google).
+                'api' => $this->app->make(CalendarApiOneWay::class),
                 default => throw new InvalidArgumentException(sprintf(
-                    'Unknown GOOGLE_CALENDAR_DRIVER [%s]. Only [manual] is built; the one-way '
-                    .'Calendar API driver is blocked on the Workspace decision in PROGRESS.md '
-                    .'GATE A question 3.',
+                    'Unknown GOOGLE_CALENDAR_DRIVER [%s]. Use [manual] or [api].',
                     $driver,
                 )),
             };

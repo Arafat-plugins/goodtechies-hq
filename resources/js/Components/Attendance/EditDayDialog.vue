@@ -2,7 +2,8 @@
 import { useForm } from '@inertiajs/vue3';
 import { ShieldAlert } from '@lucide/vue';
 import { computed, useId, watch } from 'vue';
-import type { AttendanceDay, AttendanceStatusOption } from '@/Components/Attendance/attendance';
+import CorrectionDecision from '@/Components/Attendance/CorrectionDecision.vue';
+import type { AttendanceCorrection, AttendanceDay, AttendanceStatusOption } from '@/Components/Attendance/attendance';
 import { attendanceRoutes } from '@/Components/Attendance/attendance';
 import { Button } from '@/Components/ui/button';
 import {
@@ -46,6 +47,8 @@ const props = defineProps<{
     day: AttendanceDay | null;
     /** `AttendanceStatus::editable()`, from the server. */
     statuses: AttendanceStatusOption[];
+    /** Polish 029: this day's correction request, answered here when it is still waiting. */
+    correction?: AttendanceCorrection;
 }>();
 
 const emit = defineEmits<{ 'update:open': [open: boolean] }>();
@@ -122,6 +125,12 @@ function submit(): void {
                     Correct this day. The change is recorded in the audit log with the old and new values.
                 </DialogDescription>
             </DialogHeader>
+
+            <CorrectionDecision
+                v-if="correction?.status === 'pending'"
+                :correction="correction"
+                @decided="emit('update:open', false)"
+            />
 
             <form class="flex flex-col gap-4" @submit.prevent="submit">
                 <div class="flex flex-col gap-2">

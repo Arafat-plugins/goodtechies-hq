@@ -85,7 +85,8 @@ it('expires the link', function () {
 
     $this->actingAs($this->tapu)->get($url)->assertOk();
 
-    $this->travel(FileService::URL_TTL_MINUTES + 1)->minutes();
+    $this->travel(FileService::URL_TTL_DAYS)->days();
+    $this->travel(1)->minutes();
 
     // 403, not 404: the signature is what failed, and the middleware says so before the
     // controller ever looks the file up.

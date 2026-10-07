@@ -563,5 +563,5 @@ it('re-opens the day from the plain Clock-in button after a clock-out, the same 
         ->and(app(AttendanceService::class)->isClockedIn($this->yaseen->employee))->toBeTrue();
 
     // Still open: a second press is the double tap the old refusal was for.
-    $this->actingAs($this->yaseen)->post('/attendance/clock-in')->assertSessionHas('error', 'You already clocked in at 09:00 today.');
+    $this->actingAs($this->yaseen)->post('/attendance/clock-in')->assertSessionHas('error', 'You already clocked in at 9:00 am today.');
 });

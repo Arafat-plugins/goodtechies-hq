@@ -363,7 +363,7 @@ class AttendanceService
             }
 
             if ($existing?->clock_in !== null) {
-                throw AttendanceStateException::alreadyClockedIn($existing->clock_in->format('H:i'));
+                throw AttendanceStateException::alreadyClockedIn($existing->clock_in->format('g:i a'));
             }
 
             // A row with no clock-in can exist: the 23:55 sweep wrote an Absent, or an Admin
@@ -466,7 +466,7 @@ class AttendanceService
             }
 
             if ($record->clock_out !== null) {
-                throw AttendanceStateException::alreadyClockedOut($record->clock_out->format('H:i'));
+                throw AttendanceStateException::alreadyClockedOut($record->clock_out->format('g:i a'));
             }
 
             if ($at->lessThan($record->clock_in)) {

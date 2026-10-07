@@ -455,5 +455,5 @@ it('reads whether a meeting has happened off the clock and never off the status'
         // is. See MeetingStatus.
         ->and($past->status)->toBe(MeetingStatus::Scheduled)
         ->and($past->tone())->toBe('done')
-        ->and($past->stateLabel())->toBe('Held');
+        ->and($past->stateLabel())->toBe('Completed');
 });

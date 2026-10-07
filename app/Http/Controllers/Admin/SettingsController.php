@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Settings\UpdateSettingsRequest;
+use App\Models\GoogleAccount;
+use App\Services\Calendar\GoogleOAuth;
 use App\Services\SettingsService;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -81,6 +83,13 @@ class SettingsController extends Controller
                 // `.env` and never in the database — so the switch has to live where the
                 // credentials live, or the two could disagree.
                 'googleCalendarWhy' => 'The api driver needs Google credentials, and credentials live in .env rather than in the database. Moving the switch here would let it be turned on without them.',
+            ],
+            // Polish 030: the agency's Google account, which creates Meet links on the api driver.
+            'google' => [
+                'driver' => (string) config('services.google_calendar.driver', 'manual'),
+                'configured' => app(GoogleOAuth::class)->configured(),
+                'connected' => app(GoogleOAuth::class)->connected(),
+                'email' => GoogleAccount::current()?->email,
             ],
         ]);
     }

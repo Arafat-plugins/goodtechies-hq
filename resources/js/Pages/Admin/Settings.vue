@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
 import { Lock } from '@lucide/vue';
 import { computed } from 'vue';
 import PageShell from '@/Components/PageShell.vue';
 import SettingsSectionCard from '@/Components/Settings/SettingsSectionCard.vue';
 import type { IntegrationRow, SettingField, SettingRow } from '@/Components/Settings/settings';
 import { valuesByKey } from '@/Components/Settings/settings';
+import { Button } from '@/Components/ui/button';
 import { Badge } from '@/Components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
@@ -42,6 +43,8 @@ const props = defineProps<{
     fields: SettingField[];
     sections: string[];
     backup: { lastVerifiedAt: string | null };
+    /** Polish 030: the Google account that creates Meet links on the api driver. */
+    google: { driver: string; configured: boolean; connected: boolean; email: string | null };
     drivers: {
         realtime: string;
         realtimeEnv: string;
@@ -134,6 +137,39 @@ const verifiedAt = computed(() => {
                             <p class="text-xs text-muted-foreground">{{ row.why }}</p>
                         </div>
                     </dl>
+
+                    <!-- Polish 030: connect Google so goodERP creates the Meet link itself. -->
+                    <div class="flex min-w-0 flex-col gap-2 border-t pt-3">
+                        <div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                            <div class="flex min-w-0 flex-col">
+                                <span class="text-sm font-medium">Google Meet links</span>
+                                <span class="text-xs text-muted-foreground">
+                                    <template v-if="google.connected">
+                                        Connected{{ google.email ? ` as ${google.email}` : '' }} — new meetings get their link automatically.
+                                    </template>
+                                    <template v-else-if="google.driver !== 'api'">
+                                        Set GOOGLE_CALENDAR_DRIVER=api and the Google client in the server's .env to create links here.
+                                    </template>
+                                    <template v-else-if="!google.configured">
+                                        Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI to the server's .env.
+                                    </template>
+                                    <template v-else>Not connected — links are pasted by hand until you connect.</template>
+                                </span>
+                            </div>
+                            <Button
+                                v-if="google.connected"
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                @click="router.post('/admin/google/disconnect', {}, { preserveScroll: true })"
+                            >
+                                Disconnect
+                            </Button>
+                            <Button v-else-if="google.driver === 'api' && google.configured" as="a" href="/admin/google/connect" size="sm">
+                                Connect Google
+                            </Button>
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
 

@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { Pencil } from '@lucide/vue';
+import { MessageSquareWarning, Pencil } from '@lucide/vue';
 import { computed } from 'vue';
-import type { AttendanceDay } from '@/Components/Attendance/attendance';
+import type {
+    AttendanceCorrection,
+    AttendanceCorrectionRules,
+    AttendanceDay,
+} from '@/Components/Attendance/attendance';
 import {
+    canAskCorrection,
     WEEKDAY_HEADINGS,
     formatMinutes,
     formatShift,
@@ -45,9 +50,54 @@ const props = defineProps<{
     days: AttendanceDay[];
     /** Whether an *Edit* control is drawn per day — `AttendanceRecordPolicy::update`. */
     canEdit?: boolean;
+    /** Polish 029: the latest correction request per day (`Y-m-d`), and whether you may ask. */
+    corrections?: Record<string, AttendanceCorrection>;
+    correctionRules?: AttendanceCorrectionRules | null;
+    canRequestCorrection?: boolean;
 }>();
 
-const emit = defineEmits<{ edit: [day: AttendanceDay] }>();
+const emit = defineEmits<{ edit: [day: AttendanceDay]; request: [day: AttendanceDay] }>();
+
+function correctionOf(day: AttendanceDay): AttendanceCorrection | undefined {
+    return props.corrections?.[day.date];
+}
+
+/** Polish 029: this is one of your days that you may ask to have corrected. */
+function askable(day: AttendanceDay): boolean {
+    return (
+        !props.canEdit &&
+        !!props.canRequestCorrection &&
+        !!props.correctionRules &&
+        canAskCorrection(day, props.correctionRules, correctionOf(day))
+    );
+}
+
+/** The short line a cell prints about a correction request, or null. */
+function correctionLine(day: AttendanceDay): string | null {
+    const correction = correctionOf(day);
+
+    if (!correction) {
+        return null;
+    }
+
+    return {
+        pending: 'Correction asked',
+        approved: 'Correction approved',
+        rejected: 'Correction declined',
+    }[correction.status];
+}
+
+function clickable(day: AttendanceDay): boolean {
+    return (!!props.canEdit && !day.is_future) || askable(day);
+}
+
+function open(day: AttendanceDay): void {
+    if (props.canEdit && !day.is_future) {
+        emit('edit', day);
+    } else if (askable(day)) {
+        emit('request', day);
+    }
+}
 
 /** Empty cells before the 1st, so it lands under its own weekday column. */
 const blanks = computed(() => Array.from({ length: leadingBlanks(props.days) }, (_, index) => index));
@@ -135,7 +185,13 @@ function cellClass(day: AttendanceDay): string {
 
                     <p v-if="day.note" class="text-xs text-muted-foreground">{{ day.note }}</p>
                     <p v-if="day.edited_by" class="text-xs text-muted-foreground">Edited by {{ day.edited_by }}</p>
+                    <p v-if="correctionLine(day)" class="text-xs font-medium text-muted-foreground">{{ correctionLine(day) }}</p>
                 </div>
+
+                <Button v-if="askable(day)" variant="outline" size="sm" class="shrink-0" @click="emit('request', day)">
+                    <MessageSquareWarning aria-hidden="true" />
+                    Ask to correct
+                </Button>
 
                 <Button
                     v-if="canEdit && !day.is_future"
@@ -162,14 +218,20 @@ function cellClass(day: AttendanceDay): string {
                 <div v-for="blank in blanks" :key="`blank-${blank}`" aria-hidden="true" />
 
                 <component
-                    :is="canEdit && !day.is_future ? 'button' : 'div'"
+                    :is="clickable(day) ? 'button' : 'div'"
                     v-for="day in days"
                     :key="day.date"
-                    :type="canEdit && !day.is_future ? 'button' : undefined"
-                    :class="cellClass(day)"
-                    :aria-label="canEdit && !day.is_future ? `Edit ${sentence(day)}` : sentence(day)"
-                    :title="sentence(day)"
-                    @click="canEdit && !day.is_future ? emit('edit', day) : undefined"
+                    :type="clickable(day) ? 'button' : undefined"
+                    :class="cn(cellClass(day), askable(day) && 'group cursor-pointer')"
+                    :aria-label="
+                        canEdit && !day.is_future
+                            ? `Edit ${sentence(day)}`
+                            : askable(day)
+                              ? `Ask to correct ${sentence(day)}`
+                              : sentence(day)
+                    "
+                    :title="askable(day) ? 'Ask an Admin to correct this day' : sentence(day)"
+                    @click="clickable(day) ? open(day) : undefined"
                 >
                     <div class="flex items-baseline justify-between gap-1">
                         <span class="text-sm font-semibold tabular-nums">{{ day.day_of_month }}</span>
@@ -185,7 +247,17 @@ function cellClass(day: AttendanceDay): string {
                         {{ formatMinutes(day.tracked_minutes) }}
                     </span>
 
-                    <span v-if="day.edited_by" class="mt-auto text-xs opacity-80">Edited</span>
+                    <span v-if="correctionLine(day)" class="mt-auto text-xs font-medium opacity-80">{{ correctionLine(day) }}</span>
+                    <span v-else-if="day.edited_by" class="mt-auto text-xs opacity-80">Edited</span>
+
+                    <!-- Polish 029: the way to say "this was a mistake". -->
+                    <span
+                        v-if="askable(day)"
+                        class="mt-auto inline-flex items-center gap-1 text-xs font-medium underline-offset-2 group-hover:underline"
+                    >
+                        <MessageSquareWarning class="size-3" aria-hidden="true" />
+                        Ask to correct
+                    </span>
                 </component>
             </div>
         </div>

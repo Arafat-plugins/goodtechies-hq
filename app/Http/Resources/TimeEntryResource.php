@@ -139,7 +139,7 @@ class TimeEntryResource extends JsonResource
             $reasons[] = [
                 'key' => 'edited',
                 'label' => 'Edited after it was recorded',
-                'detail' => $entry->edited_at->isoFormat('D MMM YYYY, HH:mm'),
+                'detail' => $entry->edited_at->isoFormat('D MMM YYYY, h:mm a'),
             ];
         }
 

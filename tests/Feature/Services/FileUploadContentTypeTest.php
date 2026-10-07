@@ -194,9 +194,14 @@ it('states the link TTL in exactly one place', function (): void {
     // the only place `now()` meets the constant, and `url()` is the only caller — so changing the
     // window is one edit. `FileResource` sends `url_expires_at` from the same call, which is how
     // a tab that has been open all morning knows its links are dead without clicking one.
-    $this->travelTo(now()->startOfMinute());
+    // Polish 030: the window ends at a day boundary, so every link minted on one day is the
+    // same URL and the browser's cache can hit.
+    $this->travelTo(now()->setTime(10, 15));
+    $morning = app(FileService::class)->expiry();
 
-    expect((int) now()->diffInMinutes(app(FileService::class)->expiry()))
-        ->toBe(FileService::URL_TTL_MINUTES)
-        ->and(FileService::URL_TTL_MINUTES)->toBe(15);
+    $this->travelTo(now()->setTime(18, 40));
+
+    expect(app(FileService::class)->expiry()->equalTo($morning))->toBeTrue()
+        ->and($morning->equalTo(now()->startOfDay()->addDays(FileService::URL_TTL_DAYS)))->toBeTrue()
+        ->and(FileService::URL_TTL_DAYS)->toBe(2);
 });

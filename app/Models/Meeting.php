@@ -393,6 +393,9 @@ class Meeting extends Model
             return MeetingStatus::Cancelled->label();
         }
 
-        return $this->hasHappened($asOf) ? 'Held' : MeetingStatus::Scheduled->label();
+        // Polish 030: "Completed", the word the client uses for a meeting that has taken place
+        // ("after completed it should be show complete"). Still derived from the clock, never
+        // stored — see MeetingStatus.
+        return $this->hasHappened($asOf) ? 'Completed' : MeetingStatus::Scheduled->label();
     }
 }

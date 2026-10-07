@@ -14,7 +14,7 @@ use Illuminate\Http\Request;
 // `permissions` is here, not in the commercial half: what you may *do* to a client is not a
 // commercial fact about that client, and a screen needs it before it knows whether to draw a
 // control. Its two keys are false for anyone who may not, which is the whole answer.
-const PUBLIC_CLIENT_KEYS = ['id', 'name', 'status', 'status_label', 'permissions'];
+const PUBLIC_CLIENT_KEYS = ['id', 'name', 'nickname', 'status', 'status_label', 'permissions'];
 
 beforeEach(function () {
     $this->seed(RolePermissionSeeder::class);

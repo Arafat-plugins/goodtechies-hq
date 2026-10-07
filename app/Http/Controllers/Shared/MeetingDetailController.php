@@ -20,6 +20,7 @@ use App\Support\Surface;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route as RouteFacade;
 use Inertia\Inertia;
@@ -152,6 +153,23 @@ class MeetingDetailController extends Controller
         $this->meetings->rsvp($user, $meeting, $status);
 
         return back()->with('success', sprintf('Your answer: %s.', $status->label()));
+    }
+
+    /**
+     * Polish 030: the Join button's beacon. Marks this person Going (see
+     * `MeetingService::joined()`) while the browser opens the meeting in a new tab. 204, so the
+     * page that pressed it does not move.
+     */
+    public function join(Request $request, Meeting $meeting): HttpResponse
+    {
+        $meeting = $this->visible($request, $meeting);
+        $user = $request->user();
+
+        Gate::authorize('rsvp', [$meeting, $user]);
+
+        $this->meetings->joined($user, $meeting);
+
+        return response()->noContent();
     }
 
     /**

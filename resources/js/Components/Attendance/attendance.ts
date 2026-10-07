@@ -183,7 +183,55 @@ export const attendanceRoutes = {
     /** The upsert, keyed by (employee, date) — the row's own identity. */
     editDay: (employeeId: number, date: string): string => `/admin/attendance/${employeeId}/${date}`,
     saveSchedule: (employeeId: number): string => `/admin/schedules/${employeeId}`,
+    /** Polish 029: ask for one of your own days to be corrected, and the two answers. */
+    requestCorrection: '/attendance/corrections',
+    approveCorrection: (id: number): string => `/attendance/corrections/${id}/approve`,
+    rejectCorrection: (id: number): string => `/attendance/corrections/${id}/reject`,
 } as const;
+
+/** Polish 029: an employee's request to correct one day, as the server sends it. */
+export interface AttendanceCorrection {
+    id: number;
+    date: string;
+    current_status: string;
+    reason: string;
+    status: 'pending' | 'approved' | 'rejected';
+    status_label: string;
+    decision_note: string | null;
+    decided_by: string | null;
+}
+
+/** A pending request on the Admin roster, with whose it is. */
+export interface AttendanceCorrectionRow extends AttendanceCorrection {
+    employee: { id: number; name: string };
+    current_label: string | null;
+}
+
+/** Which of your days may be sent for correction (`AttendanceCorrectionService`). */
+export interface AttendanceCorrectionRules {
+    statuses: string[];
+    /** `Y-m-d`; days before this are too old. */
+    earliest: string;
+}
+
+/**
+ * Polish 029: can this day be sent for correction — a past or today's Late / Half day / Absent
+ * inside the window, with no request already waiting.
+ */
+export function canAskCorrection(
+    day: AttendanceDay,
+    rules: AttendanceCorrectionRules,
+    correction: AttendanceCorrection | undefined,
+): boolean {
+    return (
+        !day.is_future &&
+        day.status !== null &&
+        rules.statuses.includes(day.status) &&
+        day.date >= rules.earliest &&
+        correction?.status !== 'pending' &&
+        correction?.status !== 'approved'
+    );
+}
 
 /**
  * A duration, as somebody reads it out loud: `8h 12m`, `45m`, `—`.

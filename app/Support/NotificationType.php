@@ -80,6 +80,15 @@ enum NotificationType: string
     case LeaveRejected = 'leave.rejected';
     case LeaveCorrectionRequested = 'leave.correction_requested';
 
+    /**
+     * Polish 029: an employee asked for a day of their attendance to be corrected (a Late by
+     * mistake, say). It goes to the people who can correct that day (`attendance.manage_others`,
+     * narrowed to whose attendance they see); the two answers go back to the employee.
+     */
+    case AttendanceCorrectionRequested = 'attendance.correction_requested';
+    case AttendanceCorrectionApproved = 'attendance.correction_approved';
+    case AttendanceCorrectionRejected = 'attendance.correction_rejected';
+
     /* Messages tab (Phase 6) ------------------------------------------------------------- */
 
     /**
@@ -165,6 +174,9 @@ enum NotificationType: string
             self::ProjectCancelled => NotificationTab::System,
             self::LeaveRequested, self::LeaveApproved, self::LeaveRejected,
             self::LeaveCorrectionRequested => NotificationTab::Leave,
+            // Polish 029: attendance corrections sit with leave — both are about a person's days.
+            self::AttendanceCorrectionRequested, self::AttendanceCorrectionApproved,
+            self::AttendanceCorrectionRejected => NotificationTab::Leave,
             self::MessageReceived, self::MessageMentioned,
             self::AnnouncementPosted => NotificationTab::Messages,
             // Phase 7 fills the fourth of §11's seven tabs, by adding four cases and mapping
@@ -190,6 +202,10 @@ enum NotificationType: string
             // for may be tomorrow. A correction request is the same shape pointed the other
             // way: the request has stopped moving and only the employee can start it again.
             self::LeaveRequested, self::LeaveCorrectionRequested => NotificationPriority::High,
+
+            // Polish 029: somebody's day is wrong until an Admin answers.
+            self::AttendanceCorrectionRequested => NotificationPriority::High,
+            self::AttendanceCorrectionApproved, self::AttendanceCorrectionRejected => NotificationPriority::Normal,
 
             // Being named is the one messaging event somebody is waiting on an answer to. It is
             // the same shape as a review request pointed at a sentence instead of a task, and it
@@ -290,6 +306,12 @@ enum NotificationType: string
                 self::LeaveCorrectionRequested,
             ],
 
+            // Polish 029: approving or declining answers the request.
+            self::AttendanceCorrectionRequested => [
+                self::AttendanceCorrectionApproved,
+                self::AttendanceCorrectionRejected,
+            ],
+
             // Everything else is news, not a question. There is nothing you can do that means
             // "assignment dealt with" or "comment dealt with" other than reading it, and
             // reading is already a state this table keeps.
@@ -353,6 +375,11 @@ enum NotificationType: string
         return match ($this) {
             self::LeaveRequested => Permission::LeaveApprove,
             self::LeaveApproved, self::LeaveRejected, self::LeaveCorrectionRequested => Permission::LeaveApply,
+
+            // Polish 029: the request goes to people who correct attendance; the answers go to the
+            // employee, who reads their own attendance.
+            self::AttendanceCorrectionRequested => Permission::AttendanceManageOthers,
+            self::AttendanceCorrectionApproved, self::AttendanceCorrectionRejected => Permission::AttendanceViewOwn,
 
             // ## Phase 6, and what it means for the Accountant
             //
@@ -475,6 +502,22 @@ enum NotificationType: string
                 $context,
             ),
 
+            // Polish 029. `title` is the employee's name on the Admin's row.
+            self::AttendanceCorrectionRequested => sprintf(
+                '%s asked to correct %s (%s)',
+                $title,
+                self::day($context),
+                (string) ($context['current_label'] ?? 'attendance'),
+            ),
+            self::AttendanceCorrectionApproved => sprintf(
+                'Your attendance correction for %s is approved',
+                self::day($context),
+            ),
+            self::AttendanceCorrectionRejected => self::withReason(
+                sprintf('Your attendance correction for %s was declined', self::day($context)),
+                $context,
+            ),
+
             // Messages (Phase 6). `title` is what the conversation is CALLED to this reader —
             // for a DM that is the other person's name, which is why the singular does not
             // repeat the actor. The grouped branches are the visible half of the dedup rule
@@ -541,7 +584,19 @@ enum NotificationType: string
             return 'a time that is no longer recorded';
         }
 
-        return Carbon::parse($start)->timezone(config('app.timezone'))->isoFormat('ddd D MMM, HH:mm');
+        return Carbon::parse($start)->timezone(config('app.timezone'))->isoFormat('ddd D MMM, h:mm a');
+    }
+
+    /**
+     * Polish 029: the one day an attendance correction is about, as "7 Oct".
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private static function day(array $context): string
+    {
+        $date = (string) ($context['date'] ?? '');
+
+        return $date === '' ? 'a day' : Carbon::parse($date)->isoFormat('D MMM');
     }
 
     /**

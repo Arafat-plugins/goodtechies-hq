@@ -239,6 +239,55 @@ export const CHIME_QUIET_MS = 10_000;
 export const CHIME_SAME_ARRIVAL_MS = 30_000;
 
 let boundUser: number | null = null;
+
+/* ------------------------------------------------------------- shared between tabs (030) */
+
+/** A rise to the very count another tab already chimed for stays quiet this long. */
+const SHARED_SAME_COUNT_MS = 5 * 60_000;
+
+interface SharedChime {
+    at: number;
+    source: ChimeSource;
+    count: number;
+}
+
+function sharedChimeKey(): string | null {
+    return boundUser === null ? null : `hq.chime.${boundUser}`;
+}
+
+/** The last chime any tab of this person played. localStorage: every tab of the origin sees it. */
+function readSharedChime(): SharedChime | null {
+    const key = sharedChimeKey();
+
+    if (key === null) {
+        return null;
+    }
+
+    try {
+        const raw = window.localStorage.getItem(key);
+        const value = raw ? (JSON.parse(raw) as Partial<SharedChime>) : null;
+
+        return value && typeof value.at === 'number' && typeof value.count === 'number' && (value.source === 'bell' || value.source === 'messages')
+            ? { at: value.at, source: value.source, count: value.count }
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+function writeSharedChime(value: SharedChime): void {
+    const key = sharedChimeKey();
+
+    if (key === null) {
+        return;
+    }
+
+    try {
+        window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+        // Private window or storage off: each tab keeps its own windows, as before.
+    }
+}
 const previous: Record<ChimeSource, number | null> = { bell: null, messages: null };
 let lastChimeAt = 0;
 let lastChimeSource: ChimeSource | null = null;
@@ -289,6 +338,20 @@ export function noteUnread(source: ChimeSource, count: number): void {
 
     const now = Date.now();
 
+    // Polish 030: the quiet windows are shared by every goodERP tab in this browser, so the
+    // same arrival is heard once — not once per tab, nor again when you switch to another tab
+    // whose own poll only now sees the rise.
+    const shared = readSharedChime();
+
+    if (shared !== null) {
+        if (shared.source === source && count === shared.count && now - shared.at < SHARED_SAME_COUNT_MS) {
+            return;
+        }
+
+        lastChimeAt = Math.max(lastChimeAt, shared.at);
+        lastChimeSource = lastChimeAt === shared.at ? shared.source : lastChimeSource;
+    }
+
     if (now - lastChimeAt < CHIME_QUIET_MS) {
         return;
     }
@@ -299,6 +362,7 @@ export function noteUnread(source: ChimeSource, count: number): void {
 
     lastChimeAt = now;
     lastChimeSource = source;
+    writeSharedChime({ at: now, source, count });
 
     // Brief 009: a message rise plays Telegram's incoming sound. Polish 021: the bell plays the
     // former send sound (and sending plays the former bell chime).

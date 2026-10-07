@@ -29,6 +29,7 @@ class ClientResource extends JsonResource
         $data = [
             'id' => $this->id,
             'name' => $this->name,
+            'nickname' => $this->nickname,
             'status' => $this->status?->value,
             // ClientStatus carries no label(): active/inactive read straight back as words.
             'status_label' => $this->status === null ? null : Str::headline($this->status->value),

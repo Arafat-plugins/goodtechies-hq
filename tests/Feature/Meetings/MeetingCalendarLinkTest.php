@@ -77,7 +77,7 @@ it('resolves the manual driver by default', function () {
 });
 
 it('refuses to boot with a driver that is not built, rather than falling back quietly', function () {
-    config(['services.google_calendar.driver' => 'api']);
+    config(['services.google_calendar.driver' => 'outlook']);
     app()->forgetInstance(CalendarLink::class);
 
     // A silent fall back to `manual` would mean a VPS configured for the API running for a week
@@ -120,7 +120,10 @@ it('refuses the instant-meeting URL itself, which is the likeliest wrong paste',
         ->and(MeetLink::looksValid(MEETING_GOOD_LINK))->toBeTrue()
         ->and(MeetLink::looksValid('https://meet.google.com/lookup/goodtechies-standup'))->toBeTrue()
         ->and(MeetLink::looksValid('https://meet.google.com/qkd-mprv-tza?authuser=1'))->toBeTrue()
-        ->and(MeetLink::looksValid('http://meet.google.com/qkd-mprv-tza'))->toBeFalse()
+        // Polish 030: typed without the s, it is still that room — read as https.
+        ->and(MeetLink::looksValid('http://meet.google.com/qkd-mprv-tza'))->toBeTrue()
+        ->and(MeetLink::normalise('http://meet.google.com/qkd-mprv-tza'))->toBe('https://meet.google.com/qkd-mprv-tza')
+        ->and(MeetLink::looksValid('http://meet.google.com/new'))->toBeFalse()
         ->and(MeetLink::looksValid('https://meet.google.evil.com/qkd-mprv-tza'))->toBeFalse()
         ->and(MeetLink::looksValid(''))->toBeFalse();
 });

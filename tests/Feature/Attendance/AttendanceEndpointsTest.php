@@ -124,7 +124,7 @@ it('clocks Yaseen in and out and says what today is', function () {
     $this->actingAs($this->yaseen)
         ->post('/attendance/clock-in')
         ->assertRedirect()
-        ->assertSessionHas('success', fn (string $message): bool => str_contains($message, 'Clocked in at 08:58')
+        ->assertSessionHas('success', fn (string $message): bool => str_contains($message, 'Clocked in at 8:58 am')
             && str_contains($message, 'Present'));
 
     $this->travelTo(Carbon::parse(ENDPOINT_MONDAY)->setTime(17, 30));
@@ -132,7 +132,7 @@ it('clocks Yaseen in and out and says what today is', function () {
     $this->actingAs($this->yaseen)
         ->post('/attendance/clock-out')
         ->assertRedirect()
-        ->assertSessionHas('success', fn (string $message): bool => str_contains($message, 'Clocked out at 17:30'));
+        ->assertSessionHas('success', fn (string $message): bool => str_contains($message, 'Clocked out at 5:30 pm'));
 
     $record = AttendanceRecord::where('employee_id', $this->yaseen->employee->id)->sole();
 
@@ -150,7 +150,7 @@ it('answers a second clock-in with a sentence, not a status code', function () {
     $this->actingAs($this->yaseen)
         ->post('/attendance/clock-in')
         ->assertRedirect()
-        ->assertSessionHas('error', fn (string $message): bool => str_contains($message, '08:58'));
+        ->assertSessionHas('error', fn (string $message): bool => str_contains($message, '8:58 am'));
 
     expect(AttendanceRecord::where('employee_id', $this->yaseen->employee->id)->count())->toBe(1);
 });

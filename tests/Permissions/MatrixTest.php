@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AttendanceCorrection;
 use App\Models\Client;
 use App\Models\Conversation;
 use App\Models\Device;
@@ -530,6 +531,25 @@ function matrixLeaveRequestId(string $key): string
  * guard, which never touches the database — a row that queried on the way in would make the
  * guard depend on the seed.
  */
+function matrixCorrectionId(string $key): string
+{
+    static $ids = [];
+
+    if (! isset($ids[$key]) || ! AttendanceCorrection::whereKey($ids[$key])->exists()) {
+        $yaseen = User::where('email', 'yaseen@goodtechies.test')->firstOrFail();
+
+        $ids[$key] = (string) AttendanceCorrection::query()->create([
+            'employee_id' => $yaseen->employee->id,
+            'date' => '2026-09-14',
+            'current_status' => 'late',
+            'reason' => 'Matrix row '.$key,
+            'status' => 'pending',
+        ])->id;
+    }
+
+    return $ids[$key];
+}
+
 function matrixResolve(string $token): string
 {
     [$kind, $value] = explode(':', $token, 2);
@@ -565,6 +585,8 @@ function matrixResolve(string $token): string
         'message-conversation' => (string) Message::query()->findOrFail(matrixMessageId($value))->conversation_id,
         // A message group (12-81). See matrixGroupId().
         'group' => matrixGroupId(),
+        // Polish 029: a pending attendance correction of Yaseen's, one per row. See below.
+        'correction' => matrixCorrectionId($value),
         default => $value,
     };
 }
@@ -700,6 +722,12 @@ function permissionMatrix(): array
         ['PUT', 'admin/settings', $adminAction],
         // Polish 026: renaming the project types. Body-less, so the Form Request refuses.
         ['PUT', 'admin/project-types', $adminAction],
+        // Polish 030: Google Calendar for Meet links. Connect without a configured client sends
+        // the Admin back to Settings (302); the callback without a state does the same; disconnect
+        // with nothing connected still answers with a redirect.
+        ['GET', 'admin/google/connect', $adminAction],
+        ['GET', 'admin/google/callback', $adminAction],
+        ['POST', 'admin/google/disconnect', $adminAction],
 
         // Admin → Notifications defaults (Phase 12). `notification_preferences` decides whether
         // the engine writes a row at all, so this is a configuration screen and wears
@@ -1353,6 +1381,15 @@ function permissionMatrix(): array
         ['POST', 'attendance/clock-out', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 302, 'EMPLOYEE' => 302, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
         // The last tab's pagehide beacon: marks only, for the same people who clock (client doc 2026-10-05).
         ['POST', 'attendance/leaving', ['guest' => '302 /login', 'ADMIN' => 204, 'MANAGER' => 204, 'EMPLOYEE' => 204, 'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403]],
+        // Polish 029: asking for a day to be corrected. Body-less, so everybody signed in stops at
+        // the Form Request; who may ask is `AttendanceRecordPolicy::requestCorrection` (the
+        // people who clock), asserted in AttendanceCorrectionTest.
+        ['POST', 'attendance/corrections', $everyone(302)],
+        // Answering one — Yaseen's. ADMIN decides (302). The others never reach the decision:
+        // the request is ABSENT to whoever cannot see Yaseen's attendance (404), and Yaseen
+        // himself sees it but may not correct his own day (403).
+        ['POST', 'attendance/corrections/{correction}/approve', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404], ['{correction}' => 'correction:approve']],
+        ['POST', 'attendance/corrections/{correction}/reject', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 403, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404], ['{correction}' => 'correction:reject']],
 
         // Shared — the task timer for everyone who works tasks (flow F3, decision 12-73). No
         // surface, like the clock: an Admin and Yaseen press the same ▶. `{task}` is another of
@@ -1500,6 +1537,8 @@ function permissionMatrix(): array
         ['PUT', 'meetings/{meeting}/notes', $meetingOwner(302)],
         ['PUT', 'meetings/{meeting}', $meetingValidated(302)],
         ['POST', 'meetings/{meeting}/rsvp', $meetingValidated(302)],
+        // Polish 030: Join's beacon marks you Going — the people in the stand-up, 204.
+        ['POST', 'meetings/{meeting}/join', $meetingSeen(204)],
         ['POST', 'meetings/{meeting}/action-items', $meetingValidated(302)],
         // **Last of the meeting rows, because it consumes the record it points at.** The cells
         // are walked role by role against one meeting, so the ADMIN cell cancels the stand-up

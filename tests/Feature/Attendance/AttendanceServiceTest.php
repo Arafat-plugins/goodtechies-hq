@@ -136,7 +136,7 @@ it('refuses a second clock-in and names the time of the first', function () {
     attendance()->clockIn($employee, $monday->copy()->setTime(8, 58));
 
     expect(fn () => attendance()->clockIn($employee, $monday->copy()->setTime(9, 30)))
-        ->toThrow(AttendanceStateException::class, 'already clocked in at 08:58')
+        ->toThrow(AttendanceStateException::class, 'already clocked in at 8:58 am')
         // And no second row: one person, one day, one record.
         ->and(AttendanceRecord::where('employee_id', $employee->id)->count())->toBe(1);
 });
@@ -162,7 +162,7 @@ it('clocks out, records the minutes worked, and refuses a second clock-out', fun
         ->and($record->status)->toBe(AttendanceStatus::Present);
 
     expect(fn () => attendance()->clockOut($employee, $monday->copy()->setTime(18, 0)))
-        ->toThrow(AttendanceStateException::class, 'already clocked out at 17:30');
+        ->toThrow(AttendanceStateException::class, 'already clocked out at 5:30 pm');
 });
 
 it('refuses a clock-out from somebody who never clocked in', function () {

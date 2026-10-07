@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\AttendanceCorrection;
 use App\Models\Conversation;
 use App\Models\LeaveRequest;
 use App\Models\Notification;
@@ -110,6 +111,20 @@ class NotificationResource extends JsonResource
         if ($target['type'] === Conversation::class) {
             return Route::has('messages.index')
                 ? route('messages.index', ['conversation' => $target['id']])
+                : null;
+        }
+
+        // Polish 029: an attendance correction. The request opens the Admin's attendance screen,
+        // where the pending requests are listed; the answer opens the employee's own month.
+        if ($target['type'] === AttendanceCorrection::class) {
+            if ($this->type === NotificationType::AttendanceCorrectionRequested) {
+                return Route::has('admin.attendance.index') ? route('admin.attendance.index') : null;
+            }
+
+            $date = $this->resource->payload['context']['date'] ?? null;
+
+            return Route::has('attendance.show')
+                ? route('attendance.show', is_string($date) ? ['month' => substr($date, 0, 7)] : [])
                 : null;
         }
 

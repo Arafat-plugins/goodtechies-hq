@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Admin;
 use App\Exceptions\AttendanceStateException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Attendance\UpdateAttendanceRecordRequest;
+use App\Models\AttendanceCorrection;
 use App\Models\AttendanceRecord;
 use App\Models\Employee;
+use App\Services\AttendanceCorrectionService;
 use App\Services\AttendanceService;
 use App\Support\AttendanceStatus;
 use Illuminate\Http\RedirectResponse;
@@ -59,7 +61,10 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class AttendanceController extends Controller
 {
-    public function __construct(private readonly AttendanceService $attendance) {}
+    public function __construct(
+        private readonly AttendanceService $attendance,
+        private readonly AttendanceCorrectionService $corrections,
+    ) {}
 
     /**
      * Today's roster. `?date=YYYY-MM-DD` to read another day, because which day you are
@@ -93,6 +98,17 @@ class AttendanceController extends Controller
                 'label' => $status->label(),
                 'tone' => $status->tone(),
             ], AttendanceStatus::editable()),
+            // Polish 029: requests from employees to correct a day, waiting for an answer.
+            'corrections' => $this->corrections->pendingFor($request->user())
+                ->map(fn (AttendanceCorrection $correction): array => $correction->toPayload() + [
+                    'employee' => [
+                        'id' => (int) $correction->employee_id,
+                        'name' => $correction->employee?->user?->name ?? 'Unknown',
+                    ],
+                    'current_label' => AttendanceStatus::tryFrom($correction->current_status)?->label(),
+                ])
+                ->values()
+                ->all(),
         ]);
     }
 

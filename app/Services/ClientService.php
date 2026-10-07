@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Gate;
 class ClientService
 {
     /** The client fields a caller may write; `contacts` maps to the encrypted contact_info. */
-    private const FIELDS = ['name', 'internal_notes', 'status'];
+    private const FIELDS = ['name', 'nickname', 'internal_notes', 'status'];
 
     public function __construct(
         private readonly ActivityLogger $activity,

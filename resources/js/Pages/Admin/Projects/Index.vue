@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Archive, ArchiveRestore, FolderKanban, Pencil, Plus, Trash2 } from '@lucide/vue';
+import { Archive, ArchiveRestore, Building2, FolderKanban, List, Pencil, Plus, Trash2 } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { ColumnDef } from '@/Components/DataTable/types';
@@ -11,6 +11,7 @@ import type { Paginated } from '@/Components/Pagination.vue';
 import DeleteProjectDialog, { canForceDelete } from '@/Components/Projects/DeleteProjectDialog.vue';
 import { moneyLine } from '@/Components/Projects/FinanceCard.vue';
 import type { NamedRef, Option, Project } from '@/Components/Projects/ProjectForm.vue';
+import ClientProjectsView, { type ClientTreeRow, type ProjectBoard } from '@/Components/Projects/ClientProjectsView.vue';
 import ProjectWorkingNow from '@/Components/Projects/ProjectWorkingNow.vue';
 import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
@@ -44,6 +45,10 @@ interface Filters {
 }
 
 const props = defineProps<{
+    /** Polish 030: by client (the default) or the table. */
+    layout: 'clients' | 'list';
+    clientTree: ClientTreeRow[];
+    projectBoard: ProjectBoard | null;
     projects: Paginated<Project>;
     filters: Filters;
     clients: NamedRef[];
@@ -67,6 +72,22 @@ if (props.workingNowByProject !== undefined) {
 
 function workingOn(projectId: number): WorkingNowRow[] {
     return props.workingNowByProject?.[projectId] ?? [];
+}
+
+/* ----------------------------------------------------------------- layout (030) */
+
+const selectedProjectId = computed(() => {
+    const value = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search).get('project');
+
+    return props.projectBoard?.project.id ?? (value && /^\d+$/.test(value) ? Number(value) : null);
+});
+
+function chooseLayout(value: unknown): void {
+    if (value !== 'clients' && value !== 'list') {
+        return;
+    }
+
+    router.get('/admin/projects', value === 'list' ? { layout: 'list' } : {}, { preserveScroll: true });
 }
 
 /* ----------------------------------------------------------------- filters */
@@ -256,7 +277,33 @@ function closeDelete(): void {
         </template>
 
         <div class="flex min-w-0 flex-col gap-4">
-            <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
+            <!-- Polish 030: by client (ClickUp-style) or the table. -->
+            <ToggleGroup
+                type="single"
+                variant="outline"
+                class="shrink-0 self-start"
+                :model-value="layout"
+                aria-label="How to show projects"
+                @update:model-value="chooseLayout"
+            >
+                <ToggleGroupItem value="clients" class="px-3">
+                    <Building2 aria-hidden="true" />
+                    By client
+                </ToggleGroupItem>
+                <ToggleGroupItem value="list" class="px-3">
+                    <List aria-hidden="true" />
+                    List
+                </ToggleGroupItem>
+            </ToggleGroup>
+
+            <ClientProjectsView
+                v-if="layout === 'clients'"
+                :tree="clientTree"
+                :board="projectBoard"
+                :selected-id="selectedProjectId"
+            />
+
+            <div v-if="layout === 'list'" class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
                 <ToggleGroup
                     type="single"
                     variant="outline"
@@ -283,6 +330,7 @@ function closeDelete(): void {
             </div>
 
             <DataTable
+                v-if="layout === 'list'"
                 id="admin-projects"
                 :columns="columns"
                 :rows="projects.data"

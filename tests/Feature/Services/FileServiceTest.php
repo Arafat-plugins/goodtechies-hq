@@ -392,7 +392,8 @@ it('expires the url after the configured window', function () {
 
     $this->get($url)->assertOk();
 
-    $this->travel(FileService::URL_TTL_MINUTES + 1)->minutes();
+    $this->travel(FileService::URL_TTL_DAYS)->days();
+    $this->travel(1)->minutes();
 
     $this->get($url)->assertForbidden();
 })->group('phase2');

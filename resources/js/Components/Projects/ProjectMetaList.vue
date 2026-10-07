@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { Project } from '@/Components/Projects/ProjectForm.vue';
+import { formatDuration } from '@/Components/Timer/timer';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 
 const props = defineProps<{
     project: Project;
+    /** Polish 030: approved time spent on the whole project, when the page knows it. */
+    trackedSeconds?: number | null;
 }>();
 
 const DATE = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' });
@@ -33,6 +36,7 @@ const rows = computed(() => [
     { label: 'Project manager', value: props.project.pm?.name ?? 'Unassigned' },
     { label: 'Start date', value: formatDate(props.project.start_date) ?? '—' },
     { label: 'Deadline', value: formatDate(props.project.deadline) ?? '—' },
+    ...(props.trackedSeconds != null ? [{ label: 'Time spent', value: formatDuration(props.trackedSeconds) }] : []),
     ...(props.project.archived_at
         ? [{ label: 'Archived', value: formatDate(props.project.archived_at) ?? '—' }]
         : []),

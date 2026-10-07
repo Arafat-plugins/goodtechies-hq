@@ -15,8 +15,9 @@ const drawnImages = new Set<number>();
 
 <script setup lang="ts">
 import { Download } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
 import { iconFor } from '@/Components/Files/files';
+import { CHAT_GALLERY } from '@/Components/Messages/gallery';
 import type { ThreadAttachment } from '@/Components/Messages/messages';
 import { formatDuration } from '@/Components/Messages/messages';
 import ImageLightbox from '@/Components/Messages/ImageLightbox.vue';
@@ -78,6 +79,9 @@ const props = withDefaults(
 const rendersImage = computed(() => props.inline && !props.stale && props.file.kind === 'image');
 const rendersVoice = computed(() => props.inline && !props.stale && props.file.kind === 'voice');
 const bareImage = computed(() => props.bare && rendersImage.value);
+
+/** Polish 030: the conversation's pictures, when this card is in a chat thread. */
+const gallery = inject(CHAT_GALLERY, null);
 
 /** Brief 013: the image's lightbox, and the thumbnail focus returns to when it closes. */
 const lightboxOpen = ref(false);
@@ -209,6 +213,8 @@ const meta = computed(() => {
             :src="imageUrl"
             :name="file.name"
             :href="file.url"
+            :image-id="file.id"
+            :gallery="gallery ?? undefined"
             @closed="thumbEl?.focus()"
         />
 

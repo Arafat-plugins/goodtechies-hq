@@ -435,7 +435,7 @@ class TimerService
             if ($entry !== null
                 && $entry->started_at->lessThanOrEqualTo($mark)
                 && ($entry->last_heartbeat_at === null || $entry->last_heartbeat_at->lessThanOrEqualTo($mark))) {
-                $this->stop($entry, $mark, TimerFlag::tabClosed($mark->format('H:i')));
+                $this->stop($entry, $mark, TimerFlag::tabClosed($mark->format('g:i a')));
                 $stopped[] = (int) $entry->getKey();
             }
 

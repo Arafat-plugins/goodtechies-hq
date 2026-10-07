@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Shared\AttendanceController;
+use App\Http\Controllers\Shared\AttendanceCorrectionController;
 use App\Http\Controllers\Shared\ExpenseController;
 use App\Http\Controllers\Shared\FileDownloadController;
 use App\Http\Controllers\Shared\FinanceCategoryController;
@@ -283,6 +284,17 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
     // Client doc 2026-10-05 item 1: the last tab's pagehide beacon (see AttendanceController::leaving).
     Route::post('/attendance/leaving', [AttendanceController::class, 'leaving'])->name('attendance.leaving');
 
+    // Polish 029: ask for one of your own days to be corrected (a Late by mistake), and the
+    // answer from whoever corrects attendance. See AttendanceCorrectionController.
+    Route::post('/attendance/corrections', [AttendanceCorrectionController::class, 'store'])
+        ->name('attendance.corrections.store');
+    Route::post('/attendance/corrections/{correction}/approve', [AttendanceCorrectionController::class, 'approve'])
+        ->whereNumber('correction')
+        ->name('attendance.corrections.approve');
+    Route::post('/attendance/corrections/{correction}/reject', [AttendanceCorrectionController::class, 'reject'])
+        ->whereNumber('correction')
+        ->name('attendance.corrections.reject');
+
     // The task timer for everyone who works tasks (flow F3, decision 12-73): ▶ on a board card
     // or in the drawer, then ⏸ / resume / ⏹ on whatever is open. Shared for the clock's reason —
     // an Admin and Yaseen press the same button — and gated by `TimeEntryPolicy::trackTasks`
@@ -394,6 +406,10 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
             Route::post('/{meeting}/rsvp', [MeetingDetailController::class, 'rsvp'])
                 ->whereNumber('meeting')
                 ->name('rsvp');
+            // Polish 030: pressing Join answers "Going".
+            Route::post('/{meeting}/join', [MeetingDetailController::class, 'join'])
+                ->whereNumber('meeting')
+                ->name('join');
             Route::put('/{meeting}/notes', [MeetingDetailController::class, 'notes'])
                 ->whereNumber('meeting')
                 ->name('notes');

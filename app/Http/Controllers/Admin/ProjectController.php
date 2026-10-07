@@ -19,6 +19,7 @@ use App\Services\TaskTimerService;
 use App\Support\BillingFrequency;
 use App\Support\BillingType;
 use App\Support\Priority;
+use App\Support\ProjectClientBoard;
 use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
 use App\Support\ProjectTaskList;
@@ -81,7 +82,23 @@ class ProjectController extends Controller
             ->paginate(self::PER_PAGE)
             ->withQueryString();
 
+        // Polish 030: the page opens BY CLIENT (the client's ClickUp-style picture); the table
+        // is the "List" layout. `?project=` picks the board on the right.
+        $layout = $request->query('layout') === 'list' ? 'list' : 'clients';
+        $selected = $layout === 'clients' ? $this->id($request->query('project')) : null;
+
         return Inertia::render('Admin/Projects/Index', [
+            'layout' => $layout,
+            'clientTree' => fn (): array => $layout === 'clients' ? ProjectClientBoard::tree($request->user()) : [],
+            'projectBoard' => function () use ($request, $selected): ?array {
+                if ($selected === null) {
+                    return null;
+                }
+
+                $project = Project::query()->visibleTo($request->user())->whereKey($selected)->first();
+
+                return $project === null ? null : ProjectClientBoard::board($request->user(), $project);
+            },
             'projects' => ProjectResource::collection($projects),
             'filters' => $filters,
             'clients' => $this->clients(),

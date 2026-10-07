@@ -292,6 +292,26 @@ class MeetingService
     }
 
     /**
+     * Polish 030: somebody pressed Join. Pressing Join is answering "Going", so an invitation
+     * still waiting for an answer (or one answered "Not going") becomes Going — the client saw
+     * "No answer yet" beside somebody who had already joined. Nothing happens for a person who
+     * already said Going, and nothing for a cancelled meeting (the policy refuses it).
+     */
+    public function joined(User $user, Meeting $meeting): void
+    {
+        $seat = MeetingParticipant::query()
+            ->where('meeting_id', $meeting->getKey())
+            ->where('user_id', $user->getKey())
+            ->first();
+
+        if ($seat === null || $seat->rsvp_status === RsvpStatus::Accepted) {
+            return;
+        }
+
+        $this->rsvp($user, $meeting, RsvpStatus::Accepted);
+    }
+
+    /**
      * Write the meeting's notes and decisions (Part D §12: *"notes + decisions recorded"*).
      *
      * `updateOrCreate` through the unique index on `meeting_id`, so two people closing the same
@@ -619,7 +639,8 @@ class MeetingService
             } elseif (! MeetLink::looksValid($link)) {
                 throw MeetingStateException::meetLinkNotRecognised();
             } else {
-                $fields['meet_link'] = $link;
+                // Polish 030: stored as the https address however it was typed.
+                $fields['meet_link'] = MeetLink::canonical($link);
             }
         }
 

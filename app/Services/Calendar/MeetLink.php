@@ -55,9 +55,28 @@ final class MeetLink
      * An empty string answers `false`: "no link" is expressed by a NULL column, and a caller
      * that means "clear it" says so rather than sending a blank through here.
      */
-    public static function looksValid(string $url): bool
+    /**
+     * Polish 030: a link typed or pasted as `http://meet.google.com/…` or `meet.google.com/…`
+     * is the same room — read it as the https address rather than refusing it.
+     */
+    public static function canonical(string $url): string
     {
         $url = trim($url);
+
+        if (str_starts_with(strtolower($url), 'http://meet.google.com/')) {
+            return 'https://'.substr($url, 7);
+        }
+
+        if (str_starts_with(strtolower($url), 'meet.google.com/')) {
+            return 'https://'.$url;
+        }
+
+        return $url;
+    }
+
+    public static function looksValid(string $url): bool
+    {
+        $url = self::canonical($url);
 
         if ($url === '' || $url === self::NEW_MEETING_URL) {
             return false;
@@ -72,7 +91,7 @@ final class MeetLink
      */
     public static function normalise(?string $url): ?string
     {
-        $url = trim((string) $url);
+        $url = self::canonical((string) $url);
 
         return self::looksValid($url) ? $url : null;
     }

@@ -232,7 +232,7 @@ function confirmArchiveToggle(): void {
                 component, exactly as `Pages/Shared/Notifications.vue` does it.
             -->
             <TabsContent value="overview" class="flex flex-col gap-4 rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
-                <ProjectMetaList :project="project" />
+                <ProjectMetaList :project="project" :tracked-seconds="projectTasks.tracked_seconds" />
 
                 <div class="grid items-start gap-4 lg:grid-cols-2">
                     <Card class="min-w-0 gap-2">

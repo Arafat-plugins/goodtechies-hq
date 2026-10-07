@@ -117,7 +117,7 @@ class AuditLogResource extends JsonResource
             'recorded_at' => $log->created_at
                 ?->copy()
                 ->timezone((string) config('app.timezone'))
-                ->isoFormat('D MMM YYYY, HH:mm:ss'),
+                ->isoFormat('D MMM YYYY, h:mm:ss a'),
 
             'ip' => $log->ip,
             'user_agent' => $log->user_agent,

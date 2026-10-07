@@ -73,7 +73,7 @@ it('mints a signed url with the expiry beside it', function () {
     // The expiry in the payload is the one in the URL, not a decoration: a panel that has been
     // open past it can say the links are stale instead of finding out one click at a time.
     expect(strtotime($payload['url_expires_at']))
-        ->toBeGreaterThan(now()->addMinutes(FileService::URL_TTL_MINUTES - 1)->timestamp);
+        ->toBeGreaterThan(now()->addDay()->subMinute()->timestamp);
 })->group('phase2');
 
 it('marks an image as previewable and a zip as not', function () {

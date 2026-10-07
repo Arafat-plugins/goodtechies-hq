@@ -25,6 +25,8 @@ class StoreClientRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:255'],
+            // Polish 030: the short name the Projects page lists the client by.
+            'nickname' => ['nullable', 'string', 'max:60'],
             'status' => ['required', Rule::enum(ClientStatus::class)],
             'internal_notes' => ['nullable', 'string', 'max:5000'],
             'contacts' => ['nullable', 'array', 'max:10'],

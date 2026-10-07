@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
 import { ChevronLeft, ChevronRight } from '@lucide/vue';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import AttendanceMonth from '@/Components/Attendance/AttendanceMonth.vue';
 import ClockWidget from '@/Components/Attendance/ClockWidget.vue';
 import EditDayDialog from '@/Components/Attendance/EditDayDialog.vue';
+import RequestCorrectionDialog from '@/Components/Attendance/RequestCorrectionDialog.vue';
 import type {
+    AttendanceCorrection,
+    AttendanceCorrectionRules,
     AttendanceDay,
     AttendanceMonth as AttendanceMonthPayload,
     AttendanceScheduleSummary,
     AttendanceStatusOption,
     AttendanceSummaryRow,
 } from '@/Components/Attendance/attendance';
-import { attendanceRoutes, attendanceStatusIcon } from '@/Components/Attendance/attendance';
+import { attendanceRoutes, attendanceStatusIcon, canAskCorrection } from '@/Components/Attendance/attendance';
 import CountChip from '@/Components/CountChip.vue';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
@@ -64,8 +67,27 @@ const props = defineProps<{
      * reader who may not edit, who has no dialog to fill.
      */
     statuses: AttendanceStatusOption[];
-    permissions: { can_clock: boolean; can_edit: boolean };
+    permissions: { can_clock: boolean; can_edit: boolean; can_request_correction: boolean };
+    /** Polish 029: the latest correction request per day of this month, keyed by `Y-m-d`. */
+    corrections: Record<string, AttendanceCorrection>;
+    correction_rules: AttendanceCorrectionRules;
 }>();
+
+const asking = ref<AttendanceDay | null>(null);
+const askOpen = ref(false);
+
+const todayCorrection = computed(() => props.corrections[props.today.date]);
+const todayAskable = computed(
+    () =>
+        props.permissions.can_request_correction &&
+        !props.permissions.can_edit &&
+        canAskCorrection(props.today, props.correction_rules, todayCorrection.value),
+);
+
+function ask(day: AttendanceDay): void {
+    asking.value = day;
+    askOpen.value = true;
+}
 
 const editing = ref<AttendanceDay | null>(null);
 const editOpen = ref(false);
@@ -104,7 +126,7 @@ function workingDayLabels(days: string[]): string {
  * `useLiveProps` holds the refresh while the edit-a-day dialog is open, so a correction somebody
  * is typing is never re-read out from under them.
  */
-useLiveProps(['today', 'days', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
+useLiveProps(['today', 'days', 'summary', 'corrections'], { intervalMs: ATTENDANCE_POLL_MS });
 </script>
 
 <template>
@@ -124,7 +146,14 @@ useLiveProps(['today', 'days', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
         "
     >
         <div class="flex min-w-0 flex-col gap-4">
-            <ClockWidget v-if="subject.is_self" :today="today" :can-clock="permissions.can_clock" />
+            <ClockWidget
+                v-if="subject.is_self"
+                :today="today"
+                :can-clock="permissions.can_clock"
+                :can-ask-correction="todayAskable"
+                :correction-label="todayCorrection?.status === 'pending' ? 'Correction asked' : null"
+                @ask-correction="ask(today)"
+            />
 
             <!-- The schedule, printed so a status nobody expected can be read back to the rule
                  that produced it rather than looking like a bug. -->
@@ -184,7 +213,15 @@ useLiveProps(['today', 'days', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
                 </li>
             </ul>
 
-            <AttendanceMonth :days="days" :can-edit="permissions.can_edit" @edit="edit" />
+            <AttendanceMonth
+                :days="days"
+                :can-edit="permissions.can_edit"
+                :corrections="corrections"
+                :correction-rules="correction_rules"
+                :can-request-correction="permissions.can_request_correction"
+                @edit="edit"
+                @request="ask"
+            />
         </div>
 
         <EditDayDialog
@@ -194,6 +231,14 @@ useLiveProps(['today', 'days', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
             :employee-name="subject.name"
             :day="editing"
             :statuses="statuses"
+            :correction="editing ? corrections[editing.date] : undefined"
+        />
+
+        <RequestCorrectionDialog
+            v-if="permissions.can_request_correction"
+            v-model:open="askOpen"
+            :day="asking"
+            :previous="asking ? corrections[asking.date] : undefined"
         />
     </PageShell>
 </template>

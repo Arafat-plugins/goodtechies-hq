@@ -1,4 +1,5 @@
 import {
+    MonitorDot,
     AlarmClock,
     BadgeDollarSign,
     Bell,
@@ -104,6 +105,9 @@ export const adminNav: NavGroup[] = [
             // also claims the entry decisions' POST paths — they never render a page, but a
             // redirect back after one must not unlight the row it was made from.
             { label: 'Time', href: '/admin/time', activePrefix: '/admin/time', icon: Timer },
+            // Polish 030: what a remote employee is doing — the timer extension's sites, active
+            // and idle time, per day. It existed only as a button on Time; now it has a row.
+            { label: 'Remote activity', href: '/admin/time/activity', icon: MonitorDot },
             // One employee's week, tasks × days. No id in the href: the controller opens on the
             // first timer-tracked name and the page's own picker moves between people, so the
             // nav row does not have to know who exists.

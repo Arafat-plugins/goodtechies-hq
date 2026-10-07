@@ -213,7 +213,7 @@ it('says "Clocked in again at" when the employee clocks in on a closed day', fun
     $this->actingAs($yaseen)
         ->post('/attendance/clock-in')
         ->assertRedirect()
-        ->assertSessionHas('success', fn (string $message): bool => str_starts_with($message, 'Clocked in again at 13:00'));
+        ->assertSessionHas('success', fn (string $message): bool => str_starts_with($message, 'Clocked in again at 1:00 pm'));
 });
 
 it('refuses a second open session for the same day at the database', function () {

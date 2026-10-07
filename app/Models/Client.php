@@ -17,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * contact_info shape (not enforced, documented for callers):
  * list<array{name: string, role: string, email: string, phone: string}>
  */
-#[Fillable(['name', 'internal_notes', 'status'])]
+#[Fillable(['name', 'nickname', 'internal_notes', 'status'])]
 // Decision 10-18: `search_vector` is a STORED GENERATED tsvector of this row's own
 // searchable text. `select *` loads it (~282 B a row on `tasks`, measured with
 // `pg_column_size`), and it belongs in no payload — so it is hidden from every

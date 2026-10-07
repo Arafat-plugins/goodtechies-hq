@@ -12,6 +12,7 @@ export interface StatusOption {
 export interface Client {
     id: number;
     name: string;
+    nickname?: string | null;
     status: string;
     status_label: string;
     projects_count?: number;
@@ -49,6 +50,7 @@ const props = defineProps<{
 
 const form = useForm({
     name: props.client?.name ?? '',
+    nickname: props.client?.nickname ?? '',
     status: props.client?.status ?? (props.statuses[0]?.value ?? ''),
     internal_notes: props.client?.internal_notes ?? '',
     contacts: (props.client?.contacts ?? []).map((contact) => ({ ...contact })),
@@ -98,6 +100,21 @@ function submit(): void {
                         <p v-if="form.errors.name" id="client-name-error" class="text-xs text-destructive">
                             {{ form.errors.name }}
                         </p>
+                    </div>
+
+                    <!-- Polish 030: the short name the Projects page lists this client by. -->
+                    <div class="flex min-w-0 flex-col gap-2">
+                        <Label for="client-nickname">Nickname</Label>
+                        <Input
+                            id="client-nickname"
+                            v-model="form.nickname"
+                            name="nickname"
+                            maxlength="60"
+                            placeholder="Short name, e.g. Buffalo Modular"
+                            :disabled="form.processing"
+                            :aria-invalid="form.errors.nickname ? true : undefined"
+                        />
+                        <p v-if="form.errors.nickname" class="text-xs text-destructive">{{ form.errors.nickname }}</p>
                     </div>
 
                     <div class="flex min-w-0 flex-col gap-2">

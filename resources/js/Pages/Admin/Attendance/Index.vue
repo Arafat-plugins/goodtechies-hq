@@ -2,8 +2,10 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { CalendarCheck, Pencil } from '@lucide/vue';
 import { ref } from 'vue';
+import CorrectionDecision from '@/Components/Attendance/CorrectionDecision.vue';
 import EditDayDialog from '@/Components/Attendance/EditDayDialog.vue';
 import type {
+    AttendanceCorrectionRow,
     AttendanceDay,
     AttendanceRosterRow,
     AttendanceStatusOption,
@@ -59,7 +61,20 @@ const props = defineProps<{
     rows: AttendanceRosterRow[];
     summary: AttendanceSummaryRow[];
     statuses: AttendanceStatusOption[];
+    /** Polish 029: employees' requests to correct a day, waiting for an answer. */
+    corrections: AttendanceCorrectionRow[];
 }>();
+
+/** "Yaseen · Wed 7 Oct · Late" */
+function correctionHeading(row: AttendanceCorrectionRow): string {
+    const day = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+    });
+
+    return [row.employee.name, day, row.current_label].filter(Boolean).join(' · ');
+}
 
 const editing = ref<{ day: AttendanceDay; employeeId: number; employeeName: string } | null>(null);
 const editOpen = ref(false);
@@ -83,7 +98,7 @@ function label(row: AttendanceRosterRow): string {
  *
  * Held while the edit dialog is open, so a day being corrected by hand is not replaced mid-edit.
  */
-useLiveProps(['rows', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
+useLiveProps(['rows', 'summary', 'corrections'], { intervalMs: ATTENDANCE_POLL_MS });
 </script>
 
 <template>
@@ -103,6 +118,20 @@ useLiveProps(['rows', 'summary'], { intervalMs: ATTENDANCE_POLL_MS });
                 :next-href="attendanceRoutes.roster(date.next)"
                 :today-href="date.value !== date.today ? attendanceRoutes.roster() : null"
             />
+
+            <!-- Polish 029: requests from employees to correct a day. Answered here. -->
+            <Card v-if="corrections.length" class="flex min-w-0 flex-col gap-3 p-4">
+                <div class="flex items-center gap-2">
+                    <h2 class="text-sm font-medium">Correction requests</h2>
+                    <span class="rounded-sm bg-muted px-1.5 text-xs text-muted-foreground tabular-nums">{{ corrections.length }}</span>
+                </div>
+                <CorrectionDecision
+                    v-for="row in corrections"
+                    :key="row.id"
+                    :correction="row"
+                    :heading="correctionHeading(row)"
+                />
+            </Card>
 
             <!-- Counts of people per status. Never a ranking. -->
             <ul v-if="summary.length" class="flex flex-wrap gap-2">

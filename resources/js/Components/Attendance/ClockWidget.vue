@@ -55,7 +55,13 @@ const props = defineProps<{
     today: AttendanceDay;
     /** `AttendanceRecordPolicy::clock`, resolved on the server. */
     canClock: boolean;
+    /** Polish 029: today may be sent for correction (Late by mistake) — draws the link. */
+    canAskCorrection?: boolean;
+    /** Polish 029: today's request, when there is one ("Correction asked"). */
+    correctionLabel?: string | null;
 }>();
+
+const emit = defineEmits<{ 'ask-correction': [] }>();
 
 const busy = ref(false);
 
@@ -189,6 +195,18 @@ function retry(): void {
                 <span v-else-if="today.clock_in" class="text-sm tabular-nums text-muted-foreground">
                     In {{ clock12(today.clock_in) }}<template v-if="today.clock_out"> · Out {{ clock12(today.clock_out) }}</template>
                 </span>
+
+                <span v-if="correctionLabel" class="text-xs font-medium text-muted-foreground">· {{ correctionLabel }}</span>
+                <Button
+                    v-else-if="canAskCorrection"
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    class="h-auto px-0 text-xs"
+                    @click="emit('ask-correction')"
+                >
+                    Ask to correct
+                </Button>
             </div>
 
             <p v-if="elapsedMinutes !== null" class="text-xs tabular-nums text-muted-foreground">

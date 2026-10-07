@@ -60,6 +60,12 @@ return [
 
     'google_calendar' => [
         'driver' => env('GOOGLE_CALENDAR_DRIVER', 'manual'),
+        // Polish 030: the OAuth client the `api` driver signs in with. The secret lives in the
+        // server's .env only — never in the repository.
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI'),
+        'calendar_id' => env('GOOGLE_CALENDAR_ID', 'primary'),
     ],
 
     /*

@@ -109,6 +109,15 @@ class AttendanceRecordPolicy extends Policy
      * manages the people who report to them (Part C's 🟡 own team) — which in MVP is the
      * dormant MANAGER role and nobody else, by seed rather than by this file naming them.
      */
+    /**
+     * Polish 029: asking for one of your own days to be corrected. The same people who clock —
+     * yourself, holding `attendance.view_own`, tracked by the office clock.
+     */
+    public function requestCorrection(User $user, Employee $subject): bool
+    {
+        return $this->clock($user, $subject);
+    }
+
     private function manages(User $user, Employee $subject): bool
     {
         if (! $this->allows($user, Permission::AttendanceManageOthers)) {

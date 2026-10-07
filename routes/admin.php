@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\EmployeeController;
 use App\Http\Controllers\Admin\EmployeeExtensionDeviceController;
 use App\Http\Controllers\Admin\FileController;
+use App\Http\Controllers\Admin\GoogleCalendarController;
 use App\Http\Controllers\Admin\HolidayController;
 use App\Http\Controllers\Admin\LeaveBalanceController;
 use App\Http\Controllers\Admin\LeaveController;
@@ -59,6 +60,18 @@ Route::prefix('admin')
         Route::put('/settings', [SettingsController::class, 'update'])
             ->middleware('can:settings.manage')
             ->name('settings.update');
+
+        // Polish 030: connect the agency's Google account so goodERP creates Meet links itself.
+        // The callback URL is the one registered on the Google OAuth client.
+        Route::get('/google/connect', [GoogleCalendarController::class, 'connect'])
+            ->middleware('can:settings.manage')
+            ->name('google.connect');
+        Route::get('/google/callback', [GoogleCalendarController::class, 'callback'])
+            ->middleware('can:settings.manage')
+            ->name('google.callback');
+        Route::post('/google/disconnect', [GoogleCalendarController::class, 'disconnect'])
+            ->middleware('can:settings.manage')
+            ->name('google.disconnect');
 
         // Polish 026: the Admin's own names for the project types (the `project_type_labels`
         // setting), edited beside the Type box on the project form. Same gate as Settings.

@@ -213,7 +213,7 @@ it('puts the reminder on the Meetings tab of the Notification Center', function 
         // The sentence carries the time, because "when" is the first thing a reader wants from
         // a reminder and a bell row that makes them open the meeting to find out has failed.
         ->and($row->type->summary($row->payload, (int) $row->count))
-        ->toContain($meeting->start_at->timezone(config('app.timezone'))->isoFormat('HH:mm'));
+        ->toContain($meeting->start_at->timezone(config('app.timezone'))->isoFormat('h:mm a'));
 });
 
 it('stores no reminder flag on the meeting itself', function () {

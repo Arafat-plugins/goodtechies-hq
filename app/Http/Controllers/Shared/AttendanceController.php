@@ -6,6 +6,7 @@ use App\Exceptions\AttendanceStateException;
 use App\Http\Controllers\Controller;
 use App\Models\AttendanceRecord;
 use App\Models\Employee;
+use App\Services\AttendanceCorrectionService;
 use App\Services\AttendanceService;
 use App\Services\SettingsService;
 use App\Support\AttendanceDay;
@@ -55,6 +56,7 @@ class AttendanceController extends Controller
     public function __construct(
         private readonly AttendanceService $attendance,
         private readonly SettingsService $settings,
+        private readonly AttendanceCorrectionService $corrections,
     ) {}
 
     /**
@@ -124,6 +126,19 @@ class AttendanceController extends Controller
                 // (decisions 2-28, 2-31).
                 'can_clock' => $gate->allows('clock', [AttendanceRecord::class, $subject]),
                 'can_edit' => $gate->allows('update', [AttendanceRecord::class, $subject]),
+                // Polish 029: ask for one of your own Late / Half day / Absent days to be corrected.
+                'can_request_correction' => $gate->allows('requestCorrection', [AttendanceRecord::class, $subject]),
+            ],
+
+            // Polish 029: the latest correction request per day of this month, keyed by date, and
+            // which days may be sent (status and how far back).
+            'corrections' => (object) $this->corrections->forMonth($subject, $month),
+            'correction_rules' => [
+                'statuses' => array_map(
+                    fn (AttendanceStatus $status): string => $status->value,
+                    AttendanceCorrectionService::CORRECTABLE,
+                ),
+                'earliest' => Carbon::today()->subDays(AttendanceCorrectionService::WINDOW_DAYS)->toDateString(),
             ],
         ]);
     }
@@ -194,14 +209,14 @@ class AttendanceController extends Controller
         if (! $out && $record->wasChanged('clock_out')) {
             return back()->with('success', sprintf(
                 'Clocked in again at %s. Breaks between sessions are not counted as worked time.',
-                $record->openSession()?->clock_in->format('H:i') ?? '—',
+                $record->openSession()?->clock_in->format('g:i a') ?? '—',
             ));
         }
 
         return back()->with('success', sprintf(
             '%s at %s. Today is %s.',
             $out ? 'Clocked out' : 'Clocked in',
-            ($out ? $record->clock_out : $record->clock_in)?->format('H:i') ?? '—',
+            ($out ? $record->clock_out : $record->clock_in)?->format('g:i a') ?? '—',
             $record->status->label(),
         ));
     }

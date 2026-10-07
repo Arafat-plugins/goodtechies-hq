@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { ArrowRight, CalendarDays, ListTodo } from '@lucide/vue';
+import { ArrowRight, CalendarDays, Clock, ListTodo } from '@lucide/vue';
 import { computed } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { formatDate } from '@/Components/Tasks/taskDetail';
+import { formatDuration } from '@/Components/Timer/timer';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
 import { cn } from '@/lib/utils';
@@ -24,6 +25,8 @@ export interface ProjectTaskRow {
     tone: StatusKey | null;
     is_open: boolean;
     due_date: string | null;
+    /** Polish 030: approved time spent on this task. */
+    tracked_seconds: number;
     assignees: string[];
     href: string;
 }
@@ -31,6 +34,8 @@ export interface ProjectTaskRow {
 export interface ProjectTasks {
     total: number;
     open: number;
+    /** Polish 030: approved time spent on the whole project. */
+    tracked_seconds: number;
     rows: ProjectTaskRow[];
 }
 
@@ -61,6 +66,10 @@ function overdue(row: ProjectTaskRow): boolean {
             <span class="text-xs text-muted-foreground">
                 {{ scopeLabel }}<template v-if="tasks.total > 0"> · {{ tasks.open }} open</template>
             </span>
+            <span class="inline-flex items-center gap-1 text-xs font-medium tabular-nums" title="Total time spent on this project">
+                <Clock class="size-3" aria-hidden="true" />
+                {{ formatDuration(tasks.tracked_seconds) }} spent
+            </span>
             <Button as-child size="sm" variant="ghost" class="ml-auto">
                 <Link :href="allHref">
                     Open in Tasks
@@ -88,6 +97,14 @@ function overdue(row: ProjectTaskRow): boolean {
                         class="max-w-48 shrink-0 truncate text-xs text-muted-foreground"
                     >
                         {{ row.assignees.join(', ') }}
+                    </span>
+                    <span
+                        v-if="row.tracked_seconds > 0"
+                        class="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums"
+                        :title="`Time spent on ${row.title}`"
+                    >
+                        <Clock class="size-3" aria-hidden="true" />
+                        {{ formatDuration(row.tracked_seconds) }}
                     </span>
                     <span
                         v-if="row.due_date"

@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Models\Employee;
 use App\Models\Project;
 use App\Models\Task;
+use App\Models\TimeEntry;
 use App\Models\User;
 
 /**
@@ -52,6 +53,8 @@ final class ProjectTaskList
                 'tone' => $task->status?->tone(),
                 'is_open' => $task->status?->isOpen() ?? true,
                 'due_date' => $task->due_date?->toDateString(),
+                // Polish 030: the time spent on it (approved tracked time, the task's cache).
+                'tracked_seconds' => (int) $task->tracked_seconds,
                 'assignees' => $task->assignees
                     ->map(fn (Employee $employee): string => (string) ($employee->user?->name ?? ''))
                     ->filter()
@@ -62,6 +65,13 @@ final class ProjectTaskList
             ->values()
             ->all();
 
-        return ['total' => $total, 'open' => $open, 'rows' => $rows];
+        // Polish 030: the whole project's time spent — every approved entry booked to it,
+        // subtasks and tasks beyond this list's first fifty included.
+        // An employee sees only the time on the tasks they can see.
+        $tracked = $surface === 'admin'
+            ? (int) TimeEntry::query()->tracked()->where('project_id', $project->getKey())->sum('duration_seconds')
+            : (int) (clone $base)->sum('tracked_seconds');
+
+        return ['total' => $total, 'open' => $open, 'tracked_seconds' => $tracked, 'rows' => $rows];
     }
 }

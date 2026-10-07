@@ -12,7 +12,8 @@ import {
     Send,
     X,
 } from '@lucide/vue';
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, useId, watch } from 'vue';
+import { CHAT_GALLERY } from '@/Components/Messages/gallery';
 import { DRAWER_FOOTER_INSET } from '@/Components/drawerFooter';
 import EmptyState from '@/Components/EmptyState.vue';
 import EmojiPicker from '@/Components/Messages/EmojiPicker.vue';
@@ -1687,10 +1688,6 @@ const TICK_MS = 15_000;
 const now = ref(Date.now());
 let ticker: ReturnType<typeof setInterval> | undefined;
 
-const attachmentCount = computed(
-    () => thread.value.messages.reduce((total, message) => total + message.attachments.length, 0),
-);
-
 const expiresAt = computed(() => {
     let earliest: number | null = null;
 
@@ -1710,6 +1707,33 @@ const expiresAt = computed(() => {
 const linksStale = computed(
     () => expiresAt.value !== null && now.value >= expiresAt.value - EXPIRY_MARGIN_MS,
 );
+
+/**
+ * Polish 030: every picture in this conversation, oldest first, for the lightbox to slide
+ * through. Deleted messages carry no attachments, so they drop out by themselves.
+ */
+provide(
+    CHAT_GALLERY,
+    computed(() =>
+        thread.value.messages.flatMap((message) =>
+            message.attachments
+                .filter((file) => file.kind === 'image')
+                .map((file) => ({ id: file.id, src: file.url, name: file.name, href: file.url })),
+        ),
+    ),
+);
+
+/**
+ * Polish 030: whether THIS message's links have lapsed. Per message, so one old page whose
+ * links ran out does not turn every picture in the chat into "Link expired".
+ */
+function messageLinksStale(message: { attachments: { url_expires_at?: string | null }[] }): boolean {
+    return message.attachments.some((file) => {
+        const at = parseAt(file.url_expires_at);
+
+        return at !== null && now.value >= at - EXPIRY_MARGIN_MS;
+    });
+}
 
 /** Only while somebody is looking: a background tab does not need fresh signatures all day. */
 function refreshIfStale(): void {
@@ -2282,25 +2306,9 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
         </EmptyState>
 
         <template v-else>
-            <div
-                v-if="linksStale && attachmentCount > 0"
-                class="flex shrink-0 flex-col gap-2 rounded-md border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-                <p class="text-sm text-muted-foreground">
-                    The attachment links in this conversation have expired.
-                </p>
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    class="shrink-0"
-                    :aria-busy="refreshing || undefined"
-                    @click="load()"
-                >
-                    <RefreshCw aria-hidden="true" />
-                    Refresh links
-                </Button>
-            </div>
+            <!-- Polish 030: no "links have expired" banner. Links now last a day or more and the
+                 thread re-reads itself quietly when they run out (`refreshIfStale`), the way
+                 Telegram never asks you to refresh a picture. -->
 
             <!--
                 One tab stop for the whole thread, not one per bubble: `role="log"` tells a
@@ -2406,7 +2414,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                             <MessageRow
                                 :message="entry.message"
                                 :starts-run="entry.startsRun"
-                                :links-stale="linksStale"
+                                :links-stale="messageLinksStale(entry.message)"
                                 :layout="layout"
                                 :author-line="layout === 'sided' && thread.type !== 'dm'"
                                 :conversation-id="thread.conversation_id"

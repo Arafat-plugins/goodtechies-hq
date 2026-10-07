@@ -84,7 +84,7 @@ it('marks the moment and stops an office task timer AT it once the 30-second gra
         ->and($entry->isStopped())->toBeTrue()
         ->and($entry->ended_at->equalTo(Carbon::parse(TABCLOSE_DAY.' 09:05:00')))->toBeTrue()
         ->and($entry->duration_seconds)->toBe(300)
-        ->and($entry->flag_reason)->toBe('Stopped: the last goodERP tab was closed at 09:05.')
+        ->and($entry->flag_reason)->toBe('Stopped: the last goodERP tab was closed at 9:05 am.')
         ->and(Cache::has(TimerService::leavingKey($this->yaseen->employee->id)))->toBeFalse();
 });
 
@@ -134,7 +134,7 @@ it('stops a remote timer at the closing moment the same way', function () {
 
     expect($entry->isStopped())->toBeTrue()
         ->and($entry->ended_at->equalTo(Carbon::parse(TABCLOSE_DAY.' 09:05:00')))->toBeTrue()
-        ->and($entry->flag_reason)->toBe('Stopped: the last goodERP tab was closed at 09:05.');
+        ->and($entry->flag_reason)->toBe('Stopped: the last goodERP tab was closed at 9:05 am.');
 });
 
 it('keeps a remote timer whose heartbeat came after the mark', function () {

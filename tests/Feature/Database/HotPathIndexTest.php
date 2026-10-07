@@ -138,6 +138,8 @@ const IDX_ACCEPTED_BARE_FOREIGN_KEYS = [
     // Provenance: read forwards through a belongsTo, never as a predicate. The parents (`users`,
     // `employees`) are never deleted — Part B §3 rule 11 is deactivate, never delete — so the
     // referential check on a parent DELETE, the other reason a bare FK hurts, cannot fire.
+    'attendance_corrections.decided_by', // Polish 029: who answered, read through a belongsTo.
+    'google_accounts.connected_by', // Polish 030: who connected Google; one row, never queried by it.
     'attendance_records.edited_by',
     'employee_salaries.set_by',
     'expenses.recorded_by',
