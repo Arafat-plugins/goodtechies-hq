@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Download } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import type { GalleryImage } from '@/Components/Messages/gallery';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/Components/ui/dialog';
+import { cn } from '@/lib/utils';
 
 /**
  * Brief 013: a picture opens on this page, never in a new tab.
@@ -99,6 +100,35 @@ function onTouchEnd(event: TouchEvent): void {
     }
 }
 
+/**
+ * Polish 031: the mouse wheel moves through the pictures — down/right is next, up/left is
+ * previous. One step per gesture: a trackpad fires dozens of wheel events for one swipe.
+ */
+let wheelLockedUntil = 0;
+
+function onWheel(event: WheelEvent): void {
+    if (!many.value) {
+        return;
+    }
+
+    event.preventDefault();
+
+    const now = Date.now();
+    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+
+    if (now < wheelLockedUntil || Math.abs(delta) < 4) {
+        return;
+    }
+
+    wheelLockedUntil = now + 350;
+
+    if (delta > 0) {
+        next();
+    } else {
+        previous();
+    }
+}
+
 function onCloseAutoFocus(event: Event): void {
     event.preventDefault();
     emit('closed');
@@ -115,10 +145,16 @@ function onCloseAutoFocus(event: Event): void {
         >
             <DialogTitle class="sr-only">{{ current.name }}</DialogTitle>
             <DialogDescription class="sr-only">
-                Image attachment<template v-if="many">, {{ index + 1 }} of {{ items.length }}. Use the left and right arrow keys for the others</template>. Press Escape to close.
+                Image attachment<template v-if="many">, {{ index + 1 }} of {{ items.length }}. Use the left and right arrow keys or the mouse wheel for the others</template>. Press Escape to close.
             </DialogDescription>
 
-            <div class="relative flex min-h-0 w-full items-center justify-center" @touchstart.passive="onTouchStart" @touchend="onTouchEnd">
+            <!-- Polish 031: the arrows sit in their own gutters beside the picture, never on it. -->
+            <div
+                :class="cn('relative flex min-h-0 w-full items-center justify-center', many && 'px-14')"
+                @touchstart.passive="onTouchStart"
+                @touchend="onTouchEnd"
+                @wheel="onWheel"
+            >
                 <img
                     :key="current.id"
                     :src="current.src"
@@ -129,7 +165,7 @@ function onCloseAutoFocus(event: Event): void {
                 <button
                     v-if="many"
                     type="button"
-                    class="absolute top-1/2 left-1 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border bg-background/90 text-foreground hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-0"
+                    class="absolute top-1/2 left-0 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border bg-background/90 text-foreground hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-0"
                     :disabled="!hasPrevious"
                     aria-label="Previous image"
                     data-testid="lightbox-previous"
@@ -140,7 +176,7 @@ function onCloseAutoFocus(event: Event): void {
                 <button
                     v-if="many"
                     type="button"
-                    class="absolute top-1/2 right-1 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border bg-background/90 text-foreground hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-0"
+                    class="absolute top-1/2 right-0 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border bg-background/90 text-foreground hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-0"
                     :disabled="!hasNext"
                     aria-label="Next image"
                     data-testid="lightbox-next"

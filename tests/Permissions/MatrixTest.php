@@ -767,6 +767,8 @@ function permissionMatrix(): array
         // Admin surface — projects. archive and unarchive sit next to each other on purpose:
         // the Admin cell of the first is undone by the Admin cell of the second.
         ['GET', 'admin/projects', $admin],
+        // Polish 031: the sidebar's Projects dropdown data (JSON).
+        ['GET', 'admin/projects/tree', $admin],
         ['GET', 'admin/projects/create', $admin],
         ['POST', 'admin/projects', $adminAction],
         ['GET', 'admin/projects/{project}', $admin],

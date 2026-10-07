@@ -154,6 +154,8 @@ Route::prefix('admin')
         Route::prefix('projects')->name('projects.')->group(function () {
             Route::get('/', [ProjectController::class, 'index'])->name('index');
             Route::get('/create', [ProjectController::class, 'create'])->name('create');
+            // Polish 031: the sidebar's Projects dropdown — clients → projects → task counts, as JSON.
+            Route::get('/tree', [ProjectController::class, 'tree'])->name('tree');
             Route::post('/', [ProjectController::class, 'store'])->name('store');
             Route::get('/{project}', [ProjectController::class, 'show'])->name('show');
             Route::get('/{project}/edit', [ProjectController::class, 'edit'])->name('edit');

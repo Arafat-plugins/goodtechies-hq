@@ -27,6 +27,7 @@ use App\Support\ProjectType;
 use App\Support\RoleName;
 use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -111,6 +112,18 @@ class ProjectController extends Controller
                 ? ['workingNowByProject' => fn (): array => $this->timers->workingNowByProject($request->user()) ?? []]
                 : []),
         ]);
+    }
+
+    /**
+     * Polish 031: the sidebar's Projects dropdown, fetched when it is opened — clients (by
+     * nickname), their projects and how many tasks each has. JSON, because the sidebar is on
+     * every page and must not make every page pay for it.
+     */
+    public function tree(Request $request): JsonResponse
+    {
+        Gate::authorize('viewAny', Project::class);
+
+        return response()->json(['clients' => ProjectClientBoard::tree($request->user())]);
     }
 
     public function create(): Response

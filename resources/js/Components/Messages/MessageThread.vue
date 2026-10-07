@@ -56,6 +56,7 @@ import {
     UPLOAD_STALLED,
     useMentions,
 } from '@/Components/Messages/messages';
+import { continueList, listFromHtml } from '@/Components/Messages/composerLists';
 import type { VoiceClip } from '@/Components/Messages/voice';
 import { clipFile } from '@/Components/Messages/voice';
 import { Button } from '@/Components/ui/button';
@@ -698,13 +699,11 @@ const canAdopt = computed(() => thread.value.can_post && !posting.value && !atta
  * clipboard is left entirely alone — no `preventDefault()`, so the text lands in the field.
  */
 function onPaste(event: ClipboardEvent): void {
-    if (!canAdopt.value) {
-        return;
-    }
-
-    const image = clipboardImage(event.clipboardData);
+    const image = canAdopt.value ? clipboardImage(event.clipboardData) : null;
 
     if (image === null) {
+        pasteList(event);
+
         return;
     }
 
@@ -714,6 +713,104 @@ function onPaste(event: ClipboardEvent): void {
     const type = image.type !== '' ? image.type : 'image/png';
 
     adoptFile(new File([image], pastedFileName(type, at), { type, lastModified: at.getTime() }));
+}
+
+/**
+ * Polish 032: a list copied from a document or a page keeps its numbers. When the clipboard's
+ * HTML holds an `<ol>`/`<ul>`, the text that lands in the composer is built from it — "1. ",
+ * "2. " or "- " per item, nested items indented — instead of the browser's own text/plain,
+ * which often drops the numbers. No list in the HTML → the paste is left to the browser.
+ * The composer stays plain text: nothing new is sent, nothing is rendered differently.
+ */
+function pasteList(event: ClipboardEvent): void {
+    const target = event.target;
+
+    if (!(target instanceof HTMLTextAreaElement) || !composerEl.value?.contains(target)) {
+        return;
+    }
+
+    const text = listFromHtml(event.clipboardData?.getData('text/html'));
+
+    if (text === null) {
+        return;
+    }
+
+    event.preventDefault();
+
+    // A list pasted in the middle of a line starts and ends on its own lines.
+    const from = target.selectionStart;
+    const to = target.selectionEnd;
+    const lead = from > 0 && target.value[from - 1] !== '\n' ? '\n' : '';
+    const tail = to < target.value.length && target.value[to] !== '\n' ? '\n' : '';
+
+    insertAtCaret(target, lead + text + tail, from, to);
+}
+
+/**
+ * Replace `from`…`to` of the field with `text` and leave the caret after it. `insertText` keeps
+ * the browser's undo history and fires `input` itself; where it is refused, the value is set
+ * directly and `input` is dispatched, so v-model and the typing indicator still see it.
+ */
+function insertAtCaret(el: HTMLTextAreaElement, text: string, from: number, to: number): void {
+    el.focus();
+    el.setSelectionRange(from, to);
+
+    let done = false;
+
+    try {
+        done = document.execCommand('insertText', false, text);
+    } catch {
+        done = false;
+    }
+
+    if (!done || el.value.slice(from, from + text.length) !== text) {
+        el.setRangeText(text, from, to, 'end');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    const caret = from + text.length;
+    el.setSelectionRange(caret, caret);
+}
+
+/**
+ * Polish 032: Shift+Enter on a list line continues the list — "1. hello" gives "2. ", "- a"
+ * gives "- ", indent kept. On a line that is only the marker it ends the list: the marker goes
+ * and a plain newline comes. Anything else, or a selection, is the browser's own newline.
+ * Returns whether it handled the key.
+ */
+function continueComposerList(event: KeyboardEvent): boolean {
+    const el = event.target;
+
+    if (!(el instanceof HTMLTextAreaElement) || el.selectionStart !== el.selectionEnd) {
+        return false;
+    }
+
+    const caret = el.selectionStart;
+    const lineStart = el.value.lastIndexOf('\n', caret - 1) + 1;
+    const lineEnd = el.value.indexOf('\n', caret);
+    const after = el.value.slice(caret, lineEnd === -1 ? undefined : lineEnd);
+    const next = continueList(el.value.slice(lineStart, caret));
+
+    if (next === null) {
+        return false;
+    }
+
+    if (next.kind === 'end') {
+        // "2. |rest" is not an empty item: leave that line to the plain newline.
+        if (after.trim() !== '') {
+            return false;
+        }
+
+        event.preventDefault();
+        insertAtCaret(el, '\n', caret - next.remove, caret);
+
+        return true;
+    }
+
+    event.preventDefault();
+    insertAtCaret(el, next.insert, caret, caret);
+
+    return true;
 }
 
 /**
@@ -969,7 +1066,10 @@ function onEnter(event: KeyboardEvent): void {
 
     // Shift is the newline, unless a modifier that means "send" is also down. One handler for
     // all three shortcuts, because three handlers on the same key posted the message twice.
+    // Polish 032: on a list line Shift+Enter carries the list on to the next item.
     if (event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        continueComposerList(event);
+
         return;
     }
 

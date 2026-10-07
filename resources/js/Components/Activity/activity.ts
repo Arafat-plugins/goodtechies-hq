@@ -57,6 +57,10 @@ export interface ActivityDayPayload {
     sessions: ActivitySession[];
     summary: ActivitySummary;
     sites: ActivitySite[];
+    /** Polish 031: websites left out for being under `min_minutes` in the day. */
+    sites_hidden: { count: number; seconds: number; min_minutes: number };
+    /** Polish 031: the month around this day, tracked seconds per date. */
+    month: { label: string; previous: string; next: string; days: { date: string; seconds: number }[] };
     legend: ActivityLegendItem[];
 }
 

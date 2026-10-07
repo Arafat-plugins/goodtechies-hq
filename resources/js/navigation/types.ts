@@ -28,6 +28,8 @@ export interface NavItem {
      * row it always was rather than to a `0` nobody asked for.
      */
     badgeKey?: 'messagesUnread';
+    /** Polish 031: this row opens a dropdown of clients → projects (the Admin Projects row). */
+    tree?: 'projects';
 }
 
 export interface NavGroup {

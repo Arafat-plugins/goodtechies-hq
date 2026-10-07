@@ -59,7 +59,7 @@ export const adminNav: NavGroup[] = [
         label: 'Work',
         items: [
             { label: 'Clients', href: '/admin/clients', icon: Building2 },
-            { label: 'Projects', href: '/admin/projects', icon: FolderKanban },
+            { label: 'Projects', href: '/admin/projects', icon: FolderKanban, tree: 'projects' },
             // The Board is the default view (client's request). The List is one click away on the
             // view switcher, and /admin/tasks still serves it — this changes where the nav points,
             // not which views exist.

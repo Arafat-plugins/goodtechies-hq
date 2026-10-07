@@ -11,10 +11,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
  */
 defineProps<{
     sites: ActivitySite[];
+    /** Polish 031: how many websites were left out for being under the minimum. */
+    hidden?: { count: number; seconds: number; min_minutes: number };
 }>();
 
 const KIND_WORDS: Record<Exclude<ActivitySiteKind, 'site'>, string> = {
-    other_app: 'Other apps',
+    // Polish 031: Chrome was not the window in front — the person was in another program
+    // (Word, Photoshop, File Explorer…). A Chrome extension cannot see which one.
+    other_app: 'Outside Chrome (other programs)',
     browser_internal: 'Browser pages',
     private: 'Private window',
 };
@@ -51,6 +55,17 @@ const headClass = 'text-xs uppercase text-muted-foreground';
                 </TableBody>
             </Table>
             <EmptyState v-else :icon="Globe" title="No website time recorded for this day" />
+
+            <div class="mt-3 flex flex-col gap-1 text-xs text-muted-foreground">
+                <p v-if="hidden && hidden.count > 0">
+                    {{ hidden.count }} {{ hidden.count === 1 ? 'website' : 'websites' }} under {{ hidden.min_minutes }} minutes not shown
+                    ({{ formatDuration(hidden.seconds) }} in all).
+                </p>
+                <p v-if="sites.some((site) => site.kind === 'other_app')">
+                    “Outside Chrome” is time the computer was in use but Chrome was not the window in front — another
+                    program was. The timer extension lives inside Chrome, so it cannot see which program that was.
+                </p>
+            </div>
         </CardContent>
     </Card>
 </template>

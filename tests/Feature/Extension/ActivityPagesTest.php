@@ -72,9 +72,10 @@ function EXT_PAGES_sampledEntry(User $tapu, Task $task): TimeEntry
 
     foreach ($states as $i => $state) {
         $sites = match ($i) {
-            0, 1, 2 => [['kind' => 'site', 'host' => 'docs.google.com', 'seconds' => 60]],
-            3 => [['kind' => 'site', 'host' => 'github.com', 'seconds' => 60]],
-            4 => [['kind' => 'other_app', 'host' => '', 'seconds' => 60]],
+            // Polish 031: six minutes, so it clears the five-minute floor; the two below do not.
+            0, 1, 2, 3, 4, 5 => [['kind' => 'site', 'host' => 'docs.google.com', 'seconds' => 60]],
+            6 => [['kind' => 'site', 'host' => 'github.com', 'seconds' => 60]],
+            7 => [['kind' => 'other_app', 'host' => '', 'seconds' => 60]],
             default => [],
         };
 
@@ -161,8 +162,14 @@ it('turns a day of samples into minutes, an idle share and a site share', functi
         ->and($activity['summary']['idle_minutes'])->toBe(2)
         ->and($activity['summary']['idle_percent'])->toBe(20)
         ->and($activity['sites'][0]['host'])->toBe('docs.google.com')
-        ->and($activity['sites'][0]['seconds'])->toBe(180)
-        ->and($activity['sites'][0]['share'])->toBe(60);
+        ->and($activity['sites'][0]['seconds'])->toBe(360)
+        ->and($activity['sites'][0]['share'])->toBe(100)
+        // Polish 031: under five minutes is left out, and counted.
+        ->and($activity['sites'])->toHaveCount(1)
+        ->and($activity['sites_hidden']['count'])->toBe(2)
+        ->and($activity['sites_hidden']['seconds'])->toBe(120)
+        ->and($activity['month']['days'])->toHaveCount(30)
+        ->and(collect($activity['month']['days'])->firstWhere('date', '2026-09-24')['seconds'])->toBe(600);
 });
 
 it('marks an entry with no samples as having no activity data', function (): void {

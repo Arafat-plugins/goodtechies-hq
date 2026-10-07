@@ -3,6 +3,7 @@ import { Link, usePage } from '@inertiajs/vue3';
 import { ChevronDown } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { messagesBadge } from '@/Components/Realtime/shell';
+import SidebarProjectTree from '@/Components/Shell/SidebarProjectTree.vue';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/Components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -226,7 +227,16 @@ function itemClass(item: NavItem): string {
                     <CollapsibleContent>
                         <ul class="flex flex-col gap-1">
                             <li v-for="item in group.items" :key="item.label">
+                                <!-- Polish 031: Projects opens onto clients → projects. -->
+                                <SidebarProjectTree
+                                    v-if="item.tree === 'projects'"
+                                    :item="item"
+                                    :active="isActive(item)"
+                                    :item-class="itemClass(item)"
+                                    @navigate="emit('navigate')"
+                                />
                                 <Link
+                                    v-else
                                     :href="item.href!"
                                     :aria-current="isActive(item) ? 'page' : undefined"
                                     :class="itemClass(item)"
