@@ -191,7 +191,6 @@ function time(seconds: number): string {
                             <span class="flex min-w-0 flex-1 flex-col gap-1">
                                 <span class="text-sm leading-snug font-semibold break-words">{{ project.name }}</span>
                                 <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                                    <span v-if="project.type">{{ project.type }}</span>
                                     <StatusBadge
                                         v-if="project.tone"
                                         :status="project.tone as StatusKey"
@@ -222,21 +221,41 @@ function time(seconds: number): string {
 
                     <template v-if="isOpen(project.id)">
                         <p v-if="!project.tasks.length" :id="`project-tasks-${project.id}`" class="text-xs text-muted-foreground">No open tasks</p>
-                        <ul v-else :id="`project-tasks-${project.id}`" class="flex min-w-0 flex-col gap-1" :aria-label="`Open tasks in ${project.name}`">
+                        <ul v-else :id="`project-tasks-${project.id}`" class="flex min-w-0 flex-col gap-2" :aria-label="`Open tasks in ${project.name}`">
                             <li v-for="task in project.tasks" :key="task.id">
                                 <Link
                                     :href="`/admin/tasks/${task.id}`"
-                                    class="flex min-w-0 flex-col gap-1 rounded-md border bg-background px-2.5 py-2 text-sm hover:border-ring focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                                    class="flex min-w-0 flex-col gap-1.5 rounded-md border bg-background px-2.5 py-2.5 text-sm hover:border-ring focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                                 >
                                     <span class="leading-snug break-words">{{ task.title }}</span>
                                     <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                                        <!-- Polish 041: the status exactly as on the Tasks list (StatusBadge). -->
-                                        <StatusBadge
-                                            v-if="task.tone"
-                                            :status="task.tone as StatusKey"
-                                            :label="task.status_label ?? undefined"
-                                        />
-                                        <span v-else-if="task.status_label">{{ task.status_label }}</span>
+                                        <!-- Polish 042: who it is assigned to first, then the due date, then the status; time on the right. -->
+                                        <!-- Polish 041: faces as on the Tasks board. -->
+                                        <span v-if="task.assignees.length" class="flex shrink-0 items-center -space-x-1">
+                                            <Tooltip v-for="person in task.assignees.slice(0, 3)" :key="person.id">
+                                                <TooltipTrigger as-child>
+                                                    <Avatar role="img" :aria-label="person.name" class="size-5 ring-2 ring-background">
+                                                        <AvatarFallback :class="cn('text-xs', personTone(person.id).avatar)" aria-hidden="true">
+                                                            {{ initials(person.name) }}
+                                                        </AvatarFallback>
+                                                    </Avatar>
+                                                </TooltipTrigger>
+                                                <TooltipContent>{{ person.name }}</TooltipContent>
+                                            </Tooltip>
+                                            <Tooltip v-if="task.assignees.length > 3">
+                                                <TooltipTrigger as-child>
+                                                    <span
+                                                        role="img"
+                                                        :aria-label="`${task.assignees.length - 3} more: ${task.assignees.slice(3).map((p) => p.name).join(', ')}`"
+                                                        class="inline-flex size-5 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground ring-2 ring-background"
+                                                    >
+                                                        <span aria-hidden="true">+{{ task.assignees.length - 3 }}</span>
+                                                    </span>
+                                                </TooltipTrigger>
+                                                <TooltipContent>{{ task.assignees.slice(3).map((p) => p.name).join(', ') }}</TooltipContent>
+                                            </Tooltip>
+                                        </span>
+                                        <span v-else class="text-xs text-muted-foreground">Unassigned</span>
                                         <span
                                             v-if="task.due_date"
                                             :class="cn('inline-flex items-center gap-1 tabular-nums', task.due_date < today && 'font-medium text-destructive')"
@@ -244,37 +263,16 @@ function time(seconds: number): string {
                                             <CalendarDays class="size-3" aria-hidden="true" />
                                             {{ formatDate(task.due_date) }}
                                         </span>
-                                        <span class="ml-auto inline-flex items-center gap-2">
-                                            <!-- Polish 041: who it is assigned to — faces as on the Tasks board. -->
-                                            <span v-if="task.assignees.length" class="flex shrink-0 items-center -space-x-1">
-                                                <Tooltip v-for="person in task.assignees.slice(0, 3)" :key="person.id">
-                                                    <TooltipTrigger as-child>
-                                                        <Avatar role="img" :aria-label="person.name" class="size-5 ring-2 ring-background">
-                                                            <AvatarFallback :class="cn('text-xs', personTone(person.id).avatar)" aria-hidden="true">
-                                                                {{ initials(person.name) }}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent>{{ person.name }}</TooltipContent>
-                                                </Tooltip>
-                                                <Tooltip v-if="task.assignees.length > 3">
-                                                    <TooltipTrigger as-child>
-                                                        <span
-                                                            role="img"
-                                                            :aria-label="`${task.assignees.length - 3} more: ${task.assignees.slice(3).map((p) => p.name).join(', ')}`"
-                                                            class="inline-flex size-5 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground ring-2 ring-background"
-                                                        >
-                                                            <span aria-hidden="true">+{{ task.assignees.length - 3 }}</span>
-                                                        </span>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent>{{ task.assignees.slice(3).map((p) => p.name).join(', ') }}</TooltipContent>
-                                                </Tooltip>
-                                            </span>
-                                            <span v-else class="text-xs text-muted-foreground">Unassigned</span>
-                                            <span class="inline-flex items-center gap-1 tabular-nums">
-                                                <Clock class="size-3" aria-hidden="true" />
-                                                {{ time(task.tracked_seconds) }}
-                                            </span>
+                                        <!-- Polish 041: the status exactly as on the Tasks list (StatusBadge). -->
+                                        <StatusBadge
+                                            v-if="task.tone"
+                                            :status="task.tone as StatusKey"
+                                            :label="task.status_label ?? undefined"
+                                        />
+                                        <span v-else-if="task.status_label">{{ task.status_label }}</span>
+                                        <span class="ml-auto inline-flex items-center gap-1 tabular-nums">
+                                            <Clock class="size-3" aria-hidden="true" />
+                                            {{ time(task.tracked_seconds) }}
                                         </span>
                                     </span>
                                 </Link>
