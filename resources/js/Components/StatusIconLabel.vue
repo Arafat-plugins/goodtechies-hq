@@ -28,19 +28,20 @@ const ICON: Record<StatusKey, Component> = {
 
 /**
  * Polish 039: the client's reference — a split tag. Left: the word on the solid status colour;
- * a slanted cut; right: the icon in that colour on the card. `-fg` is the solid side because it
+ * a slanted cut; right: the icon in that colour on the card. Polish 040: no heavier bottom edge,
+ * medium weight. `-fg` is the solid side because it
  * meets 6:1 against `--background` in both themes (dark text on the light fg in dark mode, light
  * text on the dark fg in light mode). Written out in full so Tailwind keeps every class.
  */
 const TONE: Record<StatusKey, { box: string; word: string; icon: string }> = {
-    backlog: { box: 'border-status-backlog-border border-b-status-backlog', word: 'bg-status-backlog-fg', icon: 'text-status-backlog-fg' },
-    todo: { box: 'border-status-todo-border border-b-status-todo', word: 'bg-status-todo-fg', icon: 'text-status-todo-fg' },
-    progress: { box: 'border-status-progress-border border-b-status-progress', word: 'bg-status-progress-fg', icon: 'text-status-progress-fg' },
-    review: { box: 'border-status-review-border border-b-status-review', word: 'bg-status-review-fg', icon: 'text-status-review-fg' },
-    changes: { box: 'border-status-changes-border border-b-status-changes', word: 'bg-status-changes-fg', icon: 'text-status-changes-fg' },
-    done: { box: 'border-status-done-border border-b-status-done', word: 'bg-status-done-fg', icon: 'text-status-done-fg' },
-    waiting: { box: 'border-status-waiting-border border-b-status-waiting', word: 'bg-status-waiting-fg', icon: 'text-status-waiting-fg' },
-    cancelled: { box: 'border-status-cancelled-border border-b-status-cancelled', word: 'bg-status-cancelled-fg', icon: 'text-status-cancelled-fg' },
+    backlog: { box: 'border-status-backlog-border', word: 'bg-status-backlog-fg', icon: 'text-status-backlog-fg' },
+    todo: { box: 'border-status-todo-border', word: 'bg-status-todo-fg', icon: 'text-status-todo-fg' },
+    progress: { box: 'border-status-progress-border', word: 'bg-status-progress-fg', icon: 'text-status-progress-fg' },
+    review: { box: 'border-status-review-border', word: 'bg-status-review-fg', icon: 'text-status-review-fg' },
+    changes: { box: 'border-status-changes-border', word: 'bg-status-changes-fg', icon: 'text-status-changes-fg' },
+    done: { box: 'border-status-done-border', word: 'bg-status-done-fg', icon: 'text-status-done-fg' },
+    waiting: { box: 'border-status-waiting-border', word: 'bg-status-waiting-fg', icon: 'text-status-waiting-fg' },
+    cancelled: { box: 'border-status-cancelled-border', word: 'bg-status-cancelled-fg', icon: 'text-status-cancelled-fg' },
 };
 
 /** The slanted edge of the word side; the icon side runs underneath it. */
@@ -50,7 +51,7 @@ const tone = computed(() => TONE[props.status] ?? TONE.todo);
 </script>
 
 <template>
-    <span :class="cn('inline-flex h-6 shrink-0 items-stretch overflow-hidden rounded-md border border-b-2 bg-card text-xs font-semibold tracking-wide uppercase', tone.box)">
+    <span :class="cn('inline-flex h-6 shrink-0 items-stretch overflow-hidden rounded-md border bg-card text-xs font-medium tracking-wide uppercase', tone.box)">
         <span class="relative z-10 flex items-center pr-3.5 pl-2 text-background" :class="tone.word" :style="{ clipPath: SLANT }">
             {{ props.label ?? labelFor(props.status) }}
         </span>
