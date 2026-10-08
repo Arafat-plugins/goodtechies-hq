@@ -33,17 +33,6 @@ export interface ClientServiceBoardData {
         tracked_seconds: number;
         untasked_seconds: number;
         boxes: { key: string; name: string; seconds: number }[];
-        tasks: {
-            id: number;
-            title: string;
-            project: string;
-            box: string;
-            status_label: string | null;
-            tone: string | null;
-            done: boolean;
-            tracked_seconds: number;
-        }[];
-        more_tasks: number;
     };
     boxes: { key: string; name: string; seconds: number; projects: ServiceBoardProject[] }[];
 }
@@ -52,7 +41,7 @@ export interface ClientServiceBoardData {
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
 import { ArrowRight, CalendarDays, Clock, FolderKanban, Settings2 } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { ref } from 'vue';
 import type { ServiceBoxSettings } from '@/Components/Projects/ServiceBoxesDialog.vue';
 import ServiceBoxesDialog from '@/Components/Projects/ServiceBoxesDialog.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
@@ -66,12 +55,13 @@ import { cn } from '@/lib/utils';
 /**
  * Polish 033: a client's page on Admin → Projects (chosen from the sidebar's Projects list).
  *
- * Top: the client and an overview of where the time went — the total, each service box's share,
- * and every task with time on it, most first. Below: one box per service (the Admin's own list —
- * Development, SEO, Maintenance, Marketing, …); in each box the client's projects of that kind,
- * and under each project its open tasks. A project opens the project; a task opens the task.
+ * Top: the client and an overview of where the time went — the total and each service box's
+ * share (polish 034: the per-task list is gone; each task shows its own time in its box).
+ * Below: one box per service (the Admin's own list — Development, SEO, Maintenance,
+ * Marketing, …); in each box the client's projects of that kind, and under each project its open
+ * tasks. A project opens the project; a task opens the task.
  */
-const props = defineProps<{
+defineProps<{
     board: ClientServiceBoardData;
     /** Present for an Admin who may edit the boxes. */
     settings: ServiceBoxSettings | null;
@@ -79,9 +69,6 @@ const props = defineProps<{
 
 const editing = ref(false);
 
-const SHOWN = 8;
-const allTasks = ref(false);
-const overviewTasks = computed(() => (allTasks.value ? props.board.overview.tasks : props.board.overview.tasks.slice(0, SHOWN)));
 
 const today = new Date().toISOString().slice(0, 10);
 
@@ -140,44 +127,6 @@ function time(seconds: number): string {
                     </li>
                 </ul>
 
-                <p v-if="!board.overview.tasks.length" class="text-sm text-muted-foreground">No time logged on these tasks yet.</p>
-                <template v-else>
-                    <ul class="flex min-w-0 flex-col divide-y rounded-md border" aria-label="Time spent per task">
-                        <li v-for="task in overviewTasks" :key="task.id">
-                            <Link
-                                :href="`/admin/tasks/${task.id}`"
-                                class="flex min-w-0 items-center gap-3 px-3 py-2 text-sm hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
-                            >
-                                <span class="flex min-w-0 flex-1 flex-col">
-                                    <span :class="cn('truncate', task.done && 'text-muted-foreground line-through')">{{ task.title }}</span>
-                                    <span class="truncate text-xs text-muted-foreground">{{ task.project }} · {{ task.box }}</span>
-                                </span>
-                                <StatusBadge
-                                    v-if="task.tone"
-                                    class="hidden shrink-0 sm:inline-flex"
-                                    :status="task.tone as StatusKey"
-                                    :label="task.status_label ?? undefined"
-                                    size="sm"
-                                />
-                                <span class="w-16 shrink-0 text-right font-medium tabular-nums">{{ time(task.tracked_seconds) }}</span>
-                            </Link>
-                        </li>
-                    </ul>
-                    <div class="flex flex-wrap items-center gap-3">
-                        <Button
-                            v-if="board.overview.tasks.length > SHOWN"
-                            variant="ghost"
-                            size="sm"
-                            :aria-expanded="allTasks"
-                            @click="allTasks = !allTasks"
-                        >
-                            {{ allTasks ? 'Show fewer' : `Show all ${board.overview.tasks.length} tasks` }}
-                        </Button>
-                        <span v-if="allTasks && board.overview.more_tasks > 0" class="text-xs text-muted-foreground">
-                            and {{ board.overview.more_tasks }} more with less time
-                        </span>
-                    </div>
-                </template>
             </section>
         </Card>
 

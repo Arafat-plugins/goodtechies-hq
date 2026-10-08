@@ -6,6 +6,7 @@ import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { ColumnDef } from '@/Components/DataTable/types';
 import type { FilterDef } from '@/Components/FilterBar.vue';
 import FilterBar from '@/Components/FilterBar.vue';
+import PageActionsHost from '@/Components/PageActionsHost.vue';
 import PageShell from '@/Components/PageShell.vue';
 import type { Paginated } from '@/Components/Pagination.vue';
 import DeleteProjectDialog, { canForceDelete } from '@/Components/Projects/DeleteProjectDialog.vue';
@@ -282,24 +283,28 @@ function closeDelete(): void {
         </template>
 
         <div class="flex min-w-0 flex-col gap-4">
-            <!-- Polish 030: by client (ClickUp-style) or the table. -->
-            <ToggleGroup
-                type="single"
-                variant="outline"
-                class="shrink-0 self-start"
-                :model-value="layout"
-                aria-label="How to show projects"
-                @update:model-value="chooseLayout"
-            >
-                <ToggleGroupItem value="clients" class="px-3">
-                    <Building2 aria-hidden="true" />
-                    By client
-                </ToggleGroupItem>
-                <ToggleGroupItem value="list" class="px-3">
-                    <List aria-hidden="true" />
-                    List
-                </ToggleGroupItem>
-            </ToggleGroup>
+            <!-- Polish 030: by client (ClickUp-style) or the table. Polish 034: in the by-client
+                 layout "New project" sits at the end of this row, not on a row of its own. -->
+            <div class="flex min-w-0 flex-wrap items-center gap-2">
+                <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    class="shrink-0 self-start"
+                    :model-value="layout"
+                    aria-label="How to show projects"
+                    @update:model-value="chooseLayout"
+                >
+                    <ToggleGroupItem value="clients" class="px-3">
+                        <Building2 aria-hidden="true" />
+                        By client
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="list" class="px-3">
+                        <List aria-hidden="true" />
+                        List
+                    </ToggleGroupItem>
+                </ToggleGroup>
+                <PageActionsHost v-if="layout === 'clients'" />
+            </div>
 
             <ClientProjectsView
                 v-if="layout === 'clients'"

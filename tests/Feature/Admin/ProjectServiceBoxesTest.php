@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 | Polish 033: Admin → Projects by client. The sidebar lists the clients with their project
 | counts; `?client=` shows that client's projects in service boxes (the Admin's own list,
 | `project_service_boxes`), each project with its OPEN tasks, and an overview of the time spent
-| per box and per task.
+| per box (polish 034: no per-task list; each task shows its own time).
 */
 
 beforeEach(function () {
@@ -51,8 +51,10 @@ it('sorts a client\'s projects into the default boxes with their open tasks only
         ->and(collect($board['boxes'])->pluck('projects')->flatten(1)->every(fn ($project) => $project !== []))->toBeTrue()
         // WooCommerce is in the Development box by default; the done task is not listed …
         ->and(collect($card['tasks'])->pluck('id'))->not->toContain($done->id)
-        // … but its time still counts in the overview.
-        ->and(collect($board['overview']['tasks'])->firstWhere('id', $done->id)['tracked_seconds'])->toBe(5400)
+        // … but its time still counts in the project, its box and the client's total.
+        ->and($card['tracked_seconds'])->toBeGreaterThanOrEqual(5400)
+        ->and(collect($board['overview']['boxes'])->firstWhere('name', 'Development')['seconds'])->toBeGreaterThanOrEqual(5400)
+        ->and($board['overview'])->not->toHaveKey('tasks')
         ->and($props['serviceBoxes']['boxes'])->toBe(ProjectServiceBoxes::DEFAULT);
 });
 

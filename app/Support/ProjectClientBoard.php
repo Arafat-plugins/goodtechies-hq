@@ -166,14 +166,11 @@ final class ProjectClientBoard
         ];
     }
 
-    /** Tasks listed in the client's time overview; the rest are summed as "more". */
-    public const OVERVIEW_LIMIT = 100;
-
     /**
      * Polish 033: one client's picture — its projects sorted into the service boxes
      * (Development, SEO, Maintenance, Marketing, … — the Admin's own list), each project with its
-     * OPEN tasks underneath, and an overview of where the time went: the client's total, each
-     * box's, and every task that has time on it, most first.
+     * OPEN tasks underneath (each with its own time), and an overview of where the time went: the
+     * client's total and each box's (polish 034: no separate per-task list).
      *
      * `$key` is the client's id, or `internal` for the projects with no client. Null when the
      * viewer can see none of that client's projects.
@@ -240,11 +237,8 @@ final class ProjectClientBoard
 
         $boxes[ProjectServiceBoxes::OTHER_KEY] = ['key' => ProjectServiceBoxes::OTHER_KEY, 'name' => 'Other', 'seconds' => 0, 'projects' => []];
 
-        $boxNameOf = [];
-
         foreach ($projects as $project) {
             $boxKey = $typeToBox[$project->project_type?->value ?? ''] ?? ProjectServiceBoxes::OTHER_KEY;
-            $boxNameOf[$project->getKey()] = $boxes[$boxKey]['name'];
 
             /** @var Collection<int, Task> $own */
             $own = $byProject->get($project->getKey(), collect());
@@ -279,14 +273,8 @@ final class ProjectClientBoard
             ];
         }
 
-        $timed = $tasks
-            ->filter(fn (Task $task): bool => (int) $task->tracked_seconds > 0)
-            ->sortByDesc(fn (Task $task): int => (int) $task->tracked_seconds)
-            ->values();
-
         $total = array_sum($projectSeconds);
-        $onTasks = (int) $timed->sum('tracked_seconds');
-        $projectNames = $projects->pluck('name', 'id');
+        $onTasks = (int) $tasks->sum('tracked_seconds');
 
         /** @var Client|null $client */
         $client = $projects->first()?->client;
@@ -310,17 +298,6 @@ final class ProjectClientBoard
                     ->map(fn (array $box): array => ['key' => $box['key'], 'name' => $box['name'], 'seconds' => $box['seconds']])
                     ->values()
                     ->all(),
-                'tasks' => $timed->take(self::OVERVIEW_LIMIT)->map(fn (Task $task): array => [
-                    'id' => (int) $task->getKey(),
-                    'title' => (string) $task->title,
-                    'project' => (string) ($projectNames[$task->project_id] ?? ''),
-                    'box' => (string) ($boxNameOf[$task->project_id] ?? ''),
-                    'status_label' => $task->status?->label(),
-                    'tone' => $task->status?->tone(),
-                    'done' => ! $task->status?->isOpen(),
-                    'tracked_seconds' => (int) $task->tracked_seconds,
-                ])->all(),
-                'more_tasks' => max(0, $timed->count() - self::OVERVIEW_LIMIT),
             ],
             'boxes' => collect($boxes)->filter(fn (array $box): bool => $box['projects'] !== [])->values()->all(),
         ];
