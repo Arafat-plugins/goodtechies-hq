@@ -40,7 +40,7 @@ export interface ClientServiceBoardData {
 
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { ArrowRight, CalendarDays, Clock, FolderKanban, Settings2 } from '@lucide/vue';
+import { ArrowRight, CalendarDays, ChevronDown, Clock, FolderKanban, Settings2 } from '@lucide/vue';
 import { ref } from 'vue';
 import type { ServiceBoxSettings } from '@/Components/Projects/ServiceBoxesDialog.vue';
 import ServiceBoxesDialog from '@/Components/Projects/ServiceBoxesDialog.vue';
@@ -68,6 +68,39 @@ defineProps<{
 }>();
 
 const editing = ref(false);
+
+/**
+ * Polish 035: a project shows only itself until its chevron is pressed; then its open tasks.
+ * Which projects are open is remembered in this browser.
+ */
+const OPEN_KEY = 'hq.projects.client-board.open';
+
+function readOpen(): number[] {
+    try {
+        const raw = window.localStorage.getItem(OPEN_KEY);
+        const list = raw === null ? [] : (JSON.parse(raw) as unknown);
+
+        return Array.isArray(list) ? list.filter((value): value is number => typeof value === 'number') : [];
+    } catch {
+        return [];
+    }
+}
+
+const openProjects = ref<number[]>(typeof window === 'undefined' ? [] : readOpen());
+
+function isOpen(id: number): boolean {
+    return openProjects.value.includes(id);
+}
+
+function toggle(id: number): void {
+    openProjects.value = isOpen(id) ? openProjects.value.filter((value) => value !== id) : [...openProjects.value, id];
+
+    try {
+        window.localStorage.setItem(OPEN_KEY, JSON.stringify(openProjects.value.slice(-200)));
+    } catch {
+        // Storage off: the choice lasts for this page only.
+    }
+}
 
 
 const today = new Date().toISOString().slice(0, 10);
@@ -150,55 +183,74 @@ function time(seconds: number): string {
                     :key="project.id"
                     class="flex min-w-0 flex-col gap-2 rounded-md border bg-card p-3 text-card-foreground shadow-flat"
                 >
-                    <Link
-                        :href="`/admin/projects/${project.id}`"
-                        class="-m-1 flex min-w-0 items-start gap-2 rounded-md p-1 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
-                    >
-                        <FolderKanban class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                        <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-                            <span class="text-sm leading-snug font-semibold break-words">{{ project.name }}</span>
-                            <span class="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                                <span v-if="project.type">{{ project.type }}</span>
-                                <span class="inline-flex items-center gap-1 tabular-nums">
-                                    <Clock class="size-3" aria-hidden="true" />
-                                    {{ time(project.tracked_seconds) }}
+                    <!-- Polish 035: one row — the project (opens it), its time on the right, and a
+                         chevron that shows its open tasks. Collapsed by default; no hover fill. -->
+                    <div class="flex min-w-0 items-start gap-2">
+                        <Link
+                            :href="`/admin/projects/${project.id}`"
+                            class="flex min-w-0 flex-1 items-start gap-2 rounded-md focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                        >
+                            <FolderKanban class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                            <span class="flex min-w-0 flex-1 flex-col gap-1">
+                                <span class="text-sm leading-snug font-semibold break-words">{{ project.name }}</span>
+                                <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                    <span v-if="project.type">{{ project.type }}</span>
+                                    <StatusBadge
+                                        v-if="project.tone"
+                                        :status="project.tone as StatusKey"
+                                        :label="project.status_label ?? undefined"
+                                        size="sm"
+                                    />
                                 </span>
                             </span>
+                        </Link>
+                        <span class="inline-flex shrink-0 items-center gap-1 pt-0.5 text-sm font-medium tabular-nums" :title="`Time spent on ${project.name}`">
+                            <Clock class="size-3.5 text-muted-foreground" aria-hidden="true" />
+                            {{ time(project.tracked_seconds) }}
                         </span>
-                        <StatusBadge
-                            v-if="project.tone"
-                            class="shrink-0"
-                            :status="project.tone as StatusKey"
-                            :label="project.status_label ?? undefined"
-                            size="sm"
-                        />
-                    </Link>
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            class="-my-1 shrink-0"
+                            :aria-expanded="isOpen(project.id)"
+                            :aria-controls="`project-tasks-${project.id}`"
+                            :aria-label="`${isOpen(project.id) ? 'Hide' : 'Show'} the ${project.open_count} open ${project.open_count === 1 ? 'task' : 'tasks'} of ${project.name}`"
+                            @click="toggle(project.id)"
+                        >
+                            <ChevronDown
+                                :class="cn('transition-transform motion-reduce:transition-none', isOpen(project.id) && 'rotate-180')"
+                                aria-hidden="true"
+                            />
+                        </Button>
+                    </div>
 
-                    <p v-if="!project.tasks.length" class="text-xs text-muted-foreground">No open tasks</p>
-                    <ul v-else class="flex min-w-0 flex-col gap-1" :aria-label="`Open tasks in ${project.name}`">
-                        <li v-for="task in project.tasks" :key="task.id">
-                            <Link
-                                :href="`/admin/tasks/${task.id}`"
-                                class="flex min-w-0 flex-col gap-1 rounded-md border bg-background px-2.5 py-2 text-sm hover:border-ring focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
-                            >
-                                <span class="leading-snug break-words">{{ task.title }}</span>
-                                <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                                    <span v-if="task.status_label">{{ task.status_label }}</span>
-                                    <span
-                                        v-if="task.due_date"
-                                        :class="cn('inline-flex items-center gap-1 tabular-nums', task.due_date < today && 'font-medium text-destructive')"
-                                    >
-                                        <CalendarDays class="size-3" aria-hidden="true" />
-                                        {{ formatDate(task.due_date) }}
+                    <template v-if="isOpen(project.id)">
+                        <p v-if="!project.tasks.length" :id="`project-tasks-${project.id}`" class="text-xs text-muted-foreground">No open tasks</p>
+                        <ul v-else :id="`project-tasks-${project.id}`" class="flex min-w-0 flex-col gap-1" :aria-label="`Open tasks in ${project.name}`">
+                            <li v-for="task in project.tasks" :key="task.id">
+                                <Link
+                                    :href="`/admin/tasks/${task.id}`"
+                                    class="flex min-w-0 flex-col gap-1 rounded-md border bg-background px-2.5 py-2 text-sm hover:border-ring focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                                >
+                                    <span class="leading-snug break-words">{{ task.title }}</span>
+                                    <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                        <span v-if="task.status_label">{{ task.status_label }}</span>
+                                        <span
+                                            v-if="task.due_date"
+                                            :class="cn('inline-flex items-center gap-1 tabular-nums', task.due_date < today && 'font-medium text-destructive')"
+                                        >
+                                            <CalendarDays class="size-3" aria-hidden="true" />
+                                            {{ formatDate(task.due_date) }}
+                                        </span>
+                                        <span class="ml-auto inline-flex items-center gap-1 tabular-nums">
+                                            <Clock class="size-3" aria-hidden="true" />
+                                            {{ time(task.tracked_seconds) }}
+                                        </span>
                                     </span>
-                                    <span class="ml-auto inline-flex items-center gap-1 tabular-nums">
-                                        <Clock class="size-3" aria-hidden="true" />
-                                        {{ time(task.tracked_seconds) }}
-                                    </span>
-                                </span>
-                            </Link>
-                        </li>
-                    </ul>
+                                </Link>
+                            </li>
+                        </ul>
+                    </template>
                 </article>
             </section>
         </div>
