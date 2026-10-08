@@ -112,59 +112,43 @@ function time(seconds: number): string {
 
 <template>
     <div class="flex min-w-0 flex-col gap-4">
-        <!-- The client and where its time went. -->
-        <Card class="flex min-w-0 flex-col gap-4 p-4">
-            <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div class="flex min-w-0 flex-col gap-1">
+        <!-- The client and its total time. Polish 036: the total sits beside the name; the per-box
+             time chips are gone (each box shows its own time in its header). -->
+        <Card class="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+            <div class="flex min-w-0 flex-col gap-1">
+                <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
                     <h2 class="min-w-0 truncate text-lg font-semibold">{{ board.client.label }}</h2>
-                    <p class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                        <span v-if="board.client.name && board.client.name !== board.client.label">{{ board.client.name }}</span>
-                        <span>{{ board.client.project_count }} {{ board.client.project_count === 1 ? 'project' : 'projects' }}</span>
-                        <span>{{ board.client.open_count }} open {{ board.client.open_count === 1 ? 'task' : 'tasks' }}</span>
-                    </p>
-                </div>
-                <div class="flex shrink-0 flex-wrap gap-2">
-                    <Button v-if="settings" variant="outline" size="sm" @click="editing = true">
-                        <Settings2 aria-hidden="true" />
-                        Edit boxes
-                    </Button>
-                    <Button v-if="board.client.id" as-child variant="outline" size="sm">
-                        <Link :href="`/admin/clients/${board.client.id}`">
-                            Client page
-                            <ArrowRight aria-hidden="true" />
-                        </Link>
-                    </Button>
-                </div>
-            </div>
-
-            <section class="flex min-w-0 flex-col gap-3" aria-labelledby="client-overview-heading">
-                <h3 id="client-overview-heading" class="text-sm font-medium">Time spent</h3>
-
-                <ul class="flex min-w-0 flex-wrap gap-2">
-                    <li class="flex items-center gap-2 rounded-md border bg-brand-tint px-3 py-1.5 text-sm">
+                    <span
+                        class="inline-flex shrink-0 items-center gap-2 rounded-md border bg-brand-tint px-3 py-1 text-sm"
+                        title="Time spent on this client's projects"
+                    >
                         <Clock class="size-3.5 text-muted-foreground" aria-hidden="true" />
                         <span class="text-muted-foreground">Total</span>
                         <span class="font-semibold tabular-nums">{{ time(board.overview.tracked_seconds) }}</span>
-                    </li>
-                    <li v-for="box in board.overview.boxes" :key="box.key" class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm">
-                        <span class="text-muted-foreground">{{ box.name }}</span>
-                        <span class="font-medium tabular-nums">{{ time(box.seconds) }}</span>
-                    </li>
-                    <li
-                        v-if="board.overview.untasked_seconds > 0"
-                        class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm"
-                        title="Time logged on these projects without a task"
-                    >
-                        <span class="text-muted-foreground">Not on a task</span>
-                        <span class="font-medium tabular-nums">{{ time(board.overview.untasked_seconds) }}</span>
-                    </li>
-                </ul>
-
-            </section>
+                    </span>
+                </div>
+                <p class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span v-if="board.client.name && board.client.name !== board.client.label">{{ board.client.name }}</span>
+                    <span>{{ board.client.project_count }} {{ board.client.project_count === 1 ? 'project' : 'projects' }}</span>
+                    <span>{{ board.client.open_count }} open {{ board.client.open_count === 1 ? 'task' : 'tasks' }}</span>
+                </p>
+            </div>
+            <div class="flex shrink-0 flex-wrap gap-2">
+                <Button v-if="settings" variant="outline" size="sm" @click="editing = true">
+                    <Settings2 aria-hidden="true" />
+                    Edit boxes
+                </Button>
+                <Button v-if="board.client.id" as-child variant="outline" size="sm">
+                    <Link :href="`/admin/clients/${board.client.id}`">
+                        Client page
+                        <ArrowRight aria-hidden="true" />
+                    </Link>
+                </Button>
+            </div>
         </Card>
 
-        <!-- One box per service. -->
-        <div class="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <!-- One box per service. `items-start`: opening one project grows only its own box. -->
+        <div class="grid min-w-0 items-start gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             <section
                 v-for="box in board.boxes"
                 :key="box.key"
