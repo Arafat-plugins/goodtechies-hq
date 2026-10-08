@@ -6,7 +6,7 @@ export interface ServiceBoardTask {
     tone: string | null;
     due_date: string | null;
     tracked_seconds: number;
-    assignees: string[];
+    assignees: { id: number; name: string }[];
 }
 
 export interface ServiceBoardProject {
@@ -45,7 +45,10 @@ import { ref } from 'vue';
 import type { ServiceBoxSettings } from '@/Components/Projects/ServiceBoxesDialog.vue';
 import ServiceBoxesDialog from '@/Components/Projects/ServiceBoxesDialog.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
-import StatusIconLabel from '@/Components/StatusIconLabel.vue';
+import StatusBadge from '@/Components/StatusBadge.vue';
+import { personTone } from '@/Components/Messages/people';
+import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { formatDate } from '@/Components/Tasks/taskDetail';
 import { formatDuration } from '@/Components/Timer/timer';
 import { Button } from '@/Components/ui/button';
@@ -105,12 +108,22 @@ function toggle(id: number): void {
 
 const today = new Date().toISOString().slice(0, 10);
 
+function initials(name: string): string {
+    return name
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join('');
+}
+
 function time(seconds: number): string {
     return seconds > 0 ? formatDuration(seconds) : '0m';
 }
 </script>
 
 <template>
+    <TooltipProvider>
     <div class="flex min-w-0 flex-col gap-4">
         <!-- The client and its total time. Polish 036: the total sits beside the name; the per-box
              time chips are gone (each box shows its own time in its header). -->
@@ -179,7 +192,7 @@ function time(seconds: number): string {
                                 <span class="text-sm leading-snug font-semibold break-words">{{ project.name }}</span>
                                 <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                     <span v-if="project.type">{{ project.type }}</span>
-                                    <StatusIconLabel
+                                    <StatusBadge
                                         v-if="project.tone"
                                         :status="project.tone as StatusKey"
                                         :label="project.status_label ?? undefined"
@@ -217,8 +230,8 @@ function time(seconds: number): string {
                                 >
                                     <span class="leading-snug break-words">{{ task.title }}</span>
                                     <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                                        <!-- Polish 037/038: the status in its colour, as an icon + word (no capsule). -->
-                                        <StatusIconLabel
+                                        <!-- Polish 041: the status exactly as on the Tasks list (StatusBadge). -->
+                                        <StatusBadge
                                             v-if="task.tone"
                                             :status="task.tone as StatusKey"
                                             :label="task.status_label ?? undefined"
@@ -231,9 +244,37 @@ function time(seconds: number): string {
                                             <CalendarDays class="size-3" aria-hidden="true" />
                                             {{ formatDate(task.due_date) }}
                                         </span>
-                                        <span class="ml-auto inline-flex items-center gap-1 tabular-nums">
-                                            <Clock class="size-3" aria-hidden="true" />
-                                            {{ time(task.tracked_seconds) }}
+                                        <span class="ml-auto inline-flex items-center gap-2">
+                                            <!-- Polish 041: who it is assigned to — faces as on the Tasks board. -->
+                                            <span v-if="task.assignees.length" class="flex shrink-0 items-center -space-x-1">
+                                                <Tooltip v-for="person in task.assignees.slice(0, 3)" :key="person.id">
+                                                    <TooltipTrigger as-child>
+                                                        <Avatar role="img" :aria-label="person.name" class="size-5 ring-2 ring-background">
+                                                            <AvatarFallback :class="cn('text-xs', personTone(person.id).avatar)" aria-hidden="true">
+                                                                {{ initials(person.name) }}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>{{ person.name }}</TooltipContent>
+                                                </Tooltip>
+                                                <Tooltip v-if="task.assignees.length > 3">
+                                                    <TooltipTrigger as-child>
+                                                        <span
+                                                            role="img"
+                                                            :aria-label="`${task.assignees.length - 3} more: ${task.assignees.slice(3).map((p) => p.name).join(', ')}`"
+                                                            class="inline-flex size-5 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground ring-2 ring-background"
+                                                        >
+                                                            <span aria-hidden="true">+{{ task.assignees.length - 3 }}</span>
+                                                        </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>{{ task.assignees.slice(3).map((p) => p.name).join(', ') }}</TooltipContent>
+                                                </Tooltip>
+                                            </span>
+                                            <span v-else class="text-xs text-muted-foreground">Unassigned</span>
+                                            <span class="inline-flex items-center gap-1 tabular-nums">
+                                                <Clock class="size-3" aria-hidden="true" />
+                                                {{ time(task.tracked_seconds) }}
+                                            </span>
                                         </span>
                                     </span>
                                 </Link>
@@ -246,4 +287,5 @@ function time(seconds: number): string {
 
         <ServiceBoxesDialog v-if="settings" v-model:open="editing" :settings="settings" />
     </div>
+    </TooltipProvider>
 </template>

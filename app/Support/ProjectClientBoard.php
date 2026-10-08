@@ -264,9 +264,14 @@ final class ProjectClientBoard
                     'tone' => $task->status?->tone(),
                     'due_date' => $task->due_date?->toDateString(),
                     'tracked_seconds' => (int) $task->tracked_seconds,
+                    // Polish 041: who it is assigned to — id for the person's colour, name for
+                    // the face and the tooltip (as on the Tasks board).
                     'assignees' => $task->assignees
-                        ->map(fn (Employee $employee): string => (string) ($employee->user?->name ?? ''))
-                        ->filter()
+                        ->map(fn (Employee $employee): array => [
+                            'id' => (int) $employee->getKey(),
+                            'name' => (string) ($employee->user?->name ?? ''),
+                        ])
+                        ->filter(fn (array $person): bool => $person['name'] !== '')
                         ->values()
                         ->all(),
                 ])->values()->all(),
