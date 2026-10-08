@@ -50,9 +50,12 @@ export interface ProjectBoard {
 </script>
 
 <script setup lang="ts">
-import { Link, router } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 import { ArrowRight, CalendarDays, Clock, FolderKanban, KanbanSquare } from '@lucide/vue';
 import { ref } from 'vue';
+import type { ClientServiceBoardData } from '@/Components/Projects/ClientServiceBoard.vue';
+import ClientServiceBoard from '@/Components/Projects/ClientServiceBoard.vue';
+import type { ServiceBoxSettings } from '@/Components/Projects/ServiceBoxesDialog.vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
@@ -65,38 +68,25 @@ import { cn } from '@/lib/utils';
 /**
  * Polish 030: Admin → Projects by client (the client's ClickUp picture).
  *
+ * Polish 033: the sidebar lists the clients only; choosing one (`?client=`) shows that client's
+ * projects in service boxes (ClientServiceBoard). With none chosen, every client is a card.
+ *
  * Polish 031: the clients → projects list moved to the sidebar, under Projects. This page shows
  * the chosen project's tasks as a board (To do, In progress, Review, Done), or — with none
  * chosen — every client's projects with their task counts.
  * Choosing a project is a partial reload of `projectBoard` only, with the id in the URL so a
  * board is a link somebody can send.
  */
-const props = defineProps<{
+defineProps<{
     tree: ClientTreeRow[];
     board: ProjectBoard | null;
     selectedId: number | null;
+    /** Polish 033: the client chosen in the sidebar, as service boxes. */
+    clientBoard?: ClientServiceBoardData | null;
+    serviceBoxes?: ServiceBoxSettings | null;
 }>();
 
 const loading = ref(false);
-
-function choose(projectId: number): void {
-    router.get(
-        '/admin/projects',
-        { layout: 'clients', project: projectId },
-        {
-            only: ['projectBoard'],
-            preserveState: true,
-            preserveScroll: true,
-            replace: true,
-            onStart: () => {
-                loading.value = true;
-            },
-            onFinish: () => {
-                loading.value = false;
-            },
-        },
-    );
-}
 
 const today = new Date().toISOString().slice(0, 10);
 
@@ -120,7 +110,9 @@ const PRIORITY_CLASS: Record<string, string> = {
     <div class="flex min-w-0 flex-col gap-4">
         <!-- Right: the chosen project's board. -->
         <div :class="cn('flex min-w-0 flex-col gap-4 transition-opacity', loading && 'opacity-60')" :aria-busy="loading || undefined">
-            <template v-if="board">
+            <ClientServiceBoard v-if="clientBoard" :board="clientBoard" :settings="serviceBoxes ?? null" />
+
+            <template v-else-if="board">
                 <Card class="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div class="flex min-w-0 flex-col gap-1">
                         <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -226,23 +218,28 @@ const PRIORITY_CLASS: Record<string, string> = {
                 </Card>
                 <div v-else class="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     <Card v-for="row in tree" :key="row.key" class="flex min-w-0 flex-col gap-2 p-4">
-                        <div class="flex min-w-0 items-center gap-2">
+                        <Link
+                            :href="`/admin/projects?client=${row.id ?? 'internal'}`"
+                            class="-m-1 flex min-w-0 items-center gap-2 rounded-md p-1 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                        >
                             <h2 class="min-w-0 flex-1 truncate text-sm font-semibold" :title="row.name ?? undefined">{{ row.label }}</h2>
-                            <span class="shrink-0 text-xs text-muted-foreground tabular-nums">{{ row.total }} tasks</span>
-                        </div>
+                            <span class="shrink-0 text-xs text-muted-foreground tabular-nums">
+                                {{ row.projects.length }} {{ row.projects.length === 1 ? 'project' : 'projects' }}
+                            </span>
+                            <ArrowRight class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        </Link>
                         <ul class="flex min-w-0 flex-col">
                             <li v-for="project in row.projects" :key="project.id">
-                                <button
-                                    type="button"
+                                <Link
+                                    :href="`/admin/projects/${project.id}`"
                                     class="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
-                                    @click="choose(project.id)"
                                 >
                                     <FolderKanban class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                                     <span class="min-w-0 flex-1 truncate">{{ project.name }}</span>
                                     <span class="shrink-0 text-xs text-muted-foreground tabular-nums" :title="`${project.total} tasks, ${project.open} open`">
                                         {{ project.total }}
                                     </span>
-                                </button>
+                                </Link>
                             </li>
                         </ul>
                     </Card>

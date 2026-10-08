@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Setting;
+use App\Support\ProjectServiceBoxes;
 use Illuminate\Database\Seeder;
 
 class SettingsSeeder extends Seeder
@@ -30,6 +31,10 @@ class SettingsSeeder extends Seeder
         // value (`{"seo": "Search"}`). Empty means every type keeps its built-in name. Edited
         // beside the Type box on the project form, not on Admin → Settings.
         'project_type_labels' => [],
+        // Polish 033: the service boxes a client's projects are sorted into on Admin → Projects
+        // (`[{"name": "Development", "types": ["website_development", …]}, …]`). Edited from the
+        // client page, not on Admin → Settings.
+        'project_service_boxes' => ProjectServiceBoxes::DEFAULT,
     ];
 
     /**

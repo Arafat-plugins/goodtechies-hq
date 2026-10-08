@@ -722,6 +722,7 @@ function permissionMatrix(): array
         ['PUT', 'admin/settings', $adminAction],
         // Polish 026: renaming the project types. Body-less, so the Form Request refuses.
         ['PUT', 'admin/project-types', $adminAction],
+        ['PUT', 'admin/project-service-boxes', $adminAction],
         // Polish 030: Google Calendar for Meet links. Connect without a configured client sends
         // the Admin back to Settings (302); the callback without a state does the same; disconnect
         // with nothing connected still answers with a redirect.

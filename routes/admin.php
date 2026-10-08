@@ -20,6 +20,7 @@ use App\Http\Controllers\Admin\ProjectFileController;
 use App\Http\Controllers\Admin\ProjectFinanceController;
 use App\Http\Controllers\Admin\ProjectMemberController;
 use App\Http\Controllers\Admin\ProjectPermissionController;
+use App\Http\Controllers\Admin\ProjectServiceBoxController;
 use App\Http\Controllers\Admin\ProjectStatusController;
 use App\Http\Controllers\Admin\ProjectTypeController;
 use App\Http\Controllers\Admin\RecurringTaskController;
@@ -78,6 +79,11 @@ Route::prefix('admin')
         Route::put('/project-types', [ProjectTypeController::class, 'update'])
             ->middleware('can:settings.manage')
             ->name('project-types.update');
+
+        // Polish 033: the service boxes on Admin → Projects by client (`project_service_boxes`).
+        Route::put('/project-service-boxes', [ProjectServiceBoxController::class, 'update'])
+            ->middleware('can:settings.manage')
+            ->name('project-service-boxes.update');
 
         // Admin → Notifications: the agency-wide notification defaults
         // (`notification_preferences`, Part D §20 — *"global defaults set by Admin, Phase 12;

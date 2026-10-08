@@ -75,6 +75,8 @@ final class ProjectClientBoard
                 'name' => $client?->name,
                 'open' => (int) $items->sum('open_tasks_count'),
                 'total' => (int) $items->sum('tasks_count'),
+                // Polish 033: the sidebar counts a client's projects.
+                'project_count' => $items->count(),
                 'projects' => $items->map(fn (Project $project): array => [
                     'id' => (int) $project->getKey(),
                     'name' => (string) $project->name,
@@ -161,6 +163,180 @@ final class ProjectClientBoard
                 'tracked_seconds' => (int) TimeEntry::query()->tracked()->where('project_id', $project->getKey())->sum('duration_seconds'),
             ],
             'columns' => $columns,
+        ];
+    }
+
+    /** Tasks listed in the client's time overview; the rest are summed as "more". */
+    public const OVERVIEW_LIMIT = 100;
+
+    /**
+     * Polish 033: one client's picture — its projects sorted into the service boxes
+     * (Development, SEO, Maintenance, Marketing, … — the Admin's own list), each project with its
+     * OPEN tasks underneath, and an overview of where the time went: the client's total, each
+     * box's, and every task that has time on it, most first.
+     *
+     * `$key` is the client's id, or `internal` for the projects with no client. Null when the
+     * viewer can see none of that client's projects.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function client(User $viewer, string $key): ?array
+    {
+        $clientId = $key === 'internal' ? null : (ctype_digit($key) ? (int) $key : -1);
+
+        if ($clientId === -1) {
+            return null;
+        }
+
+        $projects = Project::query()
+            ->visibleTo($viewer)
+            ->notArchived()
+            ->when(
+                $clientId === null,
+                fn (Builder $query) => $query->whereNull('client_id'),
+                fn (Builder $query) => $query->where('client_id', $clientId),
+            )
+            ->with('client:id,name,nickname')
+            ->orderBy('name')
+            ->get();
+
+        if ($projects->isEmpty()) {
+            return null;
+        }
+
+        $projectIds = $projects->modelKeys();
+
+        /** @var array<int, int> $projectSeconds */
+        $projectSeconds = TimeEntry::query()
+            ->tracked()
+            ->whereIn('project_id', $projectIds)
+            ->groupBy('project_id')
+            ->selectRaw('project_id, sum(duration_seconds) as seconds')
+            ->pluck('seconds', 'project_id')
+            ->map(fn ($seconds): int => (int) $seconds)
+            ->all();
+
+        $tasks = Task::query()
+            ->visibleTo($viewer)
+            ->whereIn('project_id', $projectIds)
+            ->notArchived()
+            ->topLevel()
+            ->with(['assignees.user:id,name'])
+            ->orderByRaw('due_date is null')
+            ->orderBy('due_date')
+            ->orderByDesc('id')
+            ->get();
+
+        $byProject = $tasks->groupBy('project_id');
+
+        $config = ProjectServiceBoxes::configured();
+        $typeToBox = ProjectServiceBoxes::typeToBox($config);
+
+        $boxes = [];
+
+        foreach ($config as $index => $box) {
+            $boxes['b'.$index] = ['key' => 'b'.$index, 'name' => $box['name'], 'seconds' => 0, 'projects' => []];
+        }
+
+        $boxes[ProjectServiceBoxes::OTHER_KEY] = ['key' => ProjectServiceBoxes::OTHER_KEY, 'name' => 'Other', 'seconds' => 0, 'projects' => []];
+
+        $boxNameOf = [];
+
+        foreach ($projects as $project) {
+            $boxKey = $typeToBox[$project->project_type?->value ?? ''] ?? ProjectServiceBoxes::OTHER_KEY;
+            $boxNameOf[$project->getKey()] = $boxes[$boxKey]['name'];
+
+            /** @var Collection<int, Task> $own */
+            $own = $byProject->get($project->getKey(), collect());
+            // The project's approved time; never less than its own tasks' time, so a box always
+            // adds up to at least what it shows.
+            $seconds = max($projectSeconds[$project->getKey()] ?? 0, (int) $own->sum('tracked_seconds'));
+            $projectSeconds[$project->getKey()] = $seconds;
+            $open = $own->filter(fn (Task $task): bool => (bool) $task->status?->isOpen());
+
+            $boxes[$boxKey]['seconds'] += $seconds;
+            $boxes[$boxKey]['projects'][] = [
+                'id' => (int) $project->getKey(),
+                'name' => (string) $project->name,
+                'type' => $project->project_type?->label(),
+                'status_label' => $project->status?->label(),
+                'tone' => $project->status?->tone(),
+                'tracked_seconds' => $seconds,
+                'open_count' => $open->count(),
+                'tasks' => $open->map(fn (Task $task): array => [
+                    'id' => (int) $task->getKey(),
+                    'title' => (string) $task->title,
+                    'status_label' => $task->status?->label(),
+                    'tone' => $task->status?->tone(),
+                    'due_date' => $task->due_date?->toDateString(),
+                    'tracked_seconds' => (int) $task->tracked_seconds,
+                    'assignees' => $task->assignees
+                        ->map(fn (Employee $employee): string => (string) ($employee->user?->name ?? ''))
+                        ->filter()
+                        ->values()
+                        ->all(),
+                ])->values()->all(),
+            ];
+        }
+
+        $timed = $tasks
+            ->filter(fn (Task $task): bool => (int) $task->tracked_seconds > 0)
+            ->sortByDesc(fn (Task $task): int => (int) $task->tracked_seconds)
+            ->values();
+
+        $total = array_sum($projectSeconds);
+        $onTasks = (int) $timed->sum('tracked_seconds');
+        $projectNames = $projects->pluck('name', 'id');
+
+        /** @var Client|null $client */
+        $client = $projects->first()?->client;
+        $nickname = trim((string) ($client?->nickname ?? ''));
+
+        return [
+            'client' => [
+                'key' => $clientId === null ? 'internal' : (string) $clientId,
+                'id' => $client?->getKey(),
+                'label' => $client === null ? 'Internal' : ($nickname !== '' ? $nickname : (string) $client->name),
+                'name' => $client?->name,
+                'project_count' => $projects->count(),
+                'open_count' => $tasks->filter(fn (Task $task): bool => (bool) $task->status?->isOpen())->count(),
+            ],
+            'overview' => [
+                'tracked_seconds' => $total,
+                // Time logged on the projects but not on one of their (top-level) tasks.
+                'untasked_seconds' => max(0, $total - $onTasks),
+                'boxes' => collect($boxes)
+                    ->filter(fn (array $box): bool => $box['projects'] !== [])
+                    ->map(fn (array $box): array => ['key' => $box['key'], 'name' => $box['name'], 'seconds' => $box['seconds']])
+                    ->values()
+                    ->all(),
+                'tasks' => $timed->take(self::OVERVIEW_LIMIT)->map(fn (Task $task): array => [
+                    'id' => (int) $task->getKey(),
+                    'title' => (string) $task->title,
+                    'project' => (string) ($projectNames[$task->project_id] ?? ''),
+                    'box' => (string) ($boxNameOf[$task->project_id] ?? ''),
+                    'status_label' => $task->status?->label(),
+                    'tone' => $task->status?->tone(),
+                    'done' => ! $task->status?->isOpen(),
+                    'tracked_seconds' => (int) $task->tracked_seconds,
+                ])->all(),
+                'more_tasks' => max(0, $timed->count() - self::OVERVIEW_LIMIT),
+            ],
+            'boxes' => collect($boxes)->filter(fn (array $box): bool => $box['projects'] !== [])->values()->all(),
+        ];
+    }
+
+    /**
+     * The service boxes as the Admin set them, and every project type with its name — what the
+     * "Edit boxes" dialog needs.
+     *
+     * @return array<string, mixed>
+     */
+    public static function boxSettings(): array
+    {
+        return [
+            'boxes' => ProjectServiceBoxes::configured(),
+            'types' => array_map(fn (ProjectType $type): array => ['value' => $type->value, 'label' => $type->label()], ProjectType::cases()),
         ];
     }
 }

@@ -12,6 +12,8 @@ import DeleteProjectDialog, { canForceDelete } from '@/Components/Projects/Delet
 import { moneyLine } from '@/Components/Projects/FinanceCard.vue';
 import type { NamedRef, Option, Project } from '@/Components/Projects/ProjectForm.vue';
 import ClientProjectsView, { type ClientTreeRow, type ProjectBoard } from '@/Components/Projects/ClientProjectsView.vue';
+import type { ClientServiceBoardData } from '@/Components/Projects/ClientServiceBoard.vue';
+import type { ServiceBoxSettings } from '@/Components/Projects/ServiceBoxesDialog.vue';
 import ProjectWorkingNow from '@/Components/Projects/ProjectWorkingNow.vue';
 import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
@@ -49,6 +51,9 @@ const props = defineProps<{
     layout: 'clients' | 'list';
     clientTree: ClientTreeRow[];
     projectBoard: ProjectBoard | null;
+    /** Polish 033: `?client=` — that client's projects in service boxes. */
+    clientBoard: ClientServiceBoardData | null;
+    serviceBoxes: ServiceBoxSettings | null;
     projects: Paginated<Project>;
     filters: Filters;
     clients: NamedRef[];
@@ -301,6 +306,8 @@ function closeDelete(): void {
                 :tree="clientTree"
                 :board="projectBoard"
                 :selected-id="selectedProjectId"
+                :client-board="clientBoard"
+                :service-boxes="serviceBoxes"
             />
 
             <div v-if="layout === 'list'" class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">

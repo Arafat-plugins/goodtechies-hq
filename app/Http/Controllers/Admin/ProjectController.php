@@ -18,6 +18,7 @@ use App\Services\ProjectService;
 use App\Services\TaskTimerService;
 use App\Support\BillingFrequency;
 use App\Support\BillingType;
+use App\Support\Permission;
 use App\Support\Priority;
 use App\Support\ProjectClientBoard;
 use App\Support\ProjectRecurrenceFrequency;
@@ -87,6 +88,8 @@ class ProjectController extends Controller
         // is the "List" layout. `?project=` picks the board on the right.
         $layout = $request->query('layout') === 'list' ? 'list' : 'clients';
         $selected = $layout === 'clients' ? $this->id($request->query('project')) : null;
+        // Polish 033: `?client=` (an id, or `internal`) opens that client's service boxes.
+        $client = $layout === 'clients' && is_string($request->query('client')) ? $request->query('client') : null;
 
         return Inertia::render('Admin/Projects/Index', [
             'layout' => $layout,
@@ -100,6 +103,10 @@ class ProjectController extends Controller
 
                 return $project === null ? null : ProjectClientBoard::board($request->user(), $project);
             },
+            'clientBoard' => fn (): ?array => $client === null ? null : ProjectClientBoard::client($request->user(), $client),
+            'serviceBoxes' => fn (): ?array => $layout === 'clients' && $request->user()->hasPermission(Permission::SettingsManage)
+                ? ProjectClientBoard::boxSettings()
+                : null,
             'projects' => ProjectResource::collection($projects),
             'filters' => $filters,
             'clients' => $this->clients(),

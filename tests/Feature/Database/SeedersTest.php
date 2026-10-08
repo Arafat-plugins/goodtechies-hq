@@ -150,7 +150,7 @@ it('keeps counts stable when seeding twice', function () {
             // 12-79 added `messages.manage`, held by the ADMIN alone.
             'permissions' => 26,
             'role_permissions' => 61,
-            'settings' => 14,
+            'settings' => 15,
         ]);
 })->group('phase0');
 

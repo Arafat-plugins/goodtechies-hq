@@ -25,9 +25,10 @@ class SettingsService
 
     /**
      * Keys an admin edits on a screen of their own rather than Admin → Settings (polish 026:
-     * the project type names, renamed beside the Type box on the project form).
+     * the project type names, renamed beside the Type box on the project form; polish 033: the
+     * service boxes, edited on Admin → Projects).
      */
-    public const OWN_SCREEN = ['project_type_labels'];
+    public const OWN_SCREEN = ['project_type_labels', 'project_service_boxes'];
 
     /**
      * @var array<string, mixed>|null

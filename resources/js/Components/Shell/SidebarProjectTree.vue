@@ -6,6 +6,9 @@ import { cn } from '@/lib/utils';
 import type { NavItem } from '@/navigation/types';
 
 /**
+ * Polish 033: under Projects the sidebar lists the CLIENTS only, each with how many projects it
+ * has; a client opens its page of service boxes on Admin → Projects (`?client=`).
+ *
  * Polish 031: the Projects row in the Admin sidebar opens like ClickUp's space list —
  * every client (by nickname when it has one) with its task count, and under each client its
  * projects with theirs. A project opens its tasks on the Projects page.
@@ -14,20 +17,14 @@ import type { NavItem } from '@/navigation/types';
  * the tab, and quietly re-read on every later open — the sidebar is on every page and must
  * not make every page pay for it.
  */
-interface TreeProject {
-    id: number;
-    name: string;
-    open: number;
-    total: number;
-}
-
 interface TreeClient {
     key: string;
     label: string;
     name: string | null;
+    id: number | null;
     open: number;
     total: number;
-    projects: TreeProject[];
+    project_count: number;
 }
 
 const props = defineProps<{
@@ -41,7 +38,6 @@ const emit = defineEmits<{ navigate: [] }>();
 const page = usePage();
 
 const OPEN_KEY = 'hq.sidebar.projects-open';
-const CLIENTS_KEY = 'hq.sidebar.projects-clients';
 
 function read<T>(key: string, fallback: T): T {
     try {
@@ -62,7 +58,6 @@ function write(key: string, value: unknown): void {
 }
 
 const open = ref<boolean>(read(OPEN_KEY, false));
-const openClients = ref<string[]>(read(CLIENTS_KEY, []));
 
 const clients = ref<TreeClient[] | null>(null);
 const loading = ref(false);
@@ -106,33 +101,16 @@ function toggle(): void {
     open.value = !open.value;
 }
 
-function toggleClient(key: string): void {
-    openClients.value = openClients.value.includes(key)
-        ? openClients.value.filter((value) => value !== key)
-        : [...openClients.value, key];
-    write(CLIENTS_KEY, openClients.value);
-}
+/** The client open on the Projects page right now, from `?client=`. */
+const currentClient = computed(() => {
+    const match = page.url.match(/^\/admin\/projects\?(?:.*&)?client=([^&#]+)/);
 
-/** The project open on the Projects page right now, from `?project=`. */
-const currentProject = computed(() => {
-    const match = page.url.match(/^\/admin\/projects\?(?:.*&)?project=(\d+)/);
-
-    return match ? Number(match[1]) : null;
+    return match ? decodeURIComponent(match[1]) : null;
 });
 
-/** The client of the open project stays open. */
-watch(
-    [currentProject, clients],
-    ([id, list]) => {
-        const owner = list?.find((client) => client.projects.some((project) => project.id === id));
-
-        if (owner && !openClients.value.includes(owner.key)) {
-            openClients.value = [...openClients.value, owner.key];
-            write(CLIENTS_KEY, openClients.value);
-        }
-    },
-    { immediate: true },
-);
+function clientKey(client: TreeClient): string {
+    return client.id === null ? 'internal' : String(client.id);
+}
 </script>
 
 <template>
@@ -172,45 +150,28 @@ watch(
 
             <ul v-else-if="clients" class="flex flex-col gap-0.5">
                 <li v-for="client in clients" :key="client.key">
-                    <button
-                        type="button"
-                        class="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-md px-2 text-left text-sm text-sidebar-foreground/80 hover:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none"
-                        :aria-expanded="openClients.includes(client.key)"
+                    <Link
+                        :href="`/admin/projects?client=${clientKey(client)}`"
+                        :aria-current="currentClient === clientKey(client) ? 'page' : undefined"
                         :title="client.name && client.name !== client.label ? client.name : undefined"
-                        @click="toggleClient(client.key)"
+                        :class="
+                            cn(
+                                'flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-sm focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none',
+                                currentClient === clientKey(client)
+                                    ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+                                    : 'text-sidebar-foreground/80 hover:bg-sidebar-border hover:text-sidebar-accent-foreground',
+                            )
+                        "
+                        @click="emit('navigate')"
                     >
-                        <ChevronRight
-                            :class="cn('size-3.5 shrink-0 transition-transform motion-reduce:transition-none', openClients.includes(client.key) && 'rotate-90')"
-                            aria-hidden="true"
-                        />
                         <span class="min-w-0 flex-1 truncate">{{ client.label }}</span>
-                        <span class="shrink-0 text-xs text-sidebar-foreground-muted tabular-nums" :title="`${client.total} tasks, ${client.open} open`">
-                            {{ client.total }}
+                        <span
+                            class="shrink-0 text-xs text-sidebar-foreground-muted tabular-nums"
+                            :title="`${client.project_count} ${client.project_count === 1 ? 'project' : 'projects'}`"
+                        >
+                            {{ client.project_count }}
                         </span>
-                    </button>
-
-                    <ul v-if="openClients.includes(client.key)" class="flex flex-col gap-0.5 pl-5">
-                        <li v-for="project in client.projects" :key="project.id">
-                            <Link
-                                :href="`/admin/projects?project=${project.id}`"
-                                :aria-current="currentProject === project.id ? 'page' : undefined"
-                                :class="
-                                    cn(
-                                        'flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-sm focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none',
-                                        currentProject === project.id
-                                            ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
-                                            : 'text-sidebar-foreground/80 hover:bg-sidebar-border hover:text-sidebar-accent-foreground',
-                                    )
-                                "
-                                @click="emit('navigate')"
-                            >
-                                <span class="min-w-0 flex-1 truncate">{{ project.name }}</span>
-                                <span class="shrink-0 text-xs text-sidebar-foreground-muted tabular-nums" :title="`${project.total} tasks, ${project.open} open`">
-                                    {{ project.total }}
-                                </span>
-                            </Link>
-                        </li>
-                    </ul>
+                    </Link>
                 </li>
             </ul>
         </div>
