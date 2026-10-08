@@ -218,7 +218,14 @@ function time(seconds: number): string {
                                 >
                                     <span class="leading-snug break-words">{{ task.title }}</span>
                                     <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                                        <span v-if="task.status_label">{{ task.status_label }}</span>
+                                        <!-- Polish 037: the status in its colour, like everywhere else. -->
+                                        <StatusBadge
+                                            v-if="task.tone"
+                                            :status="task.tone as StatusKey"
+                                            :label="task.status_label ?? undefined"
+                                            size="sm"
+                                        />
+                                        <span v-else-if="task.status_label">{{ task.status_label }}</span>
                                         <span
                                             v-if="task.due_date"
                                             :class="cn('inline-flex items-center gap-1 tabular-nums', task.due_date < today && 'font-medium text-destructive')"
