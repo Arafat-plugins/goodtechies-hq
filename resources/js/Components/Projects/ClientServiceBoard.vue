@@ -45,7 +45,7 @@ import { ref } from 'vue';
 import type { ServiceBoxSettings } from '@/Components/Projects/ServiceBoxesDialog.vue';
 import ServiceBoxesDialog from '@/Components/Projects/ServiceBoxesDialog.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
-import StatusBadge from '@/Components/StatusBadge.vue';
+import StatusIconLabel from '@/Components/StatusIconLabel.vue';
 import { formatDate } from '@/Components/Tasks/taskDetail';
 import { formatDuration } from '@/Components/Timer/timer';
 import { Button } from '@/Components/ui/button';
@@ -179,11 +179,10 @@ function time(seconds: number): string {
                                 <span class="text-sm leading-snug font-semibold break-words">{{ project.name }}</span>
                                 <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                     <span v-if="project.type">{{ project.type }}</span>
-                                    <StatusBadge
+                                    <StatusIconLabel
                                         v-if="project.tone"
                                         :status="project.tone as StatusKey"
                                         :label="project.status_label ?? undefined"
-                                        size="sm"
                                     />
                                 </span>
                             </span>
@@ -218,12 +217,11 @@ function time(seconds: number): string {
                                 >
                                     <span class="leading-snug break-words">{{ task.title }}</span>
                                     <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                                        <!-- Polish 037: the status in its colour, like everywhere else. -->
-                                        <StatusBadge
+                                        <!-- Polish 037/038: the status in its colour, as an icon + word (no capsule). -->
+                                        <StatusIconLabel
                                             v-if="task.tone"
                                             :status="task.tone as StatusKey"
                                             :label="task.status_label ?? undefined"
-                                            size="sm"
                                         />
                                         <span v-else-if="task.status_label">{{ task.status_label }}</span>
                                         <span
