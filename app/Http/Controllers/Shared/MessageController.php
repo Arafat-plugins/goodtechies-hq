@@ -16,6 +16,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\ConversationService;
 use App\Services\MessageService;
+use App\Support\AnnouncementBanner;
 use App\Support\ConversationType;
 use App\Support\Permission;
 use App\Support\Surface;
@@ -609,7 +610,7 @@ class MessageController extends Controller
     }
 
     /**
-     * The newest announcement, for the banner the plan asks for.
+     * The pinned announcement, for the banner the plan asks for (polish 044: pinned, not newest).
      *
      * Read through the policy like everything else — if this person cannot see the
      * announcements channel there is no banner, rather than a banner that 404s when clicked.
@@ -624,23 +625,10 @@ class MessageController extends Controller
             return null;
         }
 
-        $latest = $channel->messages()->with('author')->reorder('id', 'desc')->first();
-
-        if ($latest === null) {
-            return null;
-        }
-
         $state = $this->conversations->readState($user, $channel);
 
-        return [
-            'conversation_id' => (int) $channel->getKey(),
-            'body' => (string) $latest->body,
-            'author' => $latest->author?->name,
-            'created_at' => $latest->created_at?->toIso8601String(),
-            // Whether this reader has seen it. The banner is not dismissed by a click on the
-            // banner: it goes quiet when the channel is read, which is one state and not two.
-            'is_unread' => $state['unread_count'] > 0,
-        ];
+        // Polish 044: the PINNED announcement, or no banner.
+        return AnnouncementBanner::for($channel, $user, $state['unread_count'] > 0);
     }
 
     /**

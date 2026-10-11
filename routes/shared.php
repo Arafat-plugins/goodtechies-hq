@@ -218,6 +218,15 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
                 ->middleware('throttle:posting')
                 ->whereNumber(['conversation', 'message'])
                 ->name('react');
+            // Polish 044: pin / unpin (the announcements banner, one at a time). MessagePolicy::pin.
+            Route::post('/{conversation}/messages/{message}/pin', [MessageEditController::class, 'pin'])
+                ->middleware('throttle:posting')
+                ->whereNumber(['conversation', 'message'])
+                ->name('pin');
+            Route::delete('/{conversation}/messages/{message}/pin', [MessageEditController::class, 'unpin'])
+                ->middleware('throttle:posting')
+                ->whereNumber(['conversation', 'message'])
+                ->name('unpin');
 
             // Message groups (12-81). Writes need `messages.manage` (403, the Form Requests);
             // a `{conversation}` that is not a group the actor may view is 404 (GroupController).

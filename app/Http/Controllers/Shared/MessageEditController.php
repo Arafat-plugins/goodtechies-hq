@@ -54,6 +54,29 @@ class MessageEditController extends Controller
     }
 
     /**
+     * Polish 044: pin this message (the announcements banner) — one at a time, so it replaces
+     * whatever was pinned — or take the pin off.
+     */
+    public function pin(Request $request, Conversation $conversation, Message $message): JsonResponse
+    {
+        return $this->setPinned($request, $conversation, $message, true);
+    }
+
+    public function unpin(Request $request, Conversation $conversation, Message $message): JsonResponse
+    {
+        return $this->setPinned($request, $conversation, $message, false);
+    }
+
+    private function setPinned(Request $request, Conversation $conversation, Message $message, bool $pinned): JsonResponse
+    {
+        $message = $this->resolve($request, $conversation, $message);
+
+        Gate::forUser($request->user())->authorize('pin', $message);
+
+        return $this->respond($request, $this->messages->pin($request->user(), $message, $pinned));
+    }
+
+    /**
      * 404 for a conversation this person may not open, and for a message from another one.
      */
     private function resolve(Request $request, Conversation $conversation, Message $message): Message

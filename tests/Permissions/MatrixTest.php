@@ -360,6 +360,14 @@ function matrixMessageId(string $key): string
         $tapu = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
         $conversations = app(ConversationService::class);
 
+        // Polish 044: an announcement, posted by the Admin (only an Admin posts there).
+        if ($key === 'announcement') {
+            $messages[$key] = (string) app(MessageService::class)
+                ->post(User::where('email', 'shahadat@goodtechies.test')->firstOrFail(), $conversations->announcements(), 'Matrix announcement')->id;
+
+            return $messages[$key];
+        }
+
         $conversation = $key === 'dm'
             ? $conversations->dmBetween($tapu, User::where('email', 'yaseen@goodtechies.test')->firstOrFail())
             : Conversation::query()->where('type', 'team')->firstOrFail();
@@ -1496,6 +1504,16 @@ function permissionMatrix(): array
             'REMOTE_EMPLOYEE' => 200, 'ACCOUNTANT' => 403,
         ], ['{conversation}' => 'message-conversation:dm', '{message}' => 'message:dm']],
         ['POST', 'messages/{conversation}/messages/{message}/reactions', $messaging(302), ['{message}' => 'message:team']],
+        // Polish 044: pin / unpin an announcement — whoever may post in the announcements
+        // channel (the ADMIN); everybody else who can read it gets 403.
+        ['POST', 'messages/{conversation}/messages/{message}/pin', [
+            'guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 403, 'EMPLOYEE' => 403,
+            'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403,
+        ], ['{conversation}' => 'message-conversation:announcement', '{message}' => 'message:announcement']],
+        ['DELETE', 'messages/{conversation}/messages/{message}/pin', [
+            'guest' => '302 /login', 'ADMIN' => 200, 'MANAGER' => 403, 'EMPLOYEE' => 403,
+            'REMOTE_EMPLOYEE' => 403, 'ACCOUNTANT' => 403,
+        ], ['{conversation}' => 'message-conversation:announcement', '{message}' => 'message:announcement']],
         // Opening a DM with Tapu. Everybody who may use messaging gets one — and Tapu gets
         // **404**, because a DM with yourself is not a conversation and the endpoint says so
         // the way this application says no to a record: by failing to find it.

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Copy, MoreHorizontal, Pencil, Reply, SmilePlus, Trash2 } from '@lucide/vue';
+import { Copy, MoreHorizontal, Pencil, Pin, PinOff, Reply, SmilePlus, Trash2 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import EmojiPicker from '@/Components/Messages/EmojiPicker.vue';
 import { QUICK_REACTIONS } from '@/Components/Messages/emoji';
@@ -53,6 +53,8 @@ const emit = defineEmits<{
     edit: [];
     delete: [];
     react: [emoji: string];
+    /** Polish 044: pin (true) or unpin (false) — announcements, an Admin. */
+    pin: [pinned: boolean];
 }>();
 
 const menuOpen = ref(false);
@@ -176,11 +178,16 @@ function confirmDelete(): void {
                     </DropdownMenuItem>
                 </div>
 
-                <DropdownMenuSeparator v-if="canCopy || message.can_edit || message.can_delete" />
+                <DropdownMenuSeparator v-if="canCopy || message.can_edit || message.can_delete || message.can_pin" />
 
                 <DropdownMenuItem v-if="canCopy" @select="emit('copy')">
                     <Copy aria-hidden="true" />
                     Copy
+                </DropdownMenuItem>
+                <!-- Polish 044: one pinned announcement at a time — it is the banner at the top. -->
+                <DropdownMenuItem v-if="message.can_pin" @select="emit('pin', !message.is_pinned)">
+                    <component :is="message.is_pinned ? PinOff : Pin" aria-hidden="true" />
+                    {{ message.is_pinned ? 'Unpin' : 'Pin to the top' }}
                 </DropdownMenuItem>
                 <DropdownMenuItem v-if="message.can_edit" @select="startEdit">
                     <Pencil aria-hidden="true" />

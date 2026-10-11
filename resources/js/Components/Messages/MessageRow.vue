@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { usePage } from '@inertiajs/vue3';
-import { Check, CheckCheck, CircleAlert, Clock } from '@lucide/vue';
+import { Check, CheckCheck, CircleAlert, Clock, Pin } from '@lucide/vue';
 import type { FunctionalComponent, VNode } from 'vue';
 import { computed, h, nextTick, ref } from 'vue';
 import AttachmentCard from '@/Components/Messages/AttachmentCard.vue';
@@ -21,6 +21,7 @@ import {
     toggleReaction,
 } from '@/Components/Messages/messages';
 import { personTone } from '@/Components/Messages/people';
+import { liveReload } from '@/Components/Realtime/reload';
 import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
 import { Button } from '@/Components/ui/button';
 import { Textarea } from '@/Components/ui/textarea';
@@ -210,6 +211,10 @@ const StampContent: FunctionalComponent<{ spacer?: boolean }> = (stampProps) => 
     const parts: VNode[] = [];
     const spoken = stampProps.spacer !== true;
 
+    if (props.message.is_pinned) {
+        parts.push(h(Pin, { class: 'size-3', 'aria-label': spoken ? 'Pinned' : undefined }));
+    }
+
     if (props.message.edited_at) {
         parts.push(h('span', null, 'edited'));
     }
@@ -393,13 +398,40 @@ async function remove(): Promise<void> {
         const fresh = messageFrom(answer.json);
 
         if (answer.status >= 200 && answer.status < 300 && fresh !== null) {
+            const wasPinned = props.message.is_pinned === true;
+
             emit('replace', fresh);
             emit('announce', 'Message deleted.');
+
+            // Polish 044: a deleted pinned announcement takes the banner with it — now.
+            if (wasPinned) {
+                liveReload(['shell', 'announcement']);
+            }
         } else {
             emit('announce', 'That message could not be deleted.');
         }
     } catch {
         emit('announce', 'No connection. That message was not deleted.');
+    }
+}
+
+/* ------------------------------------------------------------------ pin (044) */
+
+/** Pin or unpin an announcement. The banner follows from the shell's next read, asked at once. */
+async function pin(pinned: boolean): Promise<void> {
+    try {
+        const answer = await messageRequest(pinned ? 'POST' : 'DELETE', `${url()}/pin`, null);
+        const fresh = messageFrom(answer.json);
+
+        if (answer.status >= 200 && answer.status < 300 && fresh !== null) {
+            emit('replace', fresh);
+            emit('announce', pinned ? 'Pinned to the top.' : 'Unpinned.');
+            liveReload(['shell', 'announcement']);
+        } else {
+            emit('announce', pinned ? 'That message could not be pinned.' : 'That message could not be unpinned.');
+        }
+    } catch {
+        emit('announce', 'No connection. Nothing changed.');
     }
 }
 
@@ -586,6 +618,7 @@ async function react(emoji: string): Promise<void> {
                     @edit="startEdit"
                     @delete="remove"
                     @react="react"
+                    @pin="pin"
                 />
             </div>
 
@@ -744,6 +777,7 @@ async function react(emoji: string): Promise<void> {
                 @edit="startEdit"
                 @delete="remove"
                 @react="react"
+                @pin="pin"
             />
         </div>
     </div>

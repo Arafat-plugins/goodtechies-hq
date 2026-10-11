@@ -147,6 +147,8 @@ it('sends exactly the documented discussion keys', function () {
             'edited_at', 'is_deleted', 'can_edit', 'can_delete', 'reactions', 'seen',
             // 12-82: the quoted original of a reply.
             'reply_to',
+            // Polish 044: the pinned announcement.
+            'is_pinned', 'can_pin',
         ])
         // Resolved on the server, so the panel does not compare ids to decide which side of
         // the thread a bubble sits on.

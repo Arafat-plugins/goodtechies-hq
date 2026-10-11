@@ -51,6 +51,10 @@ export interface ThreadMessage {
     is_deleted: boolean;
     can_edit: boolean;
     can_delete: boolean;
+    /** Polish 044: the conversation's one pinned message (announcements: the banner). */
+    is_pinned?: boolean;
+    /** Polish 044: may this viewer pin / unpin it (announcements, an Admin). */
+    can_pin?: boolean;
     reactions: MessageReaction[];
     /** A DM's tick: did the other person read it? `null` where it does not apply. */
     seen: boolean | null;
@@ -306,9 +310,13 @@ export function formatListTime(value: string | null | undefined, now: Date = new
         : { day: 'numeric', month: 'short', year: 'numeric' }).format(date);
 }
 
-/** The banner the plan asks an announcement to raise. */
+/** The banner the plan asks an announcement to raise — polish 044: the PINNED announcement. */
 export interface AnnouncementBanner {
     conversation_id: number;
+    /** Polish 044: the pinned message, for Unpin. */
+    message_id?: number;
+    /** Polish 044: may this viewer unpin it (an Admin). */
+    can_unpin?: boolean;
     body: string;
     author: string | null;
     created_at: string | null;

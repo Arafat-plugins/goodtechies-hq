@@ -58,7 +58,8 @@ const SHELL_PROP_ANNOUNCEMENT = 'Office closed on Thursday for the public holida
 const SHELL_PROP_KEYS = ['unreadMessages', 'unreadByConversation', 'announcement', 'announcementChannelId'];
 
 /** The keys of the banner itself — the same five `MessageController@index` has always sent. */
-const SHELL_PROP_BANNER_KEYS = ['conversation_id', 'body', 'author', 'created_at', 'is_unread'];
+// Polish 044: + message_id and can_unpin (the banner is the PINNED announcement).
+const SHELL_PROP_BANNER_KEYS = ['conversation_id', 'message_id', 'body', 'author', 'created_at', 'is_unread', 'can_unpin'];
 
 beforeEach(function () {
     $this->seed();
@@ -211,7 +212,8 @@ it('carries a new announcement on the next poll, with no navigation in between',
 
     // Somebody with `announcements.send` posts, which is the whole event. Nothing is navigated
     // and nothing is reloaded but the one prop.
-    $this->messages->post($this->admin, $this->conversations->announcements(), SHELL_PROP_ANNOUNCEMENT);
+    // Polish 044: the banner is the pinned announcement, so the Admin pins it.
+    $this->messages->pin($this->admin, $this->messages->post($this->admin, $this->conversations->announcements(), SHELL_PROP_ANNOUNCEMENT), true);
 
     $after = SHELL_PROP_reload($this, '/employee/dashboard', 'Employee/Dashboard');
 
@@ -227,7 +229,8 @@ it('carries a new announcement on the next poll, with no navigation in between',
 it('goes quiet when the announcements channel has been read', function () {
     $this->actingAs($this->yaseen);
 
-    $this->messages->post($this->admin, $this->conversations->announcements(), SHELL_PROP_ANNOUNCEMENT);
+    // Polish 044: the banner is the pinned announcement, so the Admin pins it.
+    $this->messages->pin($this->admin, $this->messages->post($this->admin, $this->conversations->announcements(), SHELL_PROP_ANNOUNCEMENT), true);
 
     $unread = SHELL_PROP_reload($this, '/employee/dashboard', 'Employee/Dashboard');
     expect($unread['announcement']['is_unread'])->toBeTrue();
@@ -252,7 +255,8 @@ it('counts exactly what the Messages page counts, over the same policy-checked l
     $user = User::where('email', $email)->firstOrFail();
 
     $this->messages->post($this->admin, $this->conversations->team(), 'Standup moved to 10:15 tomorrow.');
-    $this->messages->post($this->admin, $this->conversations->announcements(), SHELL_PROP_ANNOUNCEMENT);
+    // Polish 044: the banner is the pinned announcement, so the Admin pins it.
+    $this->messages->pin($this->admin, $this->messages->post($this->admin, $this->conversations->announcements(), SHELL_PROP_ANNOUNCEMENT), true);
 
     $this->actingAs($user);
 
@@ -310,7 +314,8 @@ it('leaves the Messages page its own announcement prop, in the same shape', func
     // one banner; the shape has to be one shape or the extracted component reads two.
     $this->actingAs($this->yaseen);
 
-    $this->messages->post($this->admin, $this->conversations->announcements(), SHELL_PROP_ANNOUNCEMENT);
+    // Polish 044: the banner is the pinned announcement, so the Admin pins it.
+    $this->messages->pin($this->admin, $this->messages->post($this->admin, $this->conversations->announcements(), SHELL_PROP_ANNOUNCEMENT), true);
 
     $page = $this->get('/messages')->assertOk()->inertiaProps();
     $shell = SHELL_PROP_reload($this, '/employee/dashboard', 'Employee/Dashboard');

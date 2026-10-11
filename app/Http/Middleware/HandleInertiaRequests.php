@@ -8,6 +8,7 @@ use App\Models\TimeEntry;
 use App\Models\User;
 use App\Services\AttendanceService;
 use App\Services\ConversationService;
+use App\Support\AnnouncementBanner;
 use App\Support\ConversationType;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -240,43 +241,13 @@ class HandleInertiaRequests extends Middleware
             'unreadByConversation' => (object) array_filter($unread, fn (int $count): bool => $count > 0),
             'announcement' => $channel === null
                 ? null
-                : $this->banner($channel, ($unread[(int) $channel->getKey()] ?? 0) > 0),
+                : AnnouncementBanner::for($channel, $user, ($unread[(int) $channel->getKey()] ?? 0) > 0),
             // What the shell subscribes to on a socket build. There is no per-user inbox
             // channel, so the unread count above is poll-only — but an ANNOUNCEMENT is a message
             // in a conversation that already has a channel and an already policy-backed callback,
             // and everybody who may see the banner is authorised on it. Null when there is no
             // announcements channel for this reader, which is also when there is no banner.
             'announcementChannelId' => $channel === null ? null : (int) $channel->getKey(),
-        ];
-    }
-
-    /**
-     * The newest announcement, in the shape `Components/Shell/AnnouncementBanner.vue` draws.
-     *
-     * The same five keys `MessageController@index` has sent the Messages page since Phase 6, so
-     * the extracted component reads one shape wherever it is mounted. `is_unread` is handed in
-     * rather than re-read: the grouped count above already knows, and asking `readState()` again
-     * would be a second query answering a question that has been answered.
-     *
-     * @return array{conversation_id: int, body: string, author: string|null, created_at: string|null, is_unread: bool}|null
-     */
-    private function banner(Conversation $channel, bool $isUnread): ?array
-    {
-        /** @var Message|null $latest */
-        $latest = $channel->messages()->with('author')->reorder('id', 'desc')->first();
-
-        if ($latest === null) {
-            return null;
-        }
-
-        return [
-            'conversation_id' => (int) $channel->getKey(),
-            'body' => (string) $latest->body,
-            'author' => $latest->author?->name,
-            'created_at' => $latest->created_at?->toIso8601String(),
-            // Whether this reader has seen it. The banner is not dismissed by a button: it goes
-            // quiet when the announcements channel is read, which is one state and not two.
-            'is_unread' => $isUnread,
         ];
     }
 

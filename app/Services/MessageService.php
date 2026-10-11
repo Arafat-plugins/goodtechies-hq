@@ -164,9 +164,52 @@ class MessageService
                 'deleted_by' => $actor->getKey(),
             ])->save();
 
+            // Polish 044: a deleted message is never the pinned one — the banner goes with it.
+            Conversation::query()
+                ->whereKey($message->conversation_id)
+                ->where('pinned_message_id', $message->getKey())
+                ->update(['pinned_message_id' => null, 'pinned_at' => null, 'pinned_by' => null]);
+
             ConversationActivity::dispatch((int) $message->conversation_id, (int) $message->getKey(), 'deleted');
 
             return $message;
+        });
+    }
+
+    /**
+     * Polish 044: make this message its conversation's one pinned message (replacing any other
+     * pin), or take the pin off. Authorization is MessagePolicy::pin, asked by the caller.
+     * Audited; the conversation's doorbell rings so the banner and the thread follow at once.
+     */
+    public function pin(User $actor, Message $message, bool $pinned): Message
+    {
+        return DB::transaction(function () use ($actor, $message, $pinned): Message {
+            /** @var Conversation $conversation */
+            $conversation = Conversation::query()->whereKey($message->conversation_id)->lockForUpdate()->firstOrFail();
+
+            $isPinned = (int) $conversation->pinned_message_id === (int) $message->getKey();
+
+            if ($pinned === $isPinned) {
+                return $message;
+            }
+
+            $before = $conversation->pinned_message_id;
+
+            $conversation->forceFill($pinned
+                ? ['pinned_message_id' => $message->getKey(), 'pinned_at' => now(), 'pinned_by' => $actor->getKey()]
+                : ['pinned_message_id' => null, 'pinned_at' => null, 'pinned_by' => null])->save();
+
+            $this->audit->record(
+                $pinned ? AuditEvent::MessagePinned : AuditEvent::MessageUnpinned,
+                $message,
+                ['pinned_message_id' => $before === null ? null : (int) $before],
+                ['pinned_message_id' => $conversation->pinned_message_id === null ? null : (int) $conversation->pinned_message_id],
+                $actor,
+            );
+
+            ConversationActivity::dispatch((int) $message->conversation_id, (int) $message->getKey(), $pinned ? 'pinned' : 'unpinned');
+
+            return $message->setRelation('conversation', $conversation);
         });
     }
 

@@ -149,6 +149,8 @@ enum AuditEvent: string
     // delete, the attachment file ids) live in the old value — the only copy left of it.
     case MessageEdited = 'message.edited';
     case MessageDeleted = 'message.deleted';
+    case MessagePinned = 'message.pinned';
+    case MessageUnpinned = 'message.unpinned';
     case AttendanceClockedIn = 'attendance.clocked_in';
     case AttendanceClockedOut = 'attendance.clocked_out';
     // 12-81: a holder of `messages.manage` creates a chat group, renames it or changes its
@@ -275,6 +277,8 @@ enum AuditEvent: string
             self::TagDeleted => 'Tag deleted',
             self::MessageEdited => 'Message edited',
             self::MessageDeleted => 'Message deleted',
+            self::MessagePinned => 'Message pinned',
+            self::MessageUnpinned => 'Message unpinned',
             self::GroupCreated => 'Message group created',
             self::GroupUpdated => 'Message group updated',
             self::GroupMembersChanged => 'Message group members changed',
@@ -350,6 +354,8 @@ enum AuditEvent: string
             self::TagDeleted,
             self::MessageEdited,
             self::MessageDeleted,
+            self::MessagePinned,
+            self::MessageUnpinned,
             self::GroupCreated,
             self::GroupUpdated,
             self::GroupMembersChanged,

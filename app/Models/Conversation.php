@@ -26,7 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * The one-store decision still holds: the spec's `task_comments` table does not exist and must
  * not be added.
  */
-#[Fillable(['type', 'linked_project_id', 'linked_task_id', 'dm_one_id', 'dm_two_id', 'title', 'avatar_path', 'created_by'])]
+#[Fillable(['type', 'linked_project_id', 'linked_task_id', 'dm_one_id', 'dm_two_id', 'title', 'avatar_path', 'created_by', 'pinned_message_id', 'pinned_at', 'pinned_by'])]
 class Conversation extends Model
 {
     /** @use HasFactory<ConversationFactory> */
@@ -39,7 +39,18 @@ class Conversation extends Model
     {
         return [
             'type' => ConversationType::class,
+            'pinned_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Polish 044: the one pinned message (the announcements channel's banner).
+     *
+     * @return BelongsTo<Message, $this>
+     */
+    public function pinnedMessage(): BelongsTo
+    {
+        return $this->belongsTo(Message::class, 'pinned_message_id');
     }
 
     /**

@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { Megaphone } from '@lucide/vue';
+import { Pin, PinOff } from '@lucide/vue';
+import { ref } from 'vue';
 import type { AnnouncementBanner } from '@/Components/Messages/messages';
-import { formatMessageTime, messagesHref } from '@/Components/Messages/messages';
+import { formatMessageTime, messageRequest, messagesHref, messageUrl } from '@/Components/Messages/messages';
+import { liveReload } from '@/Components/Realtime/reload';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 /**
+ * Polish 044: the PINNED announcement (one at a time), as a strip at the top of whatever screen
+ * somebody is on. An Admin pins it from the message's menu in the announcements channel and
+ * unpins it there or with the button on the strip. Nothing pinned — or the pinned message
+ * deleted — means no strip. The notes below predate the pin and still describe the rest.
+ *
  * The newest announcement, as a strip at the top of whatever screen somebody is on.
  *
  * ## App-wide from Phase 12, and it was Messages-only for six phases
@@ -45,37 +53,81 @@ import { cn } from '@/lib/utils';
  * Everything else Phase 12 wired refreshes in place or speaks from the bottom.
  */
 
-defineProps<{
+const props = defineProps<{
     /** The banner, or `null` — there is nothing to draw and nothing reserving space for it. */
     announcement: AnnouncementBanner | null;
 }>();
+
+const unpinning = ref(false);
+const hidden = ref<number | null>(null);
+
+/** Polish 044: take the pin off. The strip goes at once; the shell's next read confirms it. */
+async function unpin(): Promise<void> {
+    const banner = props.announcement;
+
+    if (!banner?.message_id || unpinning.value) {
+        return;
+    }
+
+    unpinning.value = true;
+
+    try {
+        const answer = await messageRequest('DELETE', `${messageUrl(banner.conversation_id, banner.message_id)}/pin`, null);
+
+        if (answer.status >= 200 && answer.status < 300) {
+            hidden.value = banner.message_id;
+        }
+    } catch {
+        // Offline: the strip stays; the connectivity strip says why.
+    } finally {
+        unpinning.value = false;
+        liveReload(['shell', 'announcement']);
+    }
+}
 </script>
 
 <template>
-    <Link
-        v-if="announcement"
-        :href="messagesHref(announcement.conversation_id)"
-        preserve-scroll
-        :class="
-            cn(
-                'flex min-w-0 shrink-0 items-start gap-3 rounded-lg border bg-card p-3 shadow-raised',
-                'hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
-                announcement.is_unread && 'border-primary',
-            )
-        "
+    <div
+        v-if="announcement && hidden !== announcement.message_id"
+        :class="cn('flex min-w-0 shrink-0 items-start gap-1 rounded-lg border bg-card shadow-raised', announcement.is_unread && 'border-primary')"
+        data-testid="announcement-banner"
     >
-        <Megaphone class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span class="flex min-w-0 flex-col gap-0.5">
-            <span class="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
-                <span class="font-medium text-foreground">
-                    Announcement{{ announcement.is_unread ? ' — unread' : '' }}
+        <Link
+            :href="messagesHref(announcement.conversation_id)"
+            preserve-scroll
+            class="flex min-w-0 flex-1 items-start gap-3 rounded-lg p-3 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+        >
+            <Pin class="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+            <span class="flex min-w-0 flex-col gap-0.5">
+                <span class="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
+                    <span class="font-medium text-foreground">
+                        Pinned announcement{{ announcement.is_unread ? ' — unread' : '' }}
+                    </span>
+                    <span>{{ announcement.author ?? 'Somebody' }}</span>
+                    <span>{{ formatMessageTime(announcement.created_at) }}</span>
                 </span>
-                <span>{{ announcement.author ?? 'Somebody' }}</span>
-                <span>{{ formatMessageTime(announcement.created_at) }}</span>
+                <span class="line-clamp-2 min-w-0 text-sm break-words whitespace-pre-line">
+                    {{ announcement.body }}
+                </span>
             </span>
-            <span class="line-clamp-2 min-w-0 text-sm break-words">
-                {{ announcement.body }}
-            </span>
-        </span>
-    </Link>
+        </Link>
+
+        <TooltipProvider v-if="announcement.can_unpin">
+            <Tooltip>
+                <TooltipTrigger as-child>
+                    <button
+                        type="button"
+                        class="m-2 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50"
+                        :disabled="unpinning"
+                        aria-label="Unpin this announcement"
+                        data-testid="announcement-unpin"
+                        @click="unpin"
+                    >
+                        <PinOff class="size-4" aria-hidden="true" />
+                    </button>
+                </TooltipTrigger>
+                <TooltipContent>Unpin</TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
+    </div>
 </template>

@@ -311,7 +311,7 @@ const control =
     <Dialog v-model:open="open">
         <DialogContent
             :show-close-button="false"
-            class="inset-0 top-0 left-0 flex h-svh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 bg-black/95 p-0 text-white shadow-none sm:max-w-none"
+            class="inset-0 top-0 left-0 flex h-svh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 bg-black/95 p-0 text-white sm:max-w-none"
             data-testid="image-lightbox"
             @close-auto-focus="onCloseAutoFocus"
             @keydown="onKeydown"

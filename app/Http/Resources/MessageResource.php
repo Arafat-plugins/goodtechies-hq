@@ -87,6 +87,10 @@ class MessageResource extends JsonResource
                 $mine
                 || ($context['may_manage'] && $context['type'] !== ConversationType::Dm)
             ),
+            // Polish 044: the conversation's one pinned message, and whether this viewer may
+            // pin / unpin (announcements only, by somebody who may post there).
+            'is_pinned' => ! $deleted && $context['pinned_message_id'] === (int) $this->getKey(),
+            'can_pin' => ! $deleted && $context['type'] === ConversationType::Announcement && $context['can_post'],
             'reactions' => $deleted ? [] : $this->reactions($user),
             'seen' => $mine && $context['type'] === ConversationType::Dm
                 ? $context['peer_last_read_at'] !== null && $this->created_at !== null
@@ -103,7 +107,7 @@ class MessageResource extends JsonResource
      * controller set it (MessageController::show reads it alongside the `peer`), and otherwise
      * read here with one query.
      *
-     * @return array{type: ConversationType|null, can_post: bool, may_manage: bool, peer_last_read_at: Carbon|null}
+     * @return array{type: ConversationType|null, can_post: bool, may_manage: bool, pinned_message_id: int|null, peer_last_read_at: Carbon|null}
      */
     private function context(Request $request): array
     {
@@ -136,6 +140,7 @@ class MessageResource extends JsonResource
             'type' => $type,
             'can_post' => $user !== null && $conversation !== null && $user->can('post', $conversation),
             'may_manage' => $user !== null && $user->isActive() && $user->hasPermission(Permission::MessagesManage),
+            'pinned_message_id' => $conversation?->pinned_message_id === null ? null : (int) $conversation->pinned_message_id,
             'peer_last_read_at' => $peerLastReadAt instanceof Carbon ? $peerLastReadAt : null,
         ];
 

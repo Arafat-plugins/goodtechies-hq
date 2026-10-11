@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AnnouncementStrip from '@/Components/Shell/AnnouncementBanner.vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     ArrowLeft,
@@ -43,7 +44,6 @@ import type {
 import {
     conversationContextState,
     conversationRoutes,
-    formatMessageTime,
     loadConversationContext,
     messagesHref,
 } from '@/Components/Messages/messages';
@@ -440,32 +440,8 @@ const activeLine = computed(() =>
                 two. `Megaphone` plus the word "Announcement" carry it; the border is third.
                 It is a link into that channel, which is navigation — not a dismissal.
             -->
-            <Link
-                v-if="announcement"
-                :href="messagesHref(announcement.conversation_id)"
-                preserve-scroll
-                :class="
-                    cn(
-                        'flex min-w-0 shrink-0 items-start gap-3 rounded-lg border bg-card p-3 shadow-raised m-3',
-                        'hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
-                        announcement.is_unread && 'border-primary',
-                    )
-                "
-            >
-                <Megaphone class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span class="flex min-w-0 flex-col gap-0.5">
-                    <span class="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
-                        <span class="font-medium text-foreground">
-                            Announcement{{ announcement.is_unread ? ' — unread' : '' }}
-                        </span>
-                        <span>{{ announcement.author ?? 'Somebody' }}</span>
-                        <span>{{ formatMessageTime(announcement.created_at) }}</span>
-                    </span>
-                    <span class="line-clamp-2 min-w-0 text-sm break-words">
-                        {{ announcement.body }}
-                    </span>
-                </span>
-            </Link>
+            <!-- Polish 044: the shared strip (the pinned announcement, with Unpin for an Admin). -->
+            <AnnouncementStrip :announcement="announcement" class="m-3" />
 
             <div
                 :class="

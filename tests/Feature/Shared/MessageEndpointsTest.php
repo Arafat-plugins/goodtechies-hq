@@ -142,6 +142,8 @@ it('sends exactly the documented thread keys', function () {
             'edited_at', 'is_deleted', 'can_edit', 'can_delete', 'reactions', 'seen',
             // 12-82: the quoted original of a reply (null here).
             'reply_to',
+            // Polish 044: the pinned announcement.
+            'is_pinned', 'can_pin',
         ])
         // The picker's options never include the reader themselves, and never the Accountant.
         ->and(array_column($payload['mentionable'], 'id'))
@@ -273,10 +275,11 @@ it('lets an announcer post an announcement and refuses everybody else with 403',
     expect($channel->messages()->count())->toBe(1);
 })->group('phase6');
 
-it('puts the newest announcement on the Messages page as a banner', function () {
+it('puts the pinned announcement on the Messages page as a banner', function () {
     $channel = $this->conversations->announcements();
 
-    $this->messages->post($this->admin, $channel, 'Office closed on Thursday.');
+    // Polish 044: the banner is the PINNED announcement.
+    $this->messages->pin($this->admin, $this->messages->post($this->admin, $channel, 'Office closed on Thursday.'), true);
 
     $props = $this->actingAs($this->tapu)->get(MSGX_URL)->assertOk()->inertiaPage()['props'];
 

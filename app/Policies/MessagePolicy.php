@@ -89,6 +89,23 @@ class MessagePolicy extends Policy
     }
 
     /**
+     * Polish 044: pin or unpin a message — a live message in the announcements channel, by
+     * somebody who may post there (an Admin). Other conversations have no pinned bar yet.
+     */
+    public function pin(User $user, Message $message): bool
+    {
+        if ($message->isDeleted() || ! $this->view($user, $message)) {
+            return false;
+        }
+
+        $conversation = $message->conversation;
+
+        return $conversation !== null
+            && $conversation->type === ConversationType::Announcement
+            && Gate::forUser($user)->allows('post', $conversation);
+    }
+
+    /**
      * Anyone who can see a live message may react to it (12-79).
      */
     public function react(User $user, Message $message): bool
