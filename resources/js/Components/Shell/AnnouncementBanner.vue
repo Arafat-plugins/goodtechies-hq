@@ -101,7 +101,7 @@ async function unpin(): Promise<void> {
             <span class="flex min-w-0 flex-col gap-0.5">
                 <span class="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
                     <span class="font-medium text-foreground">
-                        Pinned announcement{{ announcement.is_unread ? ' — unread' : '' }}
+                        Announcement{{ announcement.is_unread ? ' — unread' : '' }}
                     </span>
                     <span>{{ announcement.author ?? 'Somebody' }}</span>
                     <span>{{ formatMessageTime(announcement.created_at) }}</span>
