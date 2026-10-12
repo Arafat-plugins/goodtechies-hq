@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Building2, Mail, Pencil, Plus, UserX } from '@lucide/vue';
+import { Building2, Pencil, Plus, UserX } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import ClientAvatar from '@/Components/Clients/ClientAvatar.vue';
 import type { Client } from '@/Components/Clients/ClientForm.vue';
@@ -104,9 +104,6 @@ function activityAgo(at: string | null | undefined): string {
     return 'just now';
 }
 
-function primaryContact(client: Client) {
-    return client.contacts?.find((contact) => contact.name || contact.email) ?? null;
-}
 
 function clearFilters(): void {
     resetQuery();
@@ -124,7 +121,8 @@ const columns = computed<ColumnDef<Client>[]>(() => [
     { key: 'projects_count', header: 'Projects', value: (client) => client.projects_count ?? 0 },
     { key: 'tasks', header: 'Tasks', nowrap: true, value: (client) => client.task_counts?.total ?? 0 },
     { key: 'status', header: 'Status', cell: 'badge', nowrap: true },
-    { key: 'contact', header: 'Primary contact', value: (client) => primaryContact(client)?.name ?? '' },
+    // Polish 056: "Total tasks" takes the old Primary contact column's place.
+    { key: 'total_tasks', header: 'Total tasks', nowrap: true, value: (client) => client.task_counts?.total ?? 0 },
     { key: 'last_activity', header: 'Last activity', nowrap: true, value: (client) => client.last_activity_at ?? '' },
 ]);
 
@@ -293,25 +291,11 @@ function confirmDeactivate(): void {
                 </template>
 
                 <template #cell-tasks="{ row }">
-                    <div class="flex flex-col gap-1">
-                        <span class="text-sm font-semibold tabular-nums">{{ (row.task_counts ?? NO_TASKS).total }}</span>
-                        <TaskCountChips :counts="row.task_counts ?? NO_TASKS" stacked />
-                    </div>
+                    <TaskCountChips :counts="row.task_counts ?? NO_TASKS" stacked />
                 </template>
 
-                <template #cell-contact="{ row }">
-                    <div v-if="primaryContact(row)" class="flex min-w-0 flex-col gap-0.5">
-                        <span class="truncate text-sm">{{ primaryContact(row)?.name }}</span>
-                        <a
-                            v-if="primaryContact(row)?.email"
-                            :href="`mailto:${primaryContact(row)?.email}`"
-                            class="flex min-w-0 items-center gap-1.5 text-xs break-all text-muted-foreground hover:text-foreground hover:underline"
-                        >
-                            <Mail class="size-3 shrink-0" aria-hidden="true" />
-                            {{ primaryContact(row)?.email }}
-                        </a>
-                    </div>
-                    <span v-else class="text-xs text-muted-foreground">No contact</span>
+                <template #cell-total_tasks="{ row }">
+                    <span class="text-base font-semibold tabular-nums">{{ (row.task_counts ?? NO_TASKS).total }}</span>
                 </template>
 
                 <template #cell-last_activity="{ row }">

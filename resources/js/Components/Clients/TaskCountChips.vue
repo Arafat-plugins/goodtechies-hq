@@ -35,7 +35,7 @@ const chips = computed(() => [
                     'inline-flex items-center gap-1 rounded-full border text-xs whitespace-nowrap',
                     chip.tone,
                     stacked
-                        ? cn('relative h-6 border-2 border-card pr-2.5', index === 0 ? 'pl-2.5' : '-ml-2.5 pl-4')
+                        ? cn('relative h-6 border-2 border-card pr-2.5 text-xs sm:h-7 sm:pr-3 sm:text-sm', index === 0 ? 'pl-3' : '-ml-3 pl-5')
                         : 'h-5 px-2',
                 )
             "

@@ -3,6 +3,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowRight,
     Box,
+    ChevronDown,
     Code,
     ExternalLink,
     FolderKanban,
@@ -41,6 +42,8 @@ import EmptyState from '@/Components/EmptyState.vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
 import { fileRoutes } from '@/Components/Files/files';
 import PageShell from '@/Components/PageShell.vue';
+import type { ServiceBoardTask } from '@/Components/Projects/ClientServiceBoard.vue';
+import OpenTaskList from '@/Components/Projects/OpenTaskList.vue';
 import type { ProjectFinance } from '@/Components/Projects/ProjectForm.vue';
 import { Input } from '@/Components/ui/input';
 import { NativeSelect } from '@/Components/ui/native-select';
@@ -86,6 +89,8 @@ const props = defineProps<{
     /** Polish 049: task counts per project id, and for the whole client. */
     projectTasks?: Record<string, TaskCounts>;
     taskCounts?: TaskCounts;
+    /** Polish 057: each project's open tasks (not completed or cancelled), by project id. */
+    projectOpen?: Record<string, { tracked_seconds: number; open_count: number; tasks: ServiceBoardTask[] }>;
 }>();
 
 const client = computed(() => props.client.data);
@@ -310,6 +315,24 @@ const shownWebsites = computed(() => {
                 )),
     );
 });
+
+/**
+ * Polish 057: under each website its projects, one row each, with a chevron that shows the
+ * project's open tasks (as on Admin → Projects?client=…). Collapsed by default.
+ */
+const openProjects = ref<number[]>([]);
+
+function isProjectOpen(id: number): boolean {
+    return openProjects.value.includes(id);
+}
+
+function toggleProject(id: number): void {
+    openProjects.value = isProjectOpen(id) ? openProjects.value.filter((value) => value !== id) : [...openProjects.value, id];
+}
+
+function openTasksOf(project: ClientProject): { open_count: number; tasks: ServiceBoardTask[] } {
+    return props.projectOpen?.[String(project.id)] ?? { open_count: 0, tasks: [] };
+}
 
 function progressPercent(counts: TaskCounts): number {
     return counts.total === 0 ? 0 : Math.round((counts.complete / counts.total) * 100);
@@ -558,25 +581,61 @@ function confirmDeactivate(): void {
                                     </div>
                                 </div>
 
-                                <div class="flex flex-col gap-2 border-t pt-4">
-                                    <span class="text-sm font-medium text-muted-foreground">Services</span>
-                                    <span class="flex flex-wrap gap-2">
-                                        <Link
+                                <!-- Polish 057: the website's projects, each a row with a chevron that
+                                     shows its open tasks (replaces the Services chips). -->
+                                <div class="flex min-w-0 flex-col gap-2 border-t pt-4">
+                                    <span class="text-sm font-medium text-muted-foreground">Projects</span>
+                                    <ul class="flex min-w-0 flex-col gap-2" :aria-label="`Projects of ${site.name}`">
+                                        <li
                                             v-for="project in site.projects"
                                             :key="project.id"
-                                            :href="`/admin/projects/${project.id}`"
-                                            :title="project.name"
-                                            :class="
-                                                cn(
-                                                    'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium outline-none hover:opacity-80 focus-visible:ring-3 focus-visible:ring-ring',
-                                                    toneChipClass(serviceOf(project).tone),
-                                                )
-                                            "
+                                            class="flex min-w-0 flex-col gap-2 rounded-md border bg-card p-2.5"
+                                            :data-website-project="project.id"
                                         >
-                                            <component :is="serviceOf(project).icon" class="size-3.5" aria-hidden="true" />
-                                            {{ project.project_type_label ?? project.name }}
-                                        </Link>
-                                    </span>
+                                            <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+                                                <Link
+                                                    :href="`/admin/projects/${project.id}`"
+                                                    :title="project.name"
+                                                    class="flex min-w-0 flex-1 basis-40 items-center gap-2 rounded-md text-sm font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring"
+                                                >
+                                                    <span
+                                                        :class="cn('flex size-7 shrink-0 items-center justify-center rounded-md border', toneChipClass(serviceOf(project).tone))"
+                                                        aria-hidden="true"
+                                                    >
+                                                        <component :is="serviceOf(project).icon" class="size-3.5" />
+                                                    </span>
+                                                    <span class="min-w-0 break-words">{{ project.project_type_label ?? project.name }}</span>
+                                                </Link>
+                                                <span class="ml-auto flex shrink-0 items-center gap-2">
+                                                    <StatusPill :label="project.status_label" :tone="toneForProjectStatus(project.status)" />
+                                                    <span class="text-xs text-muted-foreground tabular-nums">
+                                                        {{ openTasksOf(project).open_count }} {{ openTasksOf(project).open_count === 1 ? 'task' : 'tasks' }}
+                                                    </span>
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon-sm"
+                                                        class="-my-1"
+                                                        :aria-expanded="isProjectOpen(project.id)"
+                                                        :aria-controls="`website-project-tasks-${project.id}`"
+                                                        :aria-label="`${isProjectOpen(project.id) ? 'Hide' : 'Show'} the open tasks of ${project.name}`"
+                                                        @click="toggleProject(project.id)"
+                                                    >
+                                                        <ChevronDown
+                                                            :class="cn('transition-transform motion-reduce:transition-none', isProjectOpen(project.id) && 'rotate-180')"
+                                                            aria-hidden="true"
+                                                        />
+                                                    </Button>
+                                                </span>
+                                            </div>
+                                            <OpenTaskList
+                                                v-if="isProjectOpen(project.id)"
+                                                :tasks="openTasksOf(project).tasks"
+                                                :project-name="project.name"
+                                                :list-id="`website-project-tasks-${project.id}`"
+                                            />
+                                        </li>
+                                    </ul>
                                 </div>
 
                                 <div class="mt-auto flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
