@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { PartyPopper } from '@lucide/vue';
+import { CalendarDays, PartyPopper } from '@lucide/vue';
+import IconChip from '@/Components/Dashboard/IconChip.vue';
+import { listTone, toneChipClass } from '@/Components/Dashboard/tones';
 import EmptyState from '@/Components/EmptyState.vue';
 import type { Holiday } from '@/Components/Holidays/holidays';
 import { formatHolidayDayMonth, holidayWhen } from '@/Components/Holidays/holidays';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import { cn } from '@/lib/utils';
+
+/** Polish 046: "20 Oct" split for the date tile — the day large, the month under it. */
+function tileParts(date: string): { day: string; month: string } {
+    const [day = '', month = ''] = formatHolidayDayMonth(date).split(' ');
+
+    return { day, month };
+}
 
 /**
  * "Upcoming holidays" — the card Part D §3 puts on both dashboards.
@@ -43,7 +53,10 @@ withDefaults(
 <template>
     <Card class="min-w-0 gap-4 p-6">
         <div class="flex min-w-0 items-center justify-between gap-4">
-            <h2 class="text-sm font-medium">Upcoming holidays</h2>
+            <div class="flex min-w-0 items-center gap-3">
+                <IconChip :icon="CalendarDays" tone="changes" />
+                <h2 class="truncate text-sm font-medium">Upcoming holidays</h2>
+            </div>
             <Link
                 v-if="manageHref && holidays.length > 0"
                 :href="manageHref"
@@ -56,6 +69,7 @@ withDefaults(
         <EmptyState
             v-if="holidays.length === 0"
             :icon="PartyPopper"
+            tone="changes"
             title="Nothing on the calendar"
             description="No company holiday is coming up. Bangladesh gazettes its list one year at a time, so next year's appears once it has been entered."
         >
@@ -68,11 +82,23 @@ withDefaults(
 
         <ul v-else class="flex min-w-0 flex-col divide-y">
             <li
-                v-for="holiday in holidays"
+                v-for="(holiday, index) in holidays"
                 :key="holiday.id"
-                class="flex min-w-0 flex-col gap-0.5 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4"
+                class="flex min-w-0 items-center gap-3 py-3 first:pt-0 last:pb-0"
             >
-                <div class="flex min-w-0 flex-col gap-0.5">
+                <span
+                    :class="
+                        cn(
+                            'flex size-11 shrink-0 flex-col items-center justify-center rounded-lg border tabular-nums',
+                            toneChipClass(listTone(index)),
+                        )
+                    "
+                    aria-hidden="true"
+                >
+                    <span class="text-base leading-none font-semibold">{{ tileParts(holiday.date).day }}</span>
+                    <span class="text-xs leading-tight uppercase">{{ tileParts(holiday.date).month }}</span>
+                </span>
+                <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                     <p class="truncate text-sm font-medium">{{ holiday.name }}</p>
                     <p class="text-xs text-muted-foreground">
                         <span class="tabular-nums">{{ formatHolidayDayMonth(holiday.date) }}</span>

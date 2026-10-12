@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { CalendarClock } from '@lucide/vue';
+import { CalendarClock, Video } from '@lucide/vue';
+import IconChip from '@/Components/Dashboard/IconChip.vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import MeetingJoinButton from '@/Components/Meetings/MeetingJoinButton.vue';
 import type { Meeting } from '@/Components/Meetings/meetings';
@@ -65,7 +66,10 @@ function dayOf(iso: string | null): string {
 <template>
     <Card class="min-w-0 gap-4 p-6">
         <div class="flex min-w-0 items-center justify-between gap-4">
-            <h2 class="text-sm font-medium">Upcoming meetings</h2>
+            <div class="flex min-w-0 items-center gap-3">
+                <IconChip :icon="Video" tone="progress" />
+                <h2 class="truncate text-sm font-medium">Upcoming meetings</h2>
+            </div>
             <Link
                 v-if="meetings.length > 0"
                 :href="meetingsHref()"
@@ -78,6 +82,7 @@ function dayOf(iso: string | null): string {
         <EmptyState
             v-if="meetings.length === 0"
             :icon="CalendarClock"
+            tone="progress"
             title="Nothing in the diary"
             description="No meeting you are in is coming up. One you are invited to appears here as soon as it is scheduled."
         >

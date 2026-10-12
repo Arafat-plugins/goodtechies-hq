@@ -22,6 +22,8 @@ export interface AttentionItem {
 import { Link } from '@inertiajs/vue3';
 import { ChevronRight, Inbox } from '@lucide/vue';
 import { Card } from '@/Components/ui/card';
+import IconChip from '@/Components/Dashboard/IconChip.vue';
+import type { Tone } from '@/Components/Dashboard/tones';
 import EmptyState from '@/Components/EmptyState.vue';
 import { cn } from '@/lib/utils';
 
@@ -43,6 +45,9 @@ withDefaults(
          * or not.
          */
         note?: string;
+        /** Polish 046: the heading's icon chip and the empty state's colour. */
+        icon?: Component;
+        tone?: Tone;
     }>(),
     { items: () => [], emptyIcon: () => Inbox },
 );
@@ -60,13 +65,17 @@ withDefaults(
     -->
     <Card class="min-w-0 gap-4 p-6">
         <div class="flex min-w-0 items-center justify-between gap-2">
-            <h2 class="text-sm font-medium">{{ title }}</h2>
+            <div class="flex min-w-0 items-center gap-3">
+                <IconChip v-if="icon && tone" :icon="icon" :tone="tone" />
+                <h2 class="truncate text-sm font-medium">{{ title }}</h2>
+            </div>
             <slot name="action" />
         </div>
 
         <EmptyState
             v-if="items.length === 0"
             :icon="emptyIcon"
+            :tone="tone"
             variant="empty"
             :title="emptyTitle"
             :description="emptyDescription"

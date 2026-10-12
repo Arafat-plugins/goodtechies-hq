@@ -13,9 +13,11 @@ export interface StatDelta {
 
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { Minus, TrendingDown, TrendingUp } from '@lucide/vue';
+import { ChevronRight, Minus, TrendingDown, TrendingUp } from '@lucide/vue';
 import type { Component } from 'vue';
 import { computed } from 'vue';
+import IconChip from '@/Components/Dashboard/IconChip.vue';
+import { type Tone, toneBarClass } from '@/Components/Dashboard/tones';
 import { Card } from '@/Components/ui/card';
 import { cn } from '@/lib/utils';
 
@@ -40,6 +42,12 @@ const props = withDefaults(
          * must not compete with the hero row. It only changes the size of the number.
          */
         size?: 'default' | 'compact';
+        /**
+         * Polish 046: the dashboards' colour. With a tone the card stays white, its icon sits in
+         * a tinted circle before the label, a chevron marks a linked card, and a thin bar in the
+         * tone runs along its foot. Without one the card is exactly as before.
+         */
+        tone?: Tone;
     }>(),
     { size: 'default' },
 );
@@ -89,7 +97,12 @@ const deltaLabel = computed(() => {
         :class="cn('block min-w-0', href && 'rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring')"
     >
         <Card :class="cn('h-full min-w-0 gap-2 p-4', href && 'transition-colors hover:bg-accent/40')">
-            <div class="flex items-center justify-between gap-2">
+            <div v-if="tone" class="flex min-w-0 items-center gap-3">
+                <IconChip v-if="icon" :icon="icon" :tone="tone" size="md" />
+                <p class="min-w-0 flex-1 text-sm leading-tight font-medium">{{ label }}</p>
+                <ChevronRight v-if="href" class="hidden size-4 shrink-0 text-muted-foreground sm:block" aria-hidden="true" />
+            </div>
+            <div v-else class="flex items-center justify-between gap-2">
                 <p class="truncate text-sm text-muted-foreground">{{ label }}</p>
                 <component :is="icon" v-if="icon" class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             </div>
@@ -126,6 +139,8 @@ const deltaLabel = computed(() => {
             <div v-if="$slots.sparkline" class="min-w-0">
                 <slot name="sparkline" />
             </div>
+
+            <span v-if="tone" :class="cn('mt-auto block h-1 w-full rounded-full', toneBarClass(tone))" aria-hidden="true" />
         </Card>
     </component>
 </template>

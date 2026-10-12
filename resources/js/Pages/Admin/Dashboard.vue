@@ -3,6 +3,7 @@ import { Head, Link } from '@inertiajs/vue3';
 import {
     CalendarClock,
     CalendarOff,
+    ChartPie,
     CircleAlert,
     ClipboardCheck,
     CircleCheck,
@@ -20,6 +21,8 @@ import {
 import { computed, type Component } from 'vue';
 import { formatMinutes } from '@/Components/Attendance/attendance';
 import AttentionList, { type AttentionItem } from '@/Components/Dashboard/AttentionList.vue';
+import IconChip from '@/Components/Dashboard/IconChip.vue';
+import { financeTone, workTone } from '@/Components/Dashboard/tones';
 import BarCompare, { type BarCompareItem } from '@/Components/Charts/BarCompare.vue';
 import DonutBreakdown, { type DonutSlice } from '@/Components/Charts/DonutBreakdown.vue';
 import { formatMoney } from '@/Components/Finance/finance';
@@ -501,6 +504,7 @@ if (props.workingNow !== undefined) {
                 :value="stat.count"
                 :sub="subFor(stat)"
                 :icon="WORK_ICON[stat.key]"
+                :tone="workTone(stat.key)"
                 :href="stat.href"
             />
         </section>
@@ -520,6 +524,7 @@ if (props.workingNow !== undefined) {
                 :value="stats.activeEmployees"
                 sub="Current headcount · no history to compare yet"
                 :icon="Users"
+                tone="progress"
             />
             <StatCard
                 v-if="hasAttendance"
@@ -528,6 +533,7 @@ if (props.workingNow !== undefined) {
                 :value="attendance.present"
                 :sub="attendance.present === 0 ? 'Nobody has clocked in yet' : 'In today, including late arrivals'"
                 :icon="UserCheck"
+                tone="done"
                 :href="attendance.href"
             />
             <StatCard
@@ -537,6 +543,7 @@ if (props.workingNow !== undefined) {
                 :value="attendance.absent"
                 :sub="attendance.absent === 0 ? 'Nobody is marked absent' : 'Scheduled to work, no record'"
                 :icon="UserX"
+                tone="cancelled"
                 :href="attendance.href"
             />
             <StatCard
@@ -546,6 +553,7 @@ if (props.workingNow !== undefined) {
                 :value="attendance.on_leave"
                 :sub="attendance.on_leave === 0 ? 'Nobody is on approved leave today' : 'Approved leave covering today'"
                 :icon="CalendarOff"
+                tone="waiting"
                 :href="attendance.leave_href"
             />
         </section>
@@ -631,6 +639,8 @@ if (props.workingNow !== undefined) {
             <div class="min-w-0 lg:col-span-2">
                 <AttentionList
                     title="Needs your attention"
+                    :icon="Inbox"
+                    tone="cancelled"
                     :items="attentionItems"
                     :empty-icon="Inbox"
                     empty-title="Nothing is waiting on you"
@@ -670,7 +680,10 @@ if (props.workingNow !== undefined) {
         -->
         <section aria-label="Work by status and by person" class="grid gap-4 lg:grid-cols-2">
             <Card class="min-w-0 gap-4 p-6">
-                <h2 class="text-sm font-medium">Tasks by status</h2>
+                <div class="flex min-w-0 items-center gap-3">
+                    <IconChip :icon="ChartPie" tone="progress" />
+                    <h2 class="truncate text-sm font-medium">Tasks by status</h2>
+                </div>
                 <div class="flex min-h-56 min-w-0 flex-col justify-center">
                     <!--
                         The open work, split by status — the same scoped, non-archived set the
@@ -684,7 +697,10 @@ if (props.workingNow !== undefined) {
             </Card>
             <Card class="min-w-0 gap-4 p-6">
                 <div class="flex min-w-0 items-center justify-between gap-4">
-                    <h2 class="text-sm font-medium">Tasks by employee</h2>
+                    <div class="flex min-w-0 items-center gap-3">
+                        <IconChip :icon="Users" tone="backlog" />
+                        <h2 class="truncate text-sm font-medium">Tasks by employee</h2>
+                    </div>
                     <!--
                         The chart cannot carry a link per bar, so the header carries the one to
                         the screen where every one of these counts IS a link under the filter it
@@ -712,7 +728,10 @@ if (props.workingNow !== undefined) {
         <section aria-label="Projects by type and deadlines" class="grid min-w-0 gap-4 lg:grid-cols-2">
             <Card class="min-w-0 gap-4 p-6">
                 <div class="flex min-w-0 items-center justify-between gap-4">
-                    <h2 class="text-sm font-medium">Projects by type</h2>
+                    <div class="flex min-w-0 items-center gap-3">
+                        <IconChip :icon="FolderKanban" tone="changes" />
+                        <h2 class="truncate text-sm font-medium">Projects by type</h2>
+                    </div>
                     <Link
                         v-if="projectsByType.length > 0"
                         href="/admin/projects"
@@ -741,6 +760,8 @@ if (props.workingNow !== undefined) {
             <div class="min-w-0">
                 <AttentionList
                     title="Upcoming deadlines"
+                    :icon="CalendarClock"
+                    tone="review"
                     :items="deadlineItems"
                     :empty-icon="CalendarClock"
                     empty-title="No deadline in the next month"
@@ -781,6 +802,7 @@ if (props.workingNow !== undefined) {
                         :value="card.value"
                         :sub="card.sub"
                         :icon="card.icon"
+                        :tone="financeTone(card.key)"
                         :href="card.href"
                     />
                 </template>

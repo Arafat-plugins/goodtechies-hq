@@ -4,6 +4,8 @@ import { Bell, CalendarClock, CalendarDays, CalendarOff, History, MessageSquareW
 import type { AttendanceDay } from '@/Components/Attendance/attendance';
 import ClockWidget from '@/Components/Attendance/ClockWidget.vue';
 import AttentionList, { type AttentionItem } from '@/Components/Dashboard/AttentionList.vue';
+import IconChip from '@/Components/Dashboard/IconChip.vue';
+import { workTone } from '@/Components/Dashboard/tones';
 import TimerHeroCard from '@/Components/Dashboard/TimerHeroCard.vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import type { Holiday } from '@/Components/Holidays/holidays';
@@ -219,6 +221,7 @@ useLiveProps(['taskStats', 'timer', 'attendance', 'leave', 'recentActivity'], {
                 :value="stat.count"
                 :sub="bucketSubline(stat.key, stat.count)"
                 :icon="bucketIcon(stat.key)"
+                :tone="workTone(stat.key)"
                 :href="stat.href"
             />
         </section>
@@ -239,6 +242,7 @@ useLiveProps(['taskStats', 'timer', 'attendance', 'leave', 'recentActivity'], {
                 :value="largestBalance?.days ?? 0"
                 :sub="largestBalance ? `${largestBalance.name} — most days left` : 'No balance set yet'"
                 :icon="CalendarOff"
+                tone="progress"
                 :href="leave.href"
             />
             <StatCard
@@ -247,6 +251,7 @@ useLiveProps(['taskStats', 'timer', 'attendance', 'leave', 'recentActivity'], {
                 :value="leave.pending"
                 :sub="leave.pending === 0 ? 'Nothing waiting on an approver' : 'Waiting on a decision'"
                 :icon="CalendarClock"
+                tone="backlog"
                 :href="leave.href"
             />
             <StatCard
@@ -256,6 +261,7 @@ useLiveProps(['taskStats', 'timer', 'attendance', 'leave', 'recentActivity'], {
                 :value="leave.correction_requested"
                 sub="Sent back to you — amend and send it again"
                 :icon="MessageSquareWarning"
+                tone="cancelled"
                 :href="leave.href"
             />
         </section>
@@ -268,9 +274,13 @@ useLiveProps(['taskStats', 'timer', 'attendance', 'leave', 'recentActivity'], {
                 It names where they are and opens the Center.
             -->
             <Card class="min-w-0 gap-4 p-6">
-                <h2 class="text-sm font-medium">Notifications</h2>
+                <div class="flex min-w-0 items-center gap-3">
+                    <IconChip :icon="Bell" tone="waiting" />
+                    <h2 class="truncate text-sm font-medium">Notifications</h2>
+                </div>
                 <EmptyState
                     :icon="Bell"
+                    tone="waiting"
                     title="In the bell, and in the Center"
                     description="Assignments, review verdicts and comments land on the bell in the top bar, with an unread count. The Center keeps all of them."
                 >
@@ -309,7 +319,10 @@ useLiveProps(['taskStats', 'timer', 'attendance', 'leave', 'recentActivity'], {
             -->
             <Card class="min-w-0 gap-4 p-6">
                 <div class="flex min-w-0 items-center justify-between gap-4">
-                    <h2 class="text-sm font-medium">My schedule</h2>
+                    <div class="flex min-w-0 items-center gap-3">
+                        <IconChip :icon="CalendarDays" tone="done" />
+                        <h2 class="truncate text-sm font-medium">My schedule</h2>
+                    </div>
                     <Link
                         v-if="schedule"
                         :href="schedule.href"
@@ -321,6 +334,7 @@ useLiveProps(['taskStats', 'timer', 'attendance', 'leave', 'recentActivity'], {
                 <EmptyState
                     v-if="!schedule"
                     :icon="CalendarDays"
+                    tone="done"
                     title="No schedule set yet"
                     description="Nobody has set your working days or hours. An Admin sets them, and until they do no day of yours counts as an off day."
                 />
@@ -343,6 +357,8 @@ useLiveProps(['taskStats', 'timer', 'attendance', 'leave', 'recentActivity'], {
             <div class="min-w-0">
                 <AttentionList
                     title="Recent activity"
+                    :icon="History"
+                    tone="review"
                     :items="activityItems"
                     :empty-icon="History"
                     empty-title="Nothing yet"

@@ -14,6 +14,8 @@ import {
 } from '@lucide/vue';
 import { computed } from 'vue';
 import AttentionList, { type AttentionItem } from '@/Components/Dashboard/AttentionList.vue';
+import IconChip from '@/Components/Dashboard/IconChip.vue';
+import { financeTone } from '@/Components/Dashboard/tones';
 import EmptyState from '@/Components/EmptyState.vue';
 import { formatMoney } from '@/Components/Finance/finance';
 import type { FinanceMonthSummary } from '@/Components/Finance/financeReport';
@@ -245,6 +247,7 @@ useLiveProps(['finance', 'outstanding', 'leave', 'payslip'], { intervalMs: DASHB
                         :value="card.value"
                         :sub="card.sub"
                         :icon="card.icon"
+                        :tone="financeTone(card.key)"
                         :href="card.href"
                     />
                 </template>
@@ -273,6 +276,8 @@ useLiveProps(['finance', 'outstanding', 'leave', 'payslip'], { intervalMs: DASHB
         <div class="min-w-0">
             <AttentionList
                 title="Outstanding"
+                :icon="Wallet"
+                tone="review"
                 :items="outstandingItems"
                 :empty-icon="Wallet"
                 empty-title="Nothing waiting on you"
@@ -294,6 +299,7 @@ useLiveProps(['finance', 'outstanding', 'leave', 'payslip'], { intervalMs: DASHB
                     :value="largestBalance?.days ?? 0"
                     :sub="largestBalance ? `${largestBalance.name} — most days left` : 'No balance set yet'"
                     :icon="CalendarOff"
+                    tone="progress"
                     :href="leave.href"
                 />
                 <StatCard
@@ -303,6 +309,7 @@ useLiveProps(['finance', 'outstanding', 'leave', 'payslip'], { intervalMs: DASHB
                     :value="leave.pending"
                     :sub="leave.pending === 0 ? 'Nothing waiting on an approver' : 'Waiting on a decision'"
                     :icon="CalendarClock"
+                    tone="backlog"
                     :href="leave.href"
                 />
                 <StatCard
@@ -312,13 +319,17 @@ useLiveProps(['finance', 'outstanding', 'leave', 'payslip'], { intervalMs: DASHB
                     :value="leave.correction_requested"
                     sub="Sent back to you — amend and send it again"
                     :icon="MessageSquareWarning"
+                    tone="cancelled"
                     :href="leave.href"
                 />
             </div>
 
             <Card class="min-w-0 gap-4 p-6">
                 <div class="flex min-w-0 items-center justify-between gap-4">
-                    <h2 class="text-sm font-medium">My payslip</h2>
+                    <div class="flex min-w-0 items-center gap-3">
+                        <IconChip :icon="FileText" tone="done" />
+                        <h2 class="truncate text-sm font-medium">My payslip</h2>
+                    </div>
                     <Link
                         v-if="payslip"
                         :href="payslip.index_href"

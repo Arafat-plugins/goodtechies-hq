@@ -3,6 +3,7 @@ import { X } from '@lucide/vue';
 import type { Component } from 'vue';
 import { computed } from 'vue';
 import { Button } from '@/Components/ui/button';
+import { type Tone, toneChipClass } from '@/Components/Dashboard/tones';
 import { cn } from '@/lib/utils';
 
 const props = withDefaults(
@@ -17,6 +18,8 @@ const props = withDefaults(
          * current filters, so the way out is clearing them. `error` — the load failed.
          */
         variant?: 'empty' | 'filtered' | 'error';
+        /** Polish 046: a dashboard card's colour for the medallion. Ignored for `error`. */
+        tone?: Tone;
     }>(),
     { variant: 'empty' },
 );
@@ -25,7 +28,11 @@ const emit = defineEmits<{ clear: [] }>();
 
 /** The icon medallion: muted by default, destructive-toned when something went wrong. */
 const medallionClass = computed(() =>
-    props.variant === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground',
+    props.variant === 'error'
+        ? 'bg-destructive/10 text-destructive'
+        : props.tone
+          ? cn('border', toneChipClass(props.tone))
+          : 'bg-muted text-muted-foreground',
 );
 
 /** `filtered` offers a way out even when the caller passes no action of its own. */
@@ -34,8 +41,8 @@ const showsDefaultAction = computed(() => props.variant === 'filtered');
 
 <template>
     <div class="flex flex-col items-center gap-3 px-4 py-10 text-center">
-        <span :class="cn('rounded-full p-3', medallionClass)">
-            <component :is="icon" class="size-5" aria-hidden="true" />
+        <span :class="cn('rounded-full', tone && variant !== 'error' ? 'p-4' : 'p-3', medallionClass)">
+            <component :is="icon" :class="tone && variant !== 'error' ? 'size-6' : 'size-5'" aria-hidden="true" />
         </span>
         <div class="flex flex-col gap-1">
             <p class="text-sm font-medium">{{ title }}</p>
