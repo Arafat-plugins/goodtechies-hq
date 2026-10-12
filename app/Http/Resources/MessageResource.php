@@ -8,6 +8,7 @@ use App\Models\Message;
 use App\Models\MessageReaction;
 use App\Models\User;
 use App\Support\ConversationType;
+use App\Support\MessageText;
 use App\Support\Permission;
 use App\Support\UnreadLine;
 use Illuminate\Http\Request;
@@ -253,7 +254,7 @@ class MessageResource extends JsonResource
             null => 'text',
             default => 'file',
         };
-        $body = trim((string) $original->body);
+        $body = trim(MessageText::plain((string) $original->body));
 
         $excerpt = match (true) {
             $deleted => '',

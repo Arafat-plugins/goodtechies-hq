@@ -107,6 +107,8 @@ import { recurringDeadline } from '@/lib/recurrence';
 const props = defineProps<{
     /** Absent on Create. */
     project?: Project;
+    /** Polish 049: Create opened from a client's page ("Add website") starts on that client. */
+    defaultClientId?: number | null;
     clients: NamedRef[];
     assignableEmployees: EmployeeOption[];
     projectTypes: Option[];
@@ -127,7 +129,11 @@ const renamingTypes = ref(false);
 const isEdit = computed(() => props.project !== undefined);
 
 const form = useForm({
-    client_id: props.project?.client ? String(props.project.client.id) : INTERNAL,
+    client_id: props.project?.client
+        ? String(props.project.client.id)
+        : props.defaultClientId && props.clients.some((client) => client.id === props.defaultClientId)
+          ? String(props.defaultClientId)
+          : INTERNAL,
     name: props.project?.name ?? '',
     domain: props.project?.domain ?? '',
     project_type: props.project?.project_type ?? (props.projectTypes[0]?.value ?? ''),

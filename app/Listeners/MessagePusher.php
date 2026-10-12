@@ -8,6 +8,7 @@ use App\Models\Message;
 use App\Models\User;
 use App\Support\AttachmentKind;
 use App\Support\ConversationType;
+use App\Support\MessageText;
 use App\Support\Permission;
 use App\Support\PushCategory;
 use App\Support\UserStatus;
@@ -74,7 +75,7 @@ class MessagePusher
 
     private function preview(Message $message): string
     {
-        $text = trim((string) preg_replace('/\s+/u', ' ', (string) $message->body));
+        $text = trim((string) preg_replace('/\s+/u', ' ', MessageText::plain((string) $message->body)));
 
         if ($text !== '') {
             return Str::limit($text, 120);

@@ -12,6 +12,7 @@ use App\Models\Message;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
+use App\Support\MessageText;
 use App\Support\Permission;
 use App\Support\RoleName;
 use App\Support\SearchableType;
@@ -368,7 +369,7 @@ class SearchService
                 // looking for — the thread it is in is. `labelFor()` is per reader (a DM is
                 // named after the other person), which is why it is a method and not a column.
                 label: $message->conversation?->labelFor($user) ?? 'Conversation',
-                snippet: $this->excerpt((string) $message->body, $term),
+                snippet: $this->excerpt(MessageText::plain((string) $message->body), $term),
                 href: route('messages.show', (int) $message->conversation_id, absolute: false),
             ))
             ->values()

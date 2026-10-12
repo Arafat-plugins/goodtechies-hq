@@ -7,6 +7,9 @@ import AdminLayout from '@/Layouts/AdminLayout.vue';
 
 defineOptions({ layout: AdminLayout });
 
+/** Polish 049: `?client=ID` (the client page's "Add website") picks that client. */
+const defaultClientId = Number(new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search).get('client')) || null;
+
 defineProps<{
     clients: NamedRef[];
     assignableEmployees: EmployeeOption[];
@@ -27,6 +30,7 @@ defineProps<{
     <PageShell title="New project" description="Book the work, then assign the people.">
         <ProjectForm
             :clients="clients"
+            :default-client-id="defaultClientId"
             :assignable-employees="assignableEmployees"
             :project-types="projectTypes"
             :project-type-defaults="projectTypeDefaults"

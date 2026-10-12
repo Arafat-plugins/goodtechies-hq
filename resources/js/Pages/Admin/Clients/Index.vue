@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Building2, Pencil, Plus, UserX } from '@lucide/vue';
+import { Building2, Mail, Pencil, Plus, UserX } from '@lucide/vue';
 import { computed, ref } from 'vue';
+import ClientAvatar from '@/Components/Clients/ClientAvatar.vue';
 import type { Client } from '@/Components/Clients/ClientForm.vue';
+import { NO_TASKS } from '@/Components/Clients/clientTasks';
+import { projectIcon } from '@/Components/Clients/projectIcon';
+import TaskCountChips from '@/Components/Clients/TaskCountChips.vue';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { ColumnDef } from '@/Components/DataTable/types';
-import type { FilterDef } from '@/Components/FilterBar.vue';
 import FilterBar from '@/Components/FilterBar.vue';
 import PageShell from '@/Components/PageShell.vue';
 import type { Paginated } from '@/Components/Pagination.vue';
@@ -22,14 +25,15 @@ import {
 import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useMenuDialog } from '@/lib/menuFocus';
-import { resetQuery } from '@/lib/tableState';
+import { pushQuery, resetQuery } from '@/lib/tableState';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { useNavigationPending } from '@/lib/useNavigationPending';
 
 defineOptions({ layout: AdminLayout });
 
 const props = defineProps<{
     clients: Paginated<Client>;
-    filters: { search: string | null; status: string | null };
+    filters: { search: string | null; status: string | null; tasks: string | null; projects: string | null };
 }>();
 
 /* ----------------------------------------------------------------- filters */
@@ -39,19 +43,70 @@ const props = defineProps<{
  * navigation: removing the Status chip *is* "all statuses", which is why there is no
  * sentinel option any more.
  */
-const filterDefs = computed<FilterDef[]>(() => [
-    {
-        key: 'status',
-        label: 'Status',
-        kind: 'select',
-        options: [
-            { value: 'active', label: 'Active' },
-            { value: 'inactive', label: 'Inactive' },
-        ],
-    },
-]);
+/*
+ * Polish 055 — image 2: three visible dropdowns beside the search, "All status", "All clients"
+ * (with / without projects) and the open-tasks filter. Each writes its own query key; "all"
+ * clears it.
+ */
+const ALL = 'all';
 
-const hasFilters = computed(() => Boolean(props.filters.search) || Boolean(props.filters.status));
+function filterModel(key: 'status' | 'projects' | 'tasks') {
+    return computed<string>({
+        get: () => props.filters[key] ?? ALL,
+        set: (value) => pushQuery({ [key]: value === ALL ? null : value }),
+    });
+}
+
+const statusFilter = filterModel('status');
+const projectsFilter = filterModel('projects');
+const tasksFilter = filterModel('tasks');
+
+const hasFilters = computed(
+    () =>
+        Boolean(props.filters.search) ||
+        Boolean(props.filters.status) ||
+        Boolean(props.filters.tasks) ||
+        Boolean(props.filters.projects),
+);
+
+/* ----------------------------------------------------------------- cells (polish 049) */
+
+const DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const RELATIVE = new Intl.RelativeTimeFormat('en-GB', { numeric: 'auto' });
+
+function activityDate(at: string | null | undefined): string {
+    const date = at ? new Date(at) : null;
+
+    return date && !Number.isNaN(date.getTime()) ? DATE.format(date) : '—';
+}
+
+function activityAgo(at: string | null | undefined): string {
+    const date = at ? new Date(at) : null;
+
+    if (!date || Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+
+    for (const [unit, size] of [
+        ['year', 31_536_000],
+        ['month', 2_592_000],
+        ['day', 86_400],
+        ['hour', 3_600],
+        ['minute', 60],
+    ] as const) {
+        if (Math.abs(seconds) >= size) {
+            return RELATIVE.format(Math.round(seconds / size), unit);
+        }
+    }
+
+    return 'just now';
+}
+
+function primaryContact(client: Client) {
+    return client.contacts?.find((contact) => contact.name || contact.email) ?? null;
+}
 
 function clearFilters(): void {
     resetQuery();
@@ -65,15 +120,12 @@ function clearFilters(): void {
  * brief that teaches the controller to sort.
  */
 const columns = computed<ColumnDef<Client>[]>(() => [
-    { key: 'name', header: 'Name', hideable: false },
-    {
-        key: 'projects_count',
-        header: 'Projects',
-        cell: 'number',
-        nowrap: true,
-        value: (client) => client.projects_count ?? 0,
-    },
+    { key: 'name', header: 'Client', hideable: false },
+    { key: 'projects_count', header: 'Projects', value: (client) => client.projects_count ?? 0 },
+    { key: 'tasks', header: 'Tasks', nowrap: true, value: (client) => client.task_counts?.total ?? 0 },
     { key: 'status', header: 'Status', cell: 'badge', nowrap: true },
+    { key: 'contact', header: 'Primary contact', value: (client) => primaryContact(client)?.name ?? '' },
+    { key: 'last_activity', header: 'Last activity', nowrap: true, value: (client) => client.last_activity_at ?? '' },
 ]);
 
 const loading = useNavigationPending();
@@ -142,10 +194,44 @@ function confirmDeactivate(): void {
             <FilterBar
                 page-actions
                 :search="filters.search"
-                :filters="filterDefs"
-                placeholder="Search clients…"
+                :active="hasFilters"
+                placeholder="Search clients by name, email or company…"
+                search-width="sm:w-88"
                 input-id="clients-search"
-            />
+            >
+                <template #extra>
+                    <Select v-model="statusFilter">
+                        <SelectTrigger class="w-28" aria-label="Status" data-filter="status">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All status</SelectItem>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="inactive">Inactive</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Select v-model="projectsFilter">
+                        <SelectTrigger class="w-36" aria-label="Clients" data-filter="projects">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All clients</SelectItem>
+                            <SelectItem value="with">Clients with projects</SelectItem>
+                            <SelectItem value="without">Clients without projects</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Select v-model="tasksFilter">
+                        <SelectTrigger class="w-44" aria-label="Tasks" data-filter="tasks">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All tasks</SelectItem>
+                            <SelectItem value="open">Clients with open tasks</SelectItem>
+                            <SelectItem value="none">No open tasks</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </template>
+            </FilterBar>
 
             <DataTable
                 id="admin-clients"
@@ -165,13 +251,74 @@ function confirmDeactivate(): void {
                 @clear="clearFilters"
             >
                 <template #cell-name="{ row }">
-                    <Link :href="`/admin/clients/${row.id}`" class="font-medium break-words hover:underline">
-                        {{ row.name }}
-                    </Link>
+                    <div class="flex min-w-0 items-center gap-3">
+                        <ClientAvatar :id="row.id" :name="row.name" />
+                        <div class="flex min-w-0 flex-col">
+                            <Link :href="`/admin/clients/${row.id}`" class="font-medium break-words hover:underline">
+                                {{ row.name }}
+                            </Link>
+                            <span v-if="row.nickname" class="truncate text-xs text-muted-foreground">{{ row.nickname }}</span>
+                        </div>
+                    </div>
                 </template>
 
                 <template #cell-projects_count="{ row }">
-                    {{ row.projects_count ?? 0 }}
+                    <div class="flex min-w-0 flex-col gap-1">
+                        <span class="text-sm">
+                            {{ row.projects_count ?? 0 }} {{ (row.projects_count ?? 0) === 1 ? 'project' : 'projects' }}
+                        </span>
+                        <!-- Polish 052: the icons overlap like a stacked avatar group. -->
+                        <span v-if="(row.project_chips ?? []).length > 0" class="flex items-center -space-x-2" data-testid="project-stack">
+                            <Link
+                                v-for="project in (row.project_chips ?? []).slice(0, 4)"
+                                :key="project.id"
+                                :href="`/admin/projects/${project.id}`"
+                                :title="project.domain ? `${project.name} — ${project.domain}` : project.name"
+                                :aria-label="project.name"
+                                :class="[
+                                    'relative flex size-7 items-center justify-center rounded-full border-2 border-card outline-none transition-transform hover:z-10 hover:-translate-y-0.5 focus-visible:z-10 focus-visible:ring-3 focus-visible:ring-ring',
+                                    projectIcon(project.type).solid,
+                                ]"
+                            >
+                                <component :is="projectIcon(project.type).icon" class="size-3.5" aria-hidden="true" />
+                            </Link>
+                            <span
+                                v-if="(row.project_chips ?? []).length > 4"
+                                class="relative flex size-7 items-center justify-center rounded-full border-2 border-card bg-muted text-xs font-medium text-muted-foreground"
+                            >
+                                +{{ (row.project_chips ?? []).length - 4 }}
+                            </span>
+                        </span>
+                    </div>
+                </template>
+
+                <template #cell-tasks="{ row }">
+                    <div class="flex flex-col gap-1">
+                        <span class="text-sm font-semibold tabular-nums">{{ (row.task_counts ?? NO_TASKS).total }}</span>
+                        <TaskCountChips :counts="row.task_counts ?? NO_TASKS" stacked />
+                    </div>
+                </template>
+
+                <template #cell-contact="{ row }">
+                    <div v-if="primaryContact(row)" class="flex min-w-0 flex-col gap-0.5">
+                        <span class="truncate text-sm">{{ primaryContact(row)?.name }}</span>
+                        <a
+                            v-if="primaryContact(row)?.email"
+                            :href="`mailto:${primaryContact(row)?.email}`"
+                            class="flex min-w-0 items-center gap-1.5 text-xs break-all text-muted-foreground hover:text-foreground hover:underline"
+                        >
+                            <Mail class="size-3 shrink-0" aria-hidden="true" />
+                            {{ primaryContact(row)?.email }}
+                        </a>
+                    </div>
+                    <span v-else class="text-xs text-muted-foreground">No contact</span>
+                </template>
+
+                <template #cell-last_activity="{ row }">
+                    <div class="flex flex-col gap-0.5">
+                        <span class="text-sm tabular-nums">{{ activityDate(row.last_activity_at) }}</span>
+                        <span class="text-xs text-muted-foreground">{{ activityAgo(row.last_activity_at) }}</span>
+                    </div>
                 </template>
 
                 <template #cell-status="{ row }">

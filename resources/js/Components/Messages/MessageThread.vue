@@ -12,6 +12,8 @@ import {
     Send,
     X,
 } from '@lucide/vue';
+import FormatToolbar, { type FormatKind } from '@/Components/Messages/FormatToolbar.vue';
+import { toggleLinePrefix, toggleWrap, wrapCodeBlock } from '@/Components/Messages/markdown';
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, useId, watch } from 'vue';
 import { CHAT_GALLERY } from '@/Components/Messages/gallery';
 import { DRAWER_FOOTER_INSET } from '@/Components/drawerFooter';
@@ -398,6 +400,92 @@ function field(): HTMLTextAreaElement | undefined {
     return bodyEl.value?.$el as HTMLTextAreaElement | undefined;
 }
 
+/* ------------------------------------------------------------------ formatting (polish 047) */
+
+/** Text is selected in the composer: the formatting toolbar shows above it. */
+const hasSelection = ref(false);
+
+function trackSelection(): void {
+    const el = field();
+
+    hasSelection.value = Boolean(el && document.activeElement === el && el.selectionEnd > el.selectionStart);
+}
+
+function onComposerBlur(): void {
+    hasSelection.value = false;
+}
+
+/**
+ * Apply one formatting mark to the selection (markdown.ts). Only the part of the text that
+ * changed is replaced, through `insertAtCaret`, so Ctrl+Z undoes it like typing would; then the
+ * same words are selected again so a second mark can follow.
+ */
+function applyFormat(kind: FormatKind): void {
+    const el = field();
+
+    if (!el) {
+        return;
+    }
+
+    const { value, selectionStart: from, selectionEnd: to } = el;
+    const edit =
+        kind === 'quote'
+            ? toggleLinePrefix(value, from, to, '> ')
+            : kind === 'codeblock'
+              ? wrapCodeBlock(value, from, to)
+              : toggleWrap(value, from, to, FORMAT_MARK[kind]);
+
+    let head = 0;
+
+    while (head < value.length && head < edit.value.length && value[head] === edit.value[head]) {
+        head++;
+    }
+
+    let tail = 0;
+
+    while (
+        tail < value.length - head &&
+        tail < edit.value.length - head &&
+        value[value.length - 1 - tail] === edit.value[edit.value.length - 1 - tail]
+    ) {
+        tail++;
+    }
+
+    insertAtCaret(el, edit.value.slice(head, edit.value.length - tail), head, value.length - tail);
+    el.setSelectionRange(edit.from, edit.to);
+    trackSelection();
+}
+
+const FORMAT_MARK: Record<Exclude<FormatKind, 'quote' | 'codeblock'>, string> = {
+    bold: '**',
+    italic: '*',
+    underline: '__',
+    strike: '~~',
+    code: '`',
+    spoiler: '||',
+};
+
+/** Ctrl/⌘ + B, I, U, E and Shift+X — the shortcuts Discord and most editors use. */
+function onFormatKey(event: KeyboardEvent): void {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+        return;
+    }
+
+    const key = event.key.toLowerCase();
+    const kind: FormatKind | null = event.shiftKey
+        ? key === 'x'
+            ? 'strike'
+            : null
+        : ({ b: 'bold', i: 'italic', u: 'underline', e: 'code' } as Record<string, FormatKind>)[key] ?? null;
+
+    if (kind === null) {
+        return;
+    }
+
+    event.preventDefault();
+    applyFormat(kind);
+}
+
 /* ------------------------------------------------------------------ type anywhere (polish 022) */
 
 /**
@@ -433,6 +521,10 @@ const TYPING_ELSEWHERE =
     'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
 
 function onTypeAnywhere(event: KeyboardEvent): void {
+    if (sendOnStrayEnter(event)) {
+        return;
+    }
+
     if (!props.scroll || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
         return;
     }
@@ -459,6 +551,77 @@ function onTypeAnywhere(event: KeyboardEvent): void {
     }
 
     focusComposer();
+}
+
+/* ------------------------------------------------- Enter sends a file or a voice clip (polish 048) */
+
+/** A file waiting in the composer, or a recorded voice clip ready to go. */
+const hasPendingSend = computed(() => attachments.value.length > 0 || (voiceClip.value !== null && !stillRecording.value));
+
+/**
+ * Where Enter should land once something that is not text is waiting: the field while it is
+ * shown, else (a voice clip in preview hides it) the Send button. A file dropped on or picked for
+ * this thread (`force`) always brings focus here — the person just pointed at it. Otherwise focus
+ * moves only from the page itself, the composer, or a panel around it.
+ */
+function focusForSend(force = false): void {
+    void nextTick(() => {
+        const active = document.activeElement;
+        const form = composerEl.value;
+
+        // The page, the composer itself, or a panel around it (a task drawer) — not elsewhere.
+        if (!form) {
+            return;
+        }
+
+        if (!force && active && active !== document.body && !form.contains(active) && !active.contains(form)) {
+            return;
+        }
+
+        const text = field();
+
+        if (text && !voiceActive.value && text.offsetParent !== null) {
+            text.focus();
+
+            return;
+        }
+
+        form.querySelector<HTMLButtonElement>('button[type="submit"]')?.focus();
+    });
+}
+
+/**
+ * Enter pressed with nothing focused (after a drop the page itself has focus), while a file or
+ * a clip is waiting: send it, the way Enter in the field would. Enter on a real control —
+ * a button, a link, another field — is still that control's own key.
+ */
+function sendOnStrayEnter(event: KeyboardEvent): boolean {
+    if (
+        event.key !== 'Enter' ||
+        event.shiftKey ||
+        event.altKey ||
+        event.isComposing ||
+        event.defaultPrevented ||
+        !hasPendingSend.value ||
+        !thread.value.can_post
+    ) {
+        return false;
+    }
+
+    const target = event.target instanceof HTMLElement ? event.target : null;
+
+    if (target && target !== document.body && target.closest('button, a, input, textarea, select, [role], [contenteditable="true"]')) {
+        return false;
+    }
+
+    if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) {
+        return false;
+    }
+
+    event.preventDefault();
+    post();
+
+    return true;
 }
 
 function focusComposerOnOpen(): void {
@@ -626,6 +789,9 @@ function choose(event: Event): void {
 
     // So the same file can be chosen again after it is removed.
     input.value = '';
+
+    // Polish 048: so Enter sends what was just picked.
+    focusForSend(true);
 }
 
 /**
@@ -887,7 +1053,21 @@ function onDrop(event: DragEvent): void {
     for (const file of Array.from(event.dataTransfer?.files ?? [])) {
         adoptFile(file);
     }
+
+    // Polish 048: so Enter sends what was just dropped.
+    focusForSend(true);
 }
+
+// Polish 048: a recording just stopped — the mic button that had focus now reads "Record
+// again", so Enter would have re-recorded. Focus goes to Send instead.
+watch(
+    () => voiceClip.value !== null && !stillRecording.value,
+    (ready) => {
+        if (ready) {
+            focusForSend();
+        }
+    },
+);
 
 // A clip discarded or re-recorded is not the one that failed.
 watch(voiceClip, () => {
@@ -2710,6 +2890,9 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                     @cancel="cancelReply"
                 />
 
+                <!-- Polish 047: Discord-style formatting for the selected words. -->
+                <FormatToolbar v-if="hasSelection && !voiceActive" @format="applyFormat" />
+
                 <div
                     v-if="composerPinned"
                     data-testid="composer-pill"
@@ -2755,9 +2938,14 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                         :aria-invalid="fieldError ? true : undefined"
                         rows="1"
                         class="max-h-29 min-h-8 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-1.5 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
-                        @input="onComposerInput"
+                        @input="onComposerInput(); trackSelection()"
                         @keydown.enter="onEnter"
                         @keydown.esc="onComposerEscape"
+                        @keydown="onFormatKey"
+                        @select="trackSelection"
+                        @keyup="trackSelection"
+                        @mouseup="trackSelection"
+                        @blur="onComposerBlur"
                     />
 
                     <EmojiPicker :disabled="posting" @pick="insertEmoji" />
@@ -2849,9 +3037,14 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                             rows="1"
                             :placeholder="(placeholder ?? (isAnnouncements ? 'Tell everybody.' : 'Say something.')) || undefined"
                             class="max-h-40 min-h-9 min-w-0 flex-1 basis-24 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1.5 py-2 focus-visible:ring-0 aria-invalid:ring-0 dark:bg-transparent"
-                            @input="onComposerInput"
+                            @input="onComposerInput(); trackSelection()"
                             @keydown.enter="onEnter"
                             @keydown.esc="onComposerEscape"
+                            @keydown="onFormatKey"
+                            @select="trackSelection"
+                            @keyup="trackSelection"
+                            @mouseup="trackSelection"
+                            @blur="onComposerBlur"
                         />
 
                         <!--

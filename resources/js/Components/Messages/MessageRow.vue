@@ -7,6 +7,7 @@ import AttachmentCard from '@/Components/Messages/AttachmentCard.vue';
 import { rememberEmoji } from '@/Components/Messages/emoji';
 import MessageActions from '@/Components/Messages/MessageActions.vue';
 import MessageBody from '@/Components/Messages/MessageBody.vue';
+import { hasBlocks } from '@/Components/Messages/markdown';
 import ReactionBar from '@/Components/Messages/ReactionBar.vue';
 import ReplyQuote from '@/Components/Messages/ReplyQuote.vue';
 import type { ThreadLayout, ThreadMessage } from '@/Components/Messages/messages';
@@ -159,7 +160,10 @@ const clock = computed(() => formatClockTime(props.message.created_at));
  * of that room at the bottom-right corner, so the two never overlap. A message with media keeps
  * the clock under the media.
  */
-const inlineStamp = computed(() => Boolean(props.message.body) && props.message.attachments.length === 0);
+// Polish 047: a heading, quote or code block is a block of its own, so the time goes under it.
+const inlineStamp = computed(
+    () => Boolean(props.message.body) && props.message.attachments.length === 0 && !hasBlocks(props.message.body ?? ''),
+);
 
 /**
  * A photo and nothing else, in a chat (2026-10-04, the client: "a padding like blue color border

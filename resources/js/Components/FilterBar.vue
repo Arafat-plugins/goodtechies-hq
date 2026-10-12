@@ -103,6 +103,8 @@ const props = withDefaults(
         layout?: 'stacked' | 'toolbar';
         /** Polish 007: this bar's row also carries the page's `#actions` (see PageActionsHost). */
         pageActions?: boolean;
+        /** Polish 055: the search box's width from `sm` up (default `sm:w-64`). */
+        searchWidth?: string;
         /**
          * Chip mode: the value the SERVER applied for a filter key, read instead of the URL for
          * that key (`null` = not applied, no chip). For a filter the server may override, so a
@@ -354,7 +356,7 @@ function isChosen(def: FilterDef, value: string): boolean {
 <template>
     <div class="flex min-w-0 flex-col gap-3">
         <DefineSearch>
-            <div class="relative w-full sm:w-64">
+            <div :class="['relative w-full', searchWidth ?? 'sm:w-64']">
                 <Search
                     class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                     aria-hidden="true"

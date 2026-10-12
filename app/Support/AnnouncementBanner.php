@@ -41,7 +41,7 @@ final class AnnouncementBanner
         return [
             'conversation_id' => (int) $channel->getKey(),
             'message_id' => (int) $pinned->getKey(),
-            'body' => (string) $pinned->body,
+            'body' => MessageText::plain((string) $pinned->body),
             'author' => $pinned->author?->name,
             'created_at' => $pinned->created_at?->toIso8601String(),
             // Whether this reader has unread announcements — the banner's border.

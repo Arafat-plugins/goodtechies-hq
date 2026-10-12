@@ -84,6 +84,13 @@ class DatabaseSeeder extends Seeder
             // than to discover on the morning somebody wires the two together.
             WorkSeeder::class,
         ]);
+
+        // Polish 054: more clients with several websites each, for judging the Clients list
+        // and a client's page on a local machine. Never under the test suite, so no count a
+        // test asserts changes.
+        if (! app()->runningUnitTests()) {
+            $this->call(ShowcaseSeeder::class);
+        }
     }
 
     /**

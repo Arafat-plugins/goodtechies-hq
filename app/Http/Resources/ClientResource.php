@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 
@@ -36,6 +37,10 @@ class ClientResource extends JsonResource
             'projects_count' => $this->whenCounted('projects'),
             'projects' => ProjectResource::collection($this->whenLoaded('projects')),
             'permissions' => $this->permissions($user),
+            // Polish 049: set by the Clients list only.
+            'task_counts' => $this->whenHas('task_counts'),
+            'project_chips' => $this->whenHas('project_chips'),
+            'last_activity_at' => $this->whenHas('last_activity_at', fn ($at) => $at === null ? null : Carbon::parse($at)->toIso8601String()),
         ];
 
         if ($user !== null && Gate::forUser($user)->allows('view', $this->resource)) {

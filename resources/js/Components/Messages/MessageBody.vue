@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { MessagePerson } from '@/Components/Messages/messages';
+import MessageInline, { type RenderNode } from '@/Components/Messages/MessageInline.vue';
+import { type Block, type InlineNode, parseMessage } from '@/Components/Messages/markdown';
 import { cn } from '@/lib/utils';
 
 /**
@@ -86,7 +88,8 @@ type Segment =
 
 const LINK = /https?:\/\/[^\s<]+/giu;
 
-const segments = computed<Segment[]>(() => {
+/** The mention pattern for this message's recorded mentions, or null. */
+const mention = computed<RegExp | null>(() => {
     const names = props.mentions
         .map((person) => (person.name ?? '').trim())
         .filter((name) => name !== '')
@@ -96,23 +99,78 @@ const segments = computed<Segment[]>(() => {
         .filter((name, index, all) => name !== '' && all.indexOf(name) === index);
 
     const escaped = names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    const mention = escaped.length === 0 ? null : new RegExp(`@(?:${escaped.join('|')})`, 'giu');
 
+    return escaped.length === 0 ? null : new RegExp(`@(?:${escaped.join('|')})`, 'giu');
+});
+
+/** Plain words → text, links and mentions. Links first: a URL can contain an `@`. */
+function leaves(value: string): Segment[] {
     const out: Segment[] = [];
 
-    // Links first: a URL can contain an `@`, and a mention can never contain a `://`.
-    for (const piece of split(props.body, LINK, 'link')) {
-        if (piece.kind !== 'text' || mention === null) {
+    for (const piece of split(value, LINK, 'link')) {
+        if (piece.kind !== 'text' || mention.value === null) {
             out.push(piece);
 
             continue;
         }
 
-        out.push(...split(piece.value, mention, 'mention'));
+        out.push(...split(piece.value, mention.value, 'mention'));
     }
 
     return out;
-});
+}
+
+/**
+ * Polish 047: Discord-style formatting (markdown.ts). Formatting marks become elements; the
+ * words inside them still get their links and mentions. Code is drawn exactly as typed.
+ */
+function render(nodes: InlineNode[]): RenderNode[] {
+    return nodes.flatMap<RenderNode>((node) => {
+        if (node.kind === 'text') {
+            return leaves(node.value);
+        }
+
+        if (node.kind === 'code') {
+            return [{ kind: 'code', value: node.value }];
+        }
+
+        return [{ kind: node.kind, children: render(node.children) }];
+    });
+}
+
+interface RenderBlock {
+    kind: 'paragraph' | 'heading' | 'quote' | 'code';
+    level?: 1 | 2 | 3;
+    nodes?: RenderNode[];
+    blocks?: RenderBlock[];
+    value?: string;
+}
+
+function renderBlocks(blocks: Block[]): RenderBlock[] {
+    return blocks.map((block) => {
+        switch (block.kind) {
+            case 'code':
+                return { kind: 'code', value: block.value };
+            case 'quote':
+                return { kind: 'quote', blocks: renderBlocks(block.blocks) };
+            case 'heading':
+                return { kind: 'heading', level: block.level, nodes: render(block.inline) };
+            default:
+                return { kind: 'paragraph', nodes: render(block.inline) };
+        }
+    });
+}
+
+const blocks = computed(() => renderBlocks(parseMessage(props.body)));
+
+/** One paragraph and nothing else draws as before — one `<p>` that can sit inline with the time. */
+const single = computed(() => (blocks.value.length === 1 && blocks.value[0].kind === 'paragraph' ? blocks.value[0] : null));
+
+const HEADING_CLASS: Record<1 | 2 | 3, string> = {
+    1: 'text-xl font-bold',
+    2: 'text-lg font-bold',
+    3: 'text-base font-semibold',
+};
 
 function split(value: string, pattern: RegExp, kind: 'link' | 'mention'): Segment[] {
     const out: Segment[] = [];
@@ -150,22 +208,50 @@ function split(value: string, pattern: RegExp, kind: 'link' | 'mention'): Segmen
         word; `min-w-0` is what stops the whole thread growing a horizontal scrollbar when one
         of them is 300 characters of URL.
     -->
-    <p class="min-w-0 text-sm break-words whitespace-pre-line">
-        <template v-for="(segment, index) in segments" :key="index">
-            <a
-                v-if="segment.kind === 'link'"
-                :href="segment.value"
-                target="_blank"
-                rel="noopener noreferrer"
-                :class="linkClass"
-            >{{ segment.value }}<span class="sr-only"> (opens in a new tab)</span></a>
-
-            <strong
-                v-else-if="segment.kind === 'mention'"
-                :class="mentionClass"
-            >{{ segment.value }}<span class="sr-only"> (mentioned)</span></strong>
-
-            <template v-else>{{ segment.value }}</template>
-        </template>
+    <p v-if="single" class="min-w-0 text-sm break-words whitespace-pre-line">
+        <MessageInline :nodes="single.nodes ?? []" :link-class="linkClass" :mention-class="mentionClass" />
     </p>
+
+    <!-- Polish 047: headings, quotes and code blocks, one element each. -->
+    <div v-else class="flex min-w-0 flex-col gap-1 text-sm break-words">
+        <template v-for="(block, index) in blocks" :key="index">
+            <pre
+                v-if="block.kind === 'code'"
+                class="max-w-full overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-xs whitespace-pre text-foreground"
+            ><code>{{ block.value }}</code></pre>
+
+            <p
+                v-else-if="block.kind === 'heading'"
+                role="heading"
+                :aria-level="(block.level ?? 3) + 2"
+                :class="cn('whitespace-pre-line', HEADING_CLASS[block.level ?? 3])"
+            >
+                <MessageInline :nodes="block.nodes ?? []" :link-class="linkClass" :mention-class="mentionClass" />
+            </p>
+
+            <blockquote
+                v-else-if="block.kind === 'quote'"
+                class="flex min-w-0 flex-col gap-1 border-l-4 border-muted-foreground/40 pl-3"
+            >
+                <template v-for="(inner, innerIndex) in block.blocks" :key="innerIndex">
+                    <pre
+                        v-if="inner.kind === 'code'"
+                        class="max-w-full overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-xs whitespace-pre text-foreground"
+                    ><code>{{ inner.value }}</code></pre>
+                    <p
+                        v-else
+                        :role="inner.kind === 'heading' ? 'heading' : undefined"
+                        :aria-level="inner.kind === 'heading' ? (inner.level ?? 3) + 2 : undefined"
+                        :class="cn('whitespace-pre-line', inner.kind === 'heading' && HEADING_CLASS[inner.level ?? 3])"
+                    >
+                        <MessageInline :nodes="inner.nodes ?? []" :link-class="linkClass" :mention-class="mentionClass" />
+                    </p>
+                </template>
+            </blockquote>
+
+            <p v-else class="whitespace-pre-line">
+                <MessageInline :nodes="block.nodes ?? []" :link-class="linkClass" :mention-class="mentionClass" />
+            </p>
+        </template>
+    </div>
 </template>

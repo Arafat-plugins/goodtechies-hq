@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { TaskCounts } from '@/Components/Clients/clientTasks';
 import type { ClientContact } from '@/Components/Clients/ContactsEditor.vue';
 
 export type { ClientContact };
@@ -27,6 +28,10 @@ export interface Client {
         can_update: boolean;
         can_delete: boolean;
     };
+    /** Polish 049: sent by the Clients list only. */
+    task_counts?: TaskCounts;
+    project_chips?: { id: number; name: string; domain: string | null; type: string | null; type_label: string | null }[];
+    last_activity_at?: string | null;
 }
 </script>
 

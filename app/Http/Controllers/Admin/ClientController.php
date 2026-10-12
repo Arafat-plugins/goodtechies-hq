@@ -11,6 +11,7 @@ use App\Models\Client;
 use App\Services\ActivityLogger;
 use App\Services\ClientService;
 use App\Support\ClientStatus;
+use App\Support\ClientTaskCounts;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -46,11 +47,49 @@ class ClientController extends Controller
 
         $clients = Client::query()
             ->withCount('projects')
-            ->when($filters['search'], fn ($query, string $search) => $query->where('name', 'ilike', '%'.$search.'%'))
+            ->with(['projects' => fn ($query) => $query->select(['id', 'client_id', 'name', 'domain', 'project_type'])->orderBy('name')])
+            // Polish 055: name, company (nickname) or a contact's email. Contacts are encrypted,
+            // so their emails are matched here in PHP over the (small) client table.
+            ->when($filters['search'], fn ($query, string $search) => $query->where(
+                fn ($inner) => $inner->where('name', 'ilike', '%'.$search.'%')
+                    ->orWhere('nickname', 'ilike', '%'.$search.'%')
+                    ->orWhereIn('id', $this->idsByContactEmail($search))
+            ))
+            ->when($filters['projects'] === 'with', fn ($query) => $query->has('projects'))
+            ->when($filters['projects'] === 'without', fn ($query) => $query->doesntHave('projects'))
             ->when($filters['status'], fn ($query, string $status) => $query->where('status', $status))
+            // Polish 049: "Clients with open tasks" / "No open tasks".
+            ->when($filters['tasks'] !== null, function ($query) use ($filters) {
+                $open = fn ($sub) => $sub->selectRaw('1')
+                    ->from('tasks')
+                    ->join('projects', 'projects.id', '=', 'tasks.project_id')
+                    ->whereColumn('projects.client_id', 'clients.id')
+                    ->whereNull('tasks.deleted_at')
+                    ->whereIn('tasks.status', [...ClientTaskCounts::TODO, ...ClientTaskCounts::PROGRESS]);
+
+                $filters['tasks'] === 'open' ? $query->whereExists($open) : $query->whereNotExists($open);
+            })
             ->orderBy('name')
             ->paginate(self::PER_PAGE)
             ->withQueryString();
+
+        // Polish 049: the list's task counts, project chips and last activity — one query each.
+        $ids = $clients->getCollection()->modelKeys();
+        $counts = ClientTaskCounts::forClients($ids);
+        $touched = ClientTaskCounts::lastActivity($ids);
+
+        $clients->getCollection()->each(function (Client $client) use ($counts, $touched): void {
+            $client->setAttribute('task_counts', $counts[$client->id] ?? ClientTaskCounts::empty());
+            $client->setAttribute('last_activity_at', $touched[$client->id] ?? $client->updated_at?->toDateTimeString());
+            $client->setAttribute('project_chips', $client->projects->map(fn ($project): array => [
+                'id' => $project->id,
+                'name' => $project->name,
+                'domain' => $project->domain,
+                'type' => $project->project_type?->value,
+                'type_label' => $project->project_type?->label(),
+            ])->values()->all());
+            $client->unsetRelation('projects');
+        });
 
         return Inertia::render('Admin/Clients/Index', [
             'clients' => ClientResource::collection($clients),
@@ -89,9 +128,14 @@ class ClientController extends Controller
             'projects.finance',
         ]);
 
+        // Polish 049: each project's task counts, and the client's, for the cards and the overview.
+        $projectCounts = ClientTaskCounts::forProjects($client->projects->modelKeys());
+
         return Inertia::render('Admin/Clients/Show', [
             'client' => new ClientResource($client),
             'activity' => $this->activityFor($client),
+            'projectTasks' => (object) $projectCounts,
+            'taskCounts' => ClientTaskCounts::forClients([$client->id])[$client->id] ?? ClientTaskCounts::empty(),
         ]);
     }
 
@@ -126,7 +170,7 @@ class ClientController extends Controller
     /**
      * The list filters, echoed back so the page can show what it is filtered by.
      *
-     * @return array{search: string|null, status: string|null}
+     * @return array{search: string|null, status: string|null, tasks: string|null, projects: string|null}
      */
     private function filters(Request $request): array
     {
@@ -135,6 +179,8 @@ class ClientController extends Controller
         return [
             'search' => $search === '' ? null : $search,
             'status' => ClientStatus::tryFrom((string) $request->query('status', ''))?->value,
+            'tasks' => in_array($request->query('tasks'), ['open', 'none'], true) ? (string) $request->query('tasks') : null,
+            'projects' => in_array($request->query('projects'), ['with', 'without'], true) ? (string) $request->query('projects') : null,
         ];
     }
 
@@ -143,6 +189,21 @@ class ClientController extends Controller
      *
      * @return list<array{value: string, label: string}>
      */
+    /**
+     * Clients with a contact whose email contains the term (case-insensitive).
+     *
+     * @return list<int>
+     */
+    private function idsByContactEmail(string $search): array
+    {
+        $needle = mb_strtolower($search);
+
+        return Client::query()->get(['id', 'contact_info'])
+            ->filter(fn (Client $client): bool => collect($client->contact_info ?? [])
+                ->contains(fn ($contact): bool => is_array($contact) && str_contains(mb_strtolower((string) ($contact['email'] ?? '')), $needle)))
+            ->modelKeys();
+    }
+
     private function statuses(): array
     {
         return array_map(

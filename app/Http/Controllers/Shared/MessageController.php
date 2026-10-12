@@ -18,6 +18,7 @@ use App\Services\ConversationService;
 use App\Services\MessageService;
 use App\Support\AnnouncementBanner;
 use App\Support\ConversationType;
+use App\Support\MessageText;
 use App\Support\Permission;
 use App\Support\Surface;
 use App\Support\UserStatus;
@@ -491,7 +492,7 @@ class MessageController extends Controller
      */
     private static function excerpt(Message $message): string
     {
-        $body = trim((string) preg_replace('/\s+/u', ' ', (string) $message->body));
+        $body = trim((string) preg_replace('/\s+/u', ' ', MessageText::plain((string) $message->body)));
 
         if ($body === '') {
             return 'Sent an attachment';
@@ -514,7 +515,7 @@ class MessageController extends Controller
      */
     private static function matchExcerpt(string $body, string $term): string
     {
-        $text = trim((string) preg_replace('/\s+/u', ' ', $body));
+        $text = trim((string) preg_replace('/\s+/u', ' ', MessageText::plain($body)));
         $length = 160;
         $total = mb_strlen($text);
 
