@@ -29,7 +29,13 @@ const props = defineProps<{
     /** '' = all clients; else the tree row key (c<ID> or internal). */
     client: string;
     sort: ProjectSort;
+    /** Polish 078: where a project opens (the employee's own project page). */
+    base?: string;
+    /** Polish 078: false = the ⋯ menu offers Open only (employees). */
+    canManage?: boolean;
 }>();
+
+const openBase = computed(() => props.base ?? '/admin/projects');
 
 const emit = defineEmits<{
     archive: [project: { id: number; name: string; is_archived: boolean }];
@@ -96,7 +102,7 @@ function bare(domain: string): string {
                     </span>
                     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                         <Link
-                            :href="`/admin/projects/${project.id}`"
+                            :href="`${openBase}/${project.id}`"
                             class="truncate text-base font-semibold hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                             :title="project.name"
                         >
@@ -141,19 +147,19 @@ function bare(domain: string): string {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                             <DropdownMenuItem as-child>
-                                <Link :href="`/admin/projects/${project.id}`" class="w-full">
+                                <Link :href="`${openBase}/${project.id}`" class="w-full">
                                     <FolderKanban aria-hidden="true" />
                                     Open
                                 </Link>
                             </DropdownMenuItem>
-                            <DropdownMenuItem as-child>
+                            <DropdownMenuItem v-if="canManage !== false" as-child>
                                 <Link :href="`/admin/projects/${project.id}/edit`" class="w-full">
                                     <Pencil aria-hidden="true" />
                                     Edit
                                 </Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                                v-if="project.can_archive"
+                                v-if="canManage !== false && project.can_archive"
                                 variant="destructive"
                                 @select="emit('archive', { id: project.id, name: project.name, is_archived: false })"
                             >

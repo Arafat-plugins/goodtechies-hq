@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Employee;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ProjectResource;
 use App\Models\Project;
+use App\Support\ProjectClientBoard;
 use App\Support\ProjectStatus;
 use App\Support\ProjectTaskList;
+use App\Support\ProjectType;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -46,6 +48,12 @@ class ProjectController extends Controller
         return Inertia::render('Employee/Projects/Index', [
             'projects' => ProjectResource::collection($projects),
             'filters' => $filters,
+            // Polish 078: the page draws the Admin's project cards (polish 075) from these.
+            'clientTree' => ProjectClientBoard::tree($request->user()),
+            'projectTypes' => array_map(
+                fn (ProjectType $type): array => ['value' => $type->value, 'label' => $type->label()],
+                ProjectType::cases(),
+            ),
         ]);
     }
 

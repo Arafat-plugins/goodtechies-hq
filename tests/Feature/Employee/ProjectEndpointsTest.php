@@ -37,6 +37,14 @@ it('shows a remote employee exactly the projects he is on', function () {
         );
 })->group('phase1');
 
+it('sends the employee only his own projects as cards, with no archive right (polish 078)', function () {
+    $tree = $this->actingAs($this->tapu)->get(route('employee.projects.index'))->assertOk()->inertiaProps()['clientTree'];
+    $cards = collect($tree)->flatMap(fn (array $row): array => $row['projects']);
+
+    expect($cards->pluck('name')->sort()->values()->all())->toBe(['Buffalo Modular — SEO', 'Heat Gap — SEO Retainer'])
+        ->and($cards->pluck('can_archive')->unique()->all())->toBe([false]);
+})->group('phase1');
+
 it('filters the employee project list', function () {
     $rows = fn (User $user, array $query): array => $this->actingAs($user)
         ->get(route('employee.projects.index', $query))
