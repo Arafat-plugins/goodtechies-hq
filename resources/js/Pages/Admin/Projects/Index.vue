@@ -13,6 +13,7 @@ import DeleteProjectDialog, { canForceDelete } from '@/Components/Projects/Delet
 import { moneyLine } from '@/Components/Projects/FinanceCard.vue';
 import type { NamedRef, Option, Project } from '@/Components/Projects/ProjectForm.vue';
 import ClientProjectsView, { type ClientTreeRow, type ProjectBoard } from '@/Components/Projects/ClientProjectsView.vue';
+import ProjectCardsGrid, { type ProjectSort } from '@/Components/Projects/ProjectCardsGrid.vue';
 import type { ClientServiceBoardData } from '@/Components/Projects/ClientServiceBoard.vue';
 import type { ServiceBoxSettings } from '@/Components/Projects/ServiceBoxesDialog.vue';
 import ProjectWorkingNow from '@/Components/Projects/ProjectWorkingNow.vue';
@@ -29,6 +30,7 @@ import {
     DialogTitle,
 } from '@/Components/ui/dialog';
 import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
+import { NativeSelect } from '@/Components/ui/native-select';
 import { ToggleGroup, ToggleGroupItem } from '@/Components/ui/toggle-group';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useMenuDialog } from '@/lib/menuFocus';
@@ -94,6 +96,25 @@ function chooseLayout(value: unknown): void {
     }
 
     router.get('/admin/projects', value === 'list' ? { layout: 'list' } : {}, { preserveScroll: true });
+}
+
+/* ------------------------------------------------- project cards (075) */
+
+/** Nothing chosen in the sidebar: the project cards and their three pickers. */
+const showCards = computed(() => props.layout === 'clients' && !props.clientBoard && !props.projectBoard);
+const cardType = ref('');
+const cardClient = ref('');
+const cardSort = ref<ProjectSort>('newest');
+
+const cardClients = computed(() =>
+    [...props.clientTree]
+        .map((row) => ({ key: row.key, name: row.name ?? 'Internal' }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+);
+
+function clearCardFilters(): void {
+    cardType.value = '';
+    cardClient.value = '';
 }
 
 /* ----------------------------------------------------------------- filters */
@@ -205,7 +226,7 @@ const loading = useNavigationPending();
 
 /* ----------------------------------------------------------------- actions */
 
-const pendingProject = ref<Project | null>(null);
+const pendingProject = ref<Pick<Project, 'id' | 'name' | 'is_archived'> | null>(null);
 const archiving = ref(false);
 
 /**
@@ -219,7 +240,7 @@ const archiving = ref(false);
  */
 const menu = useMenuDialog();
 
-function askToToggleArchive(project: Project): void {
+function askToToggleArchive(project: Pick<Project, 'id' | 'name' | 'is_archived'>): void {
     menu.openFromMenu(() => {
         pendingProject.value = project;
     });
@@ -303,7 +324,26 @@ function closeDelete(): void {
                         List
                     </ToggleGroupItem>
                 </ToggleGroup>
-                <PageActionsHost v-if="layout === 'clients'" />
+                <div v-if="showCards" class="ml-auto flex min-w-0 flex-wrap items-center gap-2">
+                    <NativeSelect v-model="cardType" aria-label="Filter projects by type" class="h-9">
+                        <option value="">All projects</option>
+                        <option v-for="option in projectTypes" :key="option.value" :value="option.value">
+                            {{ option.label }}
+                        </option>
+                    </NativeSelect>
+                    <NativeSelect v-model="cardClient" aria-label="Filter projects by client" class="h-9 max-w-60">
+                        <option value="">All clients</option>
+                        <option v-for="option in cardClients" :key="option.key" :value="option.key">
+                            {{ option.name }}
+                        </option>
+                    </NativeSelect>
+                    <NativeSelect v-model="cardSort" aria-label="Order projects" class="h-9">
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="name">Name A–Z</option>
+                    </NativeSelect>
+                </div>
+                <PageActionsHost v-if="layout === 'clients'" :inline="showCards" />
             </div>
 
             <ClientProjectsView
@@ -313,7 +353,16 @@ function closeDelete(): void {
                 :selected-id="selectedProjectId"
                 :client-board="clientBoard"
                 :service-boxes="serviceBoxes"
-            />
+            >
+                <ProjectCardsGrid
+                    :tree="clientTree"
+                    :type="cardType"
+                    :client="cardClient"
+                    :sort="cardSort"
+                    @archive="askToToggleArchive"
+                    @clear="clearCardFilters"
+                />
+            </ClientProjectsView>
 
             <div v-if="layout === 'list'" class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
                 <ToggleGroup

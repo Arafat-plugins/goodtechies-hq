@@ -10,6 +10,8 @@ export interface NavItem {
     label: string;
     href?: string;
     icon: Component;
+    /** Polish 077: a colour for this row's icon only (Messages wears the brand colour). */
+    iconClass?: string;
     phase?: number;
     /**
      * What this row counts as "here", when that is wider than where it points.

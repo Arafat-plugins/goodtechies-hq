@@ -10,6 +10,7 @@ use App\Models\TimeEntry;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Polish 030: the Admin Projects page by client (ClickUp-style, the client's own picture).
@@ -63,7 +64,9 @@ final class ProjectClientBoard
         /** @var Collection<string, Collection<int, Project>> $groups */
         $groups = $projects->groupBy(fn (Project $project): string => $project->client_id === null ? 'internal' : 'c'.$project->client_id);
 
-        $rows = $groups->map(function (Collection $items, string $key): array {
+        $gate = Gate::forUser($viewer);
+
+        $rows = $groups->map(function (Collection $items, string $key) use ($gate): array {
             /** @var Client|null $client */
             $client = $items->first()?->client;
             $nickname = trim((string) ($client?->nickname ?? ''));
@@ -86,6 +89,10 @@ final class ProjectClientBoard
                     'tone' => $project->status?->tone(),
                     'open' => (int) $project->open_tasks_count,
                     'total' => (int) $project->tasks_count,
+                    // Polish 075: the project cards (type filter, Newest first, ⋯ Archive).
+                    'type' => $project->project_type?->value,
+                    'created_at' => $project->created_at?->toIso8601String(),
+                    'can_archive' => $gate->allows('archive', $project),
                 ])->values()->all(),
             ];
         });

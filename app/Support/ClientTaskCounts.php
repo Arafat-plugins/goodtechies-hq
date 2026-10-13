@@ -47,6 +47,46 @@ final class ClientTaskCounts
     }
 
     /**
+     * Polish 066: per project, the approved time logged on it and the estimate set on its tasks
+     * (not cancelled, not deleted), in seconds — the "spent / estimated" on a client's page.
+     *
+     * @param  list<int>  $projectIds
+     * @return array<int, array{spent: int, estimate: int}>
+     */
+    public static function timeForProjects(array $projectIds): array
+    {
+        if ($projectIds === []) {
+            return [];
+        }
+
+        $spent = DB::table('time_entries')
+            ->whereIn('project_id', $projectIds)
+            ->whereNotNull('approved_at')
+            ->groupBy('project_id')
+            ->selectRaw('project_id, sum(duration_seconds) as seconds')
+            ->pluck('seconds', 'project_id');
+
+        $estimate = DB::table('tasks')
+            ->whereIn('project_id', $projectIds)
+            ->whereNull('deleted_at')
+            ->where('status', '!=', 'cancelled')
+            ->groupBy('project_id')
+            ->selectRaw('project_id, sum(estimated_minutes) as minutes')
+            ->pluck('minutes', 'project_id');
+
+        $out = [];
+
+        foreach ($projectIds as $id) {
+            $out[$id] = [
+                'spent' => (int) ($spent[$id] ?? 0),
+                'estimate' => (int) ($estimate[$id] ?? 0) * 60,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * Where a client's tasks were last touched, per client — the list's "Last activity".
      *
      * @param  list<int>  $clientIds

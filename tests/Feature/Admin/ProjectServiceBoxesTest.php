@@ -31,6 +31,16 @@ it('counts every client\'s projects in the sidebar tree', function () {
     expect($row['project_count'])->toBe(Project::query()->where('client_id', $this->project->client_id)->whereNull('archived_at')->count());
 });
 
+it('gives each project card its type, created date, all-task count and archive right (polish 075)', function () {
+    $tree = $this->actingAs($this->admin)->get('/admin/projects')->assertOk()->inertiaProps()['clientTree'];
+    $card = collect($tree)->flatMap(fn (array $row): array => $row['projects'])->firstWhere('id', $this->project->id);
+
+    expect($card['type'])->toBe($this->project->project_type->value)
+        ->and($card['created_at'])->toBe($this->project->created_at->toIso8601String())
+        ->and($card['total'])->toBe(Task::query()->where('project_id', $this->project->id)->whereNull('parent_id')->whereNull('archived_at')->count())
+        ->and($card['can_archive'])->toBeTrue();
+});
+
 it('sorts a client\'s projects into the default boxes with their open tasks only', function () {
     $this->project->update(['project_type' => ProjectType::WooCommerce]);
 

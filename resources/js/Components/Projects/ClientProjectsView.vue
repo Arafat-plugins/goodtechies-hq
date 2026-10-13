@@ -8,6 +8,10 @@ export interface ClientTreeProject {
     tone: string | null;
     open: number;
     total: number;
+    /** Polish 075: for the project cards. */
+    type?: string | null;
+    created_at?: string | null;
+    can_archive?: boolean;
 }
 
 export interface ClientTreeRow {
@@ -51,12 +55,11 @@ export interface ProjectBoard {
 
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { ArrowRight, CalendarDays, Clock, FolderKanban, KanbanSquare } from '@lucide/vue';
+import { ArrowRight, CalendarDays, Clock, KanbanSquare } from '@lucide/vue';
 import { ref } from 'vue';
 import type { ClientServiceBoardData } from '@/Components/Projects/ClientServiceBoard.vue';
 import ClientServiceBoard from '@/Components/Projects/ClientServiceBoard.vue';
 import type { ServiceBoxSettings } from '@/Components/Projects/ServiceBoxesDialog.vue';
-import EmptyState from '@/Components/EmptyState.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { formatDate } from '@/Components/Tasks/taskDetail';
@@ -211,39 +214,9 @@ const PRIORITY_CLASS: Record<string, string> = {
                 </div>
             </template>
 
-            <!-- No project chosen: every client and its projects, with task counts. -->
+            <!-- No project chosen: polish 075 — the page's project cards. -->
             <template v-else>
-                <Card v-if="!tree.length" class="p-6">
-                    <EmptyState :icon="FolderKanban" title="No projects yet" />
-                </Card>
-                <div v-else class="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    <Card v-for="row in tree" :key="row.key" class="flex min-w-0 flex-col gap-2 p-4">
-                        <Link
-                            :href="`/admin/projects?client=${row.id ?? 'internal'}`"
-                            class="-m-1 flex min-w-0 items-center gap-2 rounded-md p-1 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
-                        >
-                            <h2 class="min-w-0 flex-1 truncate text-sm font-semibold" :title="row.name ?? undefined">{{ row.label }}</h2>
-                            <span class="shrink-0 text-xs text-muted-foreground tabular-nums">
-                                {{ row.projects.length }} {{ row.projects.length === 1 ? 'project' : 'projects' }}
-                            </span>
-                            <ArrowRight class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                        </Link>
-                        <ul class="flex min-w-0 flex-col">
-                            <li v-for="project in row.projects" :key="project.id">
-                                <Link
-                                    :href="`/admin/projects/${project.id}`"
-                                    class="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
-                                >
-                                    <FolderKanban class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                                    <span class="min-w-0 flex-1 truncate">{{ project.name }}</span>
-                                    <span class="shrink-0 text-xs text-muted-foreground tabular-nums" :title="`${project.total} tasks, ${project.open} open`">
-                                        {{ project.total }}
-                                    </span>
-                                </Link>
-                            </li>
-                        </ul>
-                    </Card>
-                </div>
+                <slot />
             </template>
         </div>
     </div>

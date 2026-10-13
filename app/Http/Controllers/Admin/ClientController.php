@@ -54,6 +54,12 @@ class ClientController extends Controller
                 fn ($inner) => $inner->where('name', 'ilike', '%'.$search.'%')
                     ->orWhere('nickname', 'ilike', '%'.$search.'%')
                     ->orWhereIn('id', $this->idsByContactEmail($search))
+                    // Polish 069: a client is also found by one of its websites — a project's
+                    // name or domain ("ibctanks" finds the client that owns ibctanks.ca).
+                    ->orWhereHas('projects', fn ($projects) => $projects->where(
+                        fn ($match) => $match->where('name', 'ilike', '%'.$search.'%')
+                            ->orWhere('domain', 'ilike', '%'.$search.'%')
+                    ))
             ))
             ->when($filters['projects'] === 'with', fn ($query) => $query->has('projects'))
             ->when($filters['projects'] === 'without', fn ($query) => $query->doesntHave('projects'))
@@ -135,6 +141,8 @@ class ClientController extends Controller
             'client' => new ClientResource($client),
             'activity' => $this->activityFor($client),
             'projectTasks' => (object) $projectCounts,
+            // Polish 066: time spent / estimated per project, for the project rows.
+            'projectTime' => (object) ClientTaskCounts::timeForProjects($client->projects->modelKeys()),
             'taskCounts' => ClientTaskCounts::forClients([$client->id])[$client->id] ?? ClientTaskCounts::empty(),
         ]);
     }

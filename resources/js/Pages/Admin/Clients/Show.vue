@@ -4,6 +4,7 @@ import {
     Box,
     CalendarCheck,
     CalendarDays,
+    Clock,
     Code,
     ExternalLink,
     FolderKanban,
@@ -17,16 +18,18 @@ import {
     Pencil,
     Phone,
     Plus,
-    Search,
     Settings,
     ShoppingCart,
     Signal,
     UserX,
-    Users,
 } from '@lucide/vue';
 import type { Component } from 'vue';
 import { computed, ref } from 'vue';
 import ClientAvatar from '@/Components/Clients/ClientAvatar.vue';
+import { personTone } from '@/Components/Messages/people';
+import { formatDuration } from '@/Components/Timer/timer';
+import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import { formatDate } from '@/Components/Tasks/taskDetail';
 import type { Client } from '@/Components/Clients/ClientForm.vue';
 import { NO_TASKS, type TaskCounts } from '@/Components/Clients/clientTasks';
@@ -44,7 +47,6 @@ import FilePanel from '@/Components/Files/FilePanel.vue';
 import { fileRoutes } from '@/Components/Files/files';
 import PageShell from '@/Components/PageShell.vue';
 import type { ProjectFinance } from '@/Components/Projects/ProjectForm.vue';
-import { Input } from '@/Components/ui/input';
 import { NativeSelect } from '@/Components/ui/native-select';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
 import { Button } from '@/Components/ui/button';
@@ -91,6 +93,8 @@ const props = defineProps<{
     /** Polish 049: task counts per project id, and for the whole client. */
     projectTasks?: Record<string, TaskCounts>;
     taskCounts?: TaskCounts;
+    /** Polish 066: per project id, seconds spent (approved time) and estimated on its tasks. */
+    projectTime?: Record<string, { spent: number; estimate: number }>;
 }>();
 
 const client = computed(() => props.client.data);
@@ -286,8 +290,10 @@ function serviceOf(project: ClientProject): { icon: Component; tone: Tone } {
     return SERVICE[project.project_type ?? ''] ?? { icon: Box, tone: 'backlog' };
 }
 
-const projectSearch = ref('');
 const projectStatus = ref('');
+
+/** Polish 069: one website, picked from this client's websites ('' = all of them). */
+const projectWebsite = ref('');
 
 const statusOptions = computed(() => {
     const seen = new Map<string, string>();
@@ -299,25 +305,47 @@ const statusOptions = computed(() => {
     return [...seen.entries()].map(([value, label]) => ({ value, label }));
 });
 
-const shownWebsites = computed(() => {
-    const term = projectSearch.value.trim().toLowerCase();
-
-    return websites.value.filter(
+const shownWebsites = computed(() =>
+    websites.value.filter(
         (site) =>
             (projectStatus.value === '' || site.status === projectStatus.value) &&
-            (term === '' ||
-                site.name.toLowerCase().includes(term) ||
-                (site.domain ?? '').includes(term) ||
-                site.projects.some(
-                    (project) =>
-                        project.name.toLowerCase().includes(term) ||
-                        (project.project_type_label ?? '').toLowerCase().includes(term),
-                )),
-    );
-});
+            (projectWebsite.value === '' || site.key === projectWebsite.value),
+    ),
+);
 
 /* Polish 060/061: the details under each project row — start, deadline, assigned people. */
 const today = new Date().toISOString().slice(0, 10);
+
+function initials(name: string): string {
+    return name
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join('');
+}
+
+/** "26 Aug" for this year, "26 Aug 2027" otherwise — keeps a project's details on one line. */
+const THIS_YEAR = new Date().getFullYear();
+const SHORT_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+
+function shortDate(value: string | null | undefined): string {
+    if (!value) {
+        return '';
+    }
+
+    const date = new Date(`${value.slice(0, 10)}T00:00:00`);
+
+    return Number.isNaN(date.getTime()) || date.getFullYear() !== THIS_YEAR ? formatDate(value) : SHORT_DATE.format(date);
+}
+
+function timeOf(project: ClientProject): { spent: number; estimate: number } {
+    return props.projectTime?.[String(project.id)] ?? { spent: 0, estimate: 0 };
+}
+
+function duration(seconds: number): string {
+    return seconds > 0 ? formatDuration(seconds) : '0m';
+}
 
 function team(project: ClientProject): { id: number; name: string }[] {
     return (project.members ?? []).filter((member): member is { id: number; name: string } => Boolean(member.name));
@@ -395,6 +423,23 @@ function confirmDeactivate(): void {
                         <span v-if="contacts.length > 1" class="text-xs">+{{ contacts.length - 1 }} more contacts</span>
                     </div>
                     <p v-else class="text-sm text-muted-foreground">No contact recorded</p>
+                    <!-- Polish 073: the overview numbers as one quiet line (the two big stat cards
+                         and the "Websites & Businesses" heading are gone). -->
+                    <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground" data-testid="client-summary">
+                        <span class="inline-flex items-center gap-1.5">
+                            <FolderKanban class="size-4 shrink-0" aria-hidden="true" />
+                            <span class="font-semibold text-foreground tabular-nums">{{ websites.length }}</span>
+                            {{ websites.length === 1 ? 'website' : 'websites' }}
+                        </span>
+                        <span class="inline-flex min-w-0 flex-wrap items-center gap-2">
+                            <span class="inline-flex items-center gap-1.5">
+                                <ListTodo class="size-4 shrink-0" aria-hidden="true" />
+                                <span class="font-semibold text-foreground tabular-nums">{{ clientTasks.total }}</span>
+                                {{ clientTasks.total === 1 ? 'task' : 'tasks' }}
+                            </span>
+                            <TaskCountChips :counts="clientTasks" stacked />
+                        </span>
+                    </div>
                 </div>
             </div>
             <div class="flex flex-wrap items-center gap-2">
@@ -417,8 +462,11 @@ function confirmDeactivate(): void {
         </div>
 
         <Tabs v-model="tab" class="min-w-0 gap-4">
-            <!-- Image 4's underline tabs. The row scrolls on its own at 375. -->
-            <div class="min-w-0 max-w-full overflow-x-auto border-b">
+            <!-- Image 4's underline tabs. Polish 068: no scrollbar beside them (the tabs still
+                 scroll sideways at 375 without one); the Overview's status filter and Add Website
+                 sit at the end of this row. -->
+            <div class="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-2 border-b 2xl:flex-nowrap">
+                <div class="min-w-0 flex-1 basis-full overflow-x-auto overflow-y-hidden [scrollbar-width:none] 2xl:basis-auto [&::-webkit-scrollbar]:hidden">
                 <TabsList class="h-auto gap-2 rounded-none bg-transparent p-0">
                     <TabsTrigger
                         v-for="item in [
@@ -434,6 +482,34 @@ function confirmDeactivate(): void {
                         {{ item.label }}
                     </TabsTrigger>
                 </TabsList>
+                </div>
+                <div v-if="tab === 'overview'" class="flex max-w-full shrink-0 flex-wrap items-center gap-2 pb-2 2xl:pb-1">
+                    <NativeSelect
+                        v-if="websites.length > 1"
+                        v-model="projectWebsite"
+                        aria-label="Show one website"
+                        class="h-9 max-w-60"
+                    >
+                        <option value="">All websites</option>
+                        <option v-for="site in websites" :key="site.key" :value="site.key">
+                            {{ site.name }}
+                        </option>
+                    </NativeSelect>
+                    <NativeSelect v-model="projectStatus" aria-label="Filter websites by status" class="h-9">
+                        <option value="">All statuses</option>
+                        <option v-for="option in statusOptions" :key="option.value" :value="option.value">
+                            {{ option.label }}
+                        </option>
+                    </NativeSelect>
+                    <!-- Polish 070/071: black (the text colour; light in dark mode), not a second red
+                         button beside Deactivate. -->
+                    <Button as-child class="h-9 bg-foreground text-background hover:bg-foreground/85">
+                        <Link :href="`/admin/projects/create?client=${client.id}`">
+                            <Plus aria-hidden="true" />
+                            Add Website
+                        </Link>
+                    </Button>
+                </div>
             </div>
 
             <!--
@@ -443,62 +519,7 @@ function confirmDeactivate(): void {
                 component, exactly as `Pages/Shared/Notifications.vue` does it.
             -->
             <TabsContent value="overview" class="flex min-w-0 flex-col gap-6 rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
-                <!-- The two numbers (image 4's stat row): websites and tasks. -->
-                <div class="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <Card class="min-w-0 flex-row items-center gap-4 px-5 py-4">
-                        <span :class="cn('flex size-12 shrink-0 items-center justify-center rounded-lg border', toneChipClass('progress'))" aria-hidden="true">
-                            <FolderKanban class="size-6" />
-                        </span>
-                        <div class="flex min-w-0 flex-col">
-                            <span class="text-2xl font-bold tabular-nums">{{ websites.length }}</span>
-                            <span class="text-sm text-muted-foreground">{{ websites.length === 1 ? 'Website' : 'Websites' }}</span>
-                        </div>
-                    </Card>
-                    <Card class="min-w-0 flex-row items-center gap-4 px-5 py-4 xl:col-span-2">
-                        <span :class="cn('flex size-12 shrink-0 items-center justify-center rounded-lg border', toneChipClass('cancelled'))" aria-hidden="true">
-                            <ListTodo class="size-6" />
-                        </span>
-                        <div class="flex min-w-0 flex-1 flex-col gap-1">
-                            <div class="flex items-baseline gap-2">
-                                <span class="text-2xl font-bold tabular-nums">{{ clientTasks.total }}</span>
-                                <span class="text-sm text-muted-foreground">Tasks</span>
-                            </div>
-                            <TaskCountChips :counts="clientTasks" stacked />
-                        </div>
-                    </Card>
-                </div>
-
-                <section aria-labelledby="client-websites" class="flex min-w-0 flex-col gap-4">
-                    <div class="flex min-w-0 flex-wrap items-center gap-2">
-                        <h2 id="client-websites" class="mr-auto text-xl font-semibold tracking-tight">
-                            Websites &amp; Businesses
-                        </h2>
-                        <div class="relative min-w-0 basis-56">
-                            <Search
-                                class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-                                aria-hidden="true"
-                            />
-                            <Input
-                                v-model="projectSearch"
-                                type="search"
-                                class="h-9 pl-9"
-                                placeholder="Search websites or services…"
-                                aria-label="Search websites or services"
-                            />
-                        </div>
-                        <NativeSelect v-model="projectStatus" aria-label="Filter websites by status" class="h-9">
-                            <option value="">All statuses</option>
-                            <option v-for="option in statusOptions" :key="option.value" :value="option.value">
-                                {{ option.label }}
-                            </option>
-                        </NativeSelect>
-                        <Button as-child class="h-9">
-                            <Link :href="`/admin/projects/create?client=${client.id}`">
-                                <Plus aria-hidden="true" />
-                                Add Website
-                            </Link>
-                        </Button>
-                    </div>
+                <section aria-label="Websites &amp; Businesses" class="flex min-w-0 flex-col gap-4">
 
                     <Card v-if="websites.length === 0" class="min-w-0 p-4">
                         <EmptyState
@@ -510,7 +531,7 @@ function confirmDeactivate(): void {
                     </Card>
 
                     <p v-else-if="shownWebsites.length === 0" class="text-sm text-muted-foreground">
-                        No website matches the search or the status.
+                        No website matches these filters.
                     </p>
 
                     <ul v-else class="grid min-w-0 items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
@@ -600,31 +621,65 @@ function confirmDeactivate(): void {
                                                     </span>
                                                     <span class="min-w-0 break-words">{{ project.project_type_label ?? project.name }}</span>
                                                 </Link>
-                                                <span class="ml-auto flex shrink-0 items-center gap-2">
-                                                    <StatusPill :label="project.status_label" :tone="toneForProjectStatus(project.status)" />
+                                                <!-- Polish 066: time spent on the project / the estimate on its tasks. -->
+                                                <span
+                                                    class="ml-auto inline-flex shrink-0 items-center gap-1 text-sm font-medium tabular-nums"
+                                                    :title="`Time spent on ${project.name} / estimated on its tasks`"
+                                                >
+                                                    <Clock class="size-3.5 text-muted-foreground" aria-hidden="true" />
+                                                    <span class="sr-only">Time spent</span>
+                                                    {{ duration(timeOf(project).spent) }}
+                                                    <span class="text-muted-foreground">/ {{ timeOf(project).estimate > 0 ? duration(timeOf(project).estimate) : '—' }}</span>
+                                                    <span class="sr-only">estimated</span>
                                                 </span>
                                             </div>
-                                            <!-- Polish 060: start date, deadline, project manager, team. -->
-                                            <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 pl-9 text-xs text-muted-foreground">
-                                                <span v-if="project.start_date" class="inline-flex items-center gap-1 tabular-nums" title="Start date">
+                                            <!-- Polish 060/066: status, start date, deadline, assigned faces. -->
+                                            <!-- Polish 067: one line on a computer — dates drop the year when it is this
+                                                 year, nothing wraps, the faces stay at the right. -->
+                                            <div class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 pl-9 text-xs whitespace-nowrap text-muted-foreground sm:flex-nowrap">
+                                                <StatusPill :label="project.status_label" :tone="toneForProjectStatus(project.status)" />
+                                                <span v-if="project.start_date" :title="`Start date: ${formatDate(project.start_date)}`" class="inline-flex items-center gap-1 tabular-nums">
                                                     <CalendarDays class="size-3.5" aria-hidden="true" />
                                                     <span>Start</span>
-                                                    {{ formatDate(project.start_date) }}
+                                                    {{ shortDate(project.start_date) }}
                                                 </span>
                                                 <span
                                                     v-if="project.deadline"
                                                     :class="cn('inline-flex items-center gap-1 tabular-nums', overdue(project) && 'font-medium text-destructive')"
-                                                    title="Deadline"
+                                                    :title="`Deadline: ${formatDate(project.deadline)}`"
                                                 >
                                                     <CalendarCheck class="size-3.5" aria-hidden="true" />
                                                     <span>Due</span>
-                                                    {{ formatDate(project.deadline) }}
+                                                    {{ shortDate(project.deadline) }}
                                                 </span>
                                                 <!-- Polish 061: the people assigned to the project (not its manager). -->
-                                                <span v-if="team(project).length" class="inline-flex min-w-0 items-center gap-1" title="Assigned">
-                                                    <Users class="size-3.5 shrink-0" aria-hidden="true" />
-                                                    <span class="sr-only">Assigned:</span>
-                                                    <span class="min-w-0 break-words">{{ team(project).map((member) => member.name).join(', ') }}</span>
+                                                <!-- Polish 066: as initials faces (name on hover), not full names. -->
+                                                <span
+                                                    v-if="team(project).length"
+                                                    class="ml-auto flex shrink-0 items-center -space-x-1"
+                                                    role="img"
+                                                    :aria-label="`Assigned: ${team(project).map((member) => member.name).join(', ')}`"
+                                                >
+                                                    <TooltipProvider>
+                                                        <Tooltip v-for="member in team(project).slice(0, 4)" :key="member.id">
+                                                            <TooltipTrigger as-child>
+                                                                <Avatar class="size-7 ring-2 ring-card">
+                                                                    <AvatarFallback :class="cn('text-xs', personTone(member.id).avatar)" aria-hidden="true">
+                                                                        {{ initials(member.name) }}
+                                                                    </AvatarFallback>
+                                                                </Avatar>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>{{ member.name }}</TooltipContent>
+                                                        </Tooltip>
+                                                        <Tooltip v-if="team(project).length > 4">
+                                                            <TooltipTrigger as-child>
+                                                                <span class="inline-flex size-7 items-center justify-center rounded-full bg-muted text-xs ring-2 ring-card" aria-hidden="true">
+                                                                    +{{ team(project).length - 4 }}
+                                                                </span>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>{{ team(project).slice(4).map((member) => member.name).join(', ') }}</TooltipContent>
+                                                        </Tooltip>
+                                                    </TooltipProvider>
                                                 </span>
                                             </div>
                                         </li>

@@ -5,7 +5,6 @@ import { computed, ref } from 'vue';
 import ClientAvatar from '@/Components/Clients/ClientAvatar.vue';
 import type { Client } from '@/Components/Clients/ClientForm.vue';
 import { NO_TASKS } from '@/Components/Clients/clientTasks';
-import { projectIcon } from '@/Components/Clients/projectIcon';
 import TaskCountChips from '@/Components/Clients/TaskCountChips.vue';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { ColumnDef } from '@/Components/DataTable/types';
@@ -193,7 +192,7 @@ function confirmDeactivate(): void {
                 page-actions
                 :search="filters.search"
                 :active="hasFilters"
-                placeholder="Search clients by name, email or company…"
+                placeholder="Search by client, website, email or company…"
                 search-width="sm:w-88"
                 input-id="clients-search"
             >
@@ -260,34 +259,11 @@ function confirmDeactivate(): void {
                     </div>
                 </template>
 
+                <!-- Polish 066: the project count only — the type icons are gone. -->
                 <template #cell-projects_count="{ row }">
-                    <div class="flex min-w-0 flex-col gap-1">
-                        <span class="text-sm">
-                            {{ row.projects_count ?? 0 }} {{ (row.projects_count ?? 0) === 1 ? 'project' : 'projects' }}
-                        </span>
-                        <!-- Polish 052: the icons overlap like a stacked avatar group. -->
-                        <span v-if="(row.project_chips ?? []).length > 0" class="flex items-center -space-x-2" data-testid="project-stack">
-                            <Link
-                                v-for="project in (row.project_chips ?? []).slice(0, 4)"
-                                :key="project.id"
-                                :href="`/admin/projects/${project.id}`"
-                                :title="project.domain ? `${project.name} — ${project.domain}` : project.name"
-                                :aria-label="project.name"
-                                :class="[
-                                    'relative flex size-7 items-center justify-center rounded-full border-2 border-card outline-none transition-transform hover:z-10 hover:-translate-y-0.5 focus-visible:z-10 focus-visible:ring-3 focus-visible:ring-ring',
-                                    projectIcon(project.type).solid,
-                                ]"
-                            >
-                                <component :is="projectIcon(project.type).icon" class="size-3.5" aria-hidden="true" />
-                            </Link>
-                            <span
-                                v-if="(row.project_chips ?? []).length > 4"
-                                class="relative flex size-7 items-center justify-center rounded-full border-2 border-card bg-muted text-xs font-medium text-muted-foreground"
-                            >
-                                +{{ (row.project_chips ?? []).length - 4 }}
-                            </span>
-                        </span>
-                    </div>
+                    <span class="text-sm whitespace-nowrap tabular-nums">
+                        {{ row.projects_count ?? 0 }} {{ (row.projects_count ?? 0) === 1 ? 'project' : 'projects' }}
+                    </span>
                 </template>
 
                 <template #cell-tasks="{ row }">

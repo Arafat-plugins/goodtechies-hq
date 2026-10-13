@@ -506,6 +506,17 @@
     color-scheme: dark;
 }
 
+/*
+ * Polish 076: a native <select>'s open list. Windows Chrome drew it white with the select's
+ * light dark-mode text on it (unreadable) whenever an <option> carried no colours of its own.
+ * Every option and group now takes the popover surface in both themes.
+ */
+select option,
+select optgroup {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+}
+
 @layer base {
     * {
         @apply border-border outline-ring;

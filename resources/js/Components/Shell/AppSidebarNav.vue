@@ -172,7 +172,7 @@ function itemClass(item: NavItem): string {
                                     :class="itemClass(item)"
                                     @click="emit('navigate')"
                                 >
-                                    <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
+                                    <component :is="item.icon" :class="['size-4 shrink-0', item.iconClass]" aria-hidden="true" />
                                     <span :class="rail ? 'sr-only' : 'truncate'">{{ item.label }}</span>
                                     <!--
                                         Railed, the label is gone and there is no room for a
@@ -242,7 +242,7 @@ function itemClass(item: NavItem): string {
                                     :class="itemClass(item)"
                                     @click="emit('navigate')"
                                 >
-                                    <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
+                                    <component :is="item.icon" :class="['size-4 shrink-0', item.iconClass]" aria-hidden="true" />
                                     <span class="truncate">{{ item.label }}</span>
                                     <span
                                         v-if="badgeFor(item)"

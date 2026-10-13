@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Client;
+use App\Models\Project;
 use App\Models\User;
 use App\Support\ClientTaskCounts;
 use Illuminate\Support\Facades\DB;
@@ -80,4 +81,36 @@ it('filters clients by having projects and finds a client by a contact email', f
     expect($with)->not->toContain($empty->id)
         ->and($without)->toContain($empty->id)
         ->and($byEmail->all())->toBe([$empty->id]);
+});
+
+it('gives a client page each project\'s approved time spent and its tasks\' estimate (polish 066)', function () {
+    $client = Client::query()->whereHas('projects')->firstOrFail();
+    $projectId = (int) $client->projects()->value('id');
+
+    $spent = (int) DB::table('time_entries')->where('project_id', $projectId)->whereNotNull('approved_at')->sum('duration_seconds');
+    $estimate = 60 * (int) DB::table('tasks')->where('project_id', $projectId)->whereNull('deleted_at')
+        ->where('status', '!=', 'cancelled')->sum('estimated_minutes');
+
+    $time = ClientTaskCounts::timeForProjects([$projectId]);
+
+    expect($time[$projectId])->toBe(['spent' => $spent, 'estimate' => $estimate]);
+
+    $this->actingAs($this->admin)->get(route('admin.clients.show', $client))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where("projectTime.{$projectId}.spent", $spent)
+            ->where("projectTime.{$projectId}.estimate", $estimate));
+});
+
+it('finds a client by one of its websites — a project name or domain (polish 069)', function () {
+    $owner = Client::factory()->create(['name' => 'Owner Of Site']);
+    $other = Client::factory()->create(['name' => 'Someone Else']);
+    Project::factory()->create(['client_id' => $owner->id, 'name' => 'Zephyr Tanks — SEO', 'domain' => 'zephyrtanks.test']);
+    Project::factory()->create(['client_id' => $other->id, 'name' => 'Unrelated', 'domain' => 'unrelated.test']);
+
+    $ids = fn (string $term) => collect($this->actingAs($this->admin)->get(route('admin.clients.index', ['search' => $term]))
+        ->inertiaProps()['clients']['data'])->pluck('id')->all();
+
+    expect($ids('zephyrtanks.te'))->toBe([$owner->id])
+        ->and($ids('ZEPHYR TANKS'))->toBe([$owner->id]);
 });
