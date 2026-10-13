@@ -1,4 +1,4 @@
-# GoodTechies HQ
+# goodERP
 
 An internal agency operating system for GoodTechies — projects, tasks, time, leave,
 team communication, finance and payroll in one place, built phase by phase and
@@ -76,4 +76,4 @@ npx vue-tsc --noEmit                    # type check
 ## License
 
 Proprietary. Built for GoodTechies.
-# goodtechies-hq- 
+# goodERP 
