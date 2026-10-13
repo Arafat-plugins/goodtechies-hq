@@ -12,7 +12,6 @@ use App\Services\ActivityLogger;
 use App\Services\ClientService;
 use App\Support\ClientStatus;
 use App\Support\ClientTaskCounts;
-use App\Support\ProjectClientBoard;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -118,7 +117,7 @@ class ClientController extends Controller
             ->with('success', 'Client created.');
     }
 
-    public function show(Request $request, Client $client): Response
+    public function show(Client $client): Response
     {
         Gate::authorize('view', $client);
 
@@ -132,26 +131,10 @@ class ClientController extends Controller
         // Polish 049: each project's task counts, and the client's, for the cards and the overview.
         $projectCounts = ClientTaskCounts::forProjects($client->projects->modelKeys());
 
-        // Polish 057: each project's open tasks (as on Admin → Projects?client=…), for the
-        // project rows under each website card.
-        $board = ProjectClientBoard::client($request->user(), (string) $client->getKey());
-        $projectOpen = [];
-
-        foreach ($board['boxes'] ?? [] as $box) {
-            foreach ($box['projects'] as $project) {
-                $projectOpen[$project['id']] = [
-                    'tracked_seconds' => $project['tracked_seconds'],
-                    'open_count' => $project['open_count'],
-                    'tasks' => $project['tasks'],
-                ];
-            }
-        }
-
         return Inertia::render('Admin/Clients/Show', [
             'client' => new ClientResource($client),
             'activity' => $this->activityFor($client),
             'projectTasks' => (object) $projectCounts,
-            'projectOpen' => (object) $projectOpen,
             'taskCounts' => ClientTaskCounts::forClients([$client->id])[$client->id] ?? ClientTaskCounts::empty(),
         ]);
     }

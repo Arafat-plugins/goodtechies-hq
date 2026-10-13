@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
-    ArrowRight,
     Box,
-    ChevronDown,
+    CalendarCheck,
+    CalendarDays,
     Code,
     ExternalLink,
     FolderKanban,
     Globe,
     LayoutGrid,
-    List,
     ListTodo,
     Mail,
     Megaphone,
@@ -23,10 +22,12 @@ import {
     ShoppingCart,
     Signal,
     UserX,
+    Users,
 } from '@lucide/vue';
 import type { Component } from 'vue';
 import { computed, ref } from 'vue';
 import ClientAvatar from '@/Components/Clients/ClientAvatar.vue';
+import { formatDate } from '@/Components/Tasks/taskDetail';
 import type { Client } from '@/Components/Clients/ClientForm.vue';
 import { NO_TASKS, type TaskCounts } from '@/Components/Clients/clientTasks';
 import TaskCountChips from '@/Components/Clients/TaskCountChips.vue';
@@ -42,8 +43,6 @@ import EmptyState from '@/Components/EmptyState.vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
 import { fileRoutes } from '@/Components/Files/files';
 import PageShell from '@/Components/PageShell.vue';
-import type { ServiceBoardTask } from '@/Components/Projects/ClientServiceBoard.vue';
-import OpenTaskList from '@/Components/Projects/OpenTaskList.vue';
 import type { ProjectFinance } from '@/Components/Projects/ProjectForm.vue';
 import { Input } from '@/Components/ui/input';
 import { NativeSelect } from '@/Components/ui/native-select';
@@ -79,6 +78,9 @@ interface ClientProject {
     status_label: string;
     priority_label?: string | null;
     deadline?: string | null;
+    start_date?: string | null;
+    pm?: { id: number; name: string | null } | null;
+    members?: { id: number; name: string | null }[];
     is_archived?: boolean;
     finance?: ProjectFinance | null;
 }
@@ -89,8 +91,6 @@ const props = defineProps<{
     /** Polish 049: task counts per project id, and for the whole client. */
     projectTasks?: Record<string, TaskCounts>;
     taskCounts?: TaskCounts;
-    /** Polish 057: each project's open tasks (not completed or cancelled), by project id. */
-    projectOpen?: Record<string, { tracked_seconds: number; open_count: number; tasks: ServiceBoardTask[] }>;
 }>();
 
 const client = computed(() => props.client.data);
@@ -316,22 +316,15 @@ const shownWebsites = computed(() => {
     );
 });
 
-/**
- * Polish 057: under each website its projects, one row each, with a chevron that shows the
- * project's open tasks (as on Admin → Projects?client=…). Collapsed by default.
- */
-const openProjects = ref<number[]>([]);
+/* Polish 060/061: the details under each project row — start, deadline, assigned people. */
+const today = new Date().toISOString().slice(0, 10);
 
-function isProjectOpen(id: number): boolean {
-    return openProjects.value.includes(id);
+function team(project: ClientProject): { id: number; name: string }[] {
+    return (project.members ?? []).filter((member): member is { id: number; name: string } => Boolean(member.name));
 }
 
-function toggleProject(id: number): void {
-    openProjects.value = isProjectOpen(id) ? openProjects.value.filter((value) => value !== id) : [...openProjects.value, id];
-}
-
-function openTasksOf(project: ClientProject): { open_count: number; tasks: ServiceBoardTask[] } {
-    return props.projectOpen?.[String(project.id)] ?? { open_count: 0, tasks: [] };
+function overdue(project: ClientProject): boolean {
+    return Boolean(project.deadline) && (project.deadline as string) < today && !['completed', 'archived', 'cancelled'].includes(project.status);
 }
 
 function progressPercent(counts: TaskCounts): number {
@@ -520,9 +513,9 @@ function confirmDeactivate(): void {
                         No website matches the search or the status.
                     </p>
 
-                    <ul v-else class="grid min-w-0 gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                    <ul v-else class="grid min-w-0 items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
                         <li v-for="(site, index) in shownWebsites" :key="site.key" class="min-w-0">
-                            <Card class="h-full min-w-0 gap-4 p-5" :data-website-card="site.key">
+                            <Card class="min-w-0 gap-4 p-5" :data-website-card="site.key">
                                 <div class="flex min-w-0 flex-wrap items-start gap-4">
                                     <span
                                         :class="cn('flex size-14 shrink-0 items-center justify-center rounded-xl', TILE_SOLID[tileTone(index)])"
@@ -553,8 +546,9 @@ function confirmDeactivate(): void {
                                     <div class="flex basis-full flex-wrap items-center gap-2 sm:basis-auto sm:justify-end">
                                         <StatusPill :label="site.statusLabel" :tone="toneForProjectStatus(site.status)" />
                                         <span class="flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs text-muted-foreground tabular-nums">
-                                            <List class="size-3.5" aria-hidden="true" />
-                                            {{ site.tasks.total }} {{ site.tasks.total === 1 ? 'task' : 'tasks' }}
+                                            <!-- Polish 058: the website's project count (its tasks are in the rows below). -->
+                                            <FolderKanban class="size-3.5" aria-hidden="true" />
+                                            {{ site.projects.length }} {{ site.projects.length === 1 ? 'project' : 'projects' }}
                                         </span>
                                         <DropdownMenu>
                                             <DropdownMenuTrigger as-child>
@@ -581,8 +575,8 @@ function confirmDeactivate(): void {
                                     </div>
                                 </div>
 
-                                <!-- Polish 057: the website's projects, each a row with a chevron that
-                                     shows its open tasks (replaces the Services chips). -->
+                                <!-- Polish 057/059: the website's projects as a plain list — name and
+                                     status only, no task counts, no dropdown. -->
                                 <div class="flex min-w-0 flex-col gap-2 border-t pt-4">
                                     <span class="text-sm font-medium text-muted-foreground">Projects</span>
                                     <ul class="flex min-w-0 flex-col gap-2" :aria-label="`Projects of ${site.name}`">
@@ -592,7 +586,7 @@ function confirmDeactivate(): void {
                                             class="flex min-w-0 flex-col gap-2 rounded-md border bg-card p-2.5"
                                             :data-website-project="project.id"
                                         >
-                                            <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+                                            <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1.5">
                                                 <Link
                                                     :href="`/admin/projects/${project.id}`"
                                                     :title="project.name"
@@ -608,37 +602,37 @@ function confirmDeactivate(): void {
                                                 </Link>
                                                 <span class="ml-auto flex shrink-0 items-center gap-2">
                                                     <StatusPill :label="project.status_label" :tone="toneForProjectStatus(project.status)" />
-                                                    <span class="text-xs text-muted-foreground tabular-nums">
-                                                        {{ openTasksOf(project).open_count }} {{ openTasksOf(project).open_count === 1 ? 'task' : 'tasks' }}
-                                                    </span>
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon-sm"
-                                                        class="-my-1"
-                                                        :aria-expanded="isProjectOpen(project.id)"
-                                                        :aria-controls="`website-project-tasks-${project.id}`"
-                                                        :aria-label="`${isProjectOpen(project.id) ? 'Hide' : 'Show'} the open tasks of ${project.name}`"
-                                                        @click="toggleProject(project.id)"
-                                                    >
-                                                        <ChevronDown
-                                                            :class="cn('transition-transform motion-reduce:transition-none', isProjectOpen(project.id) && 'rotate-180')"
-                                                            aria-hidden="true"
-                                                        />
-                                                    </Button>
                                                 </span>
                                             </div>
-                                            <OpenTaskList
-                                                v-if="isProjectOpen(project.id)"
-                                                :tasks="openTasksOf(project).tasks"
-                                                :project-name="project.name"
-                                                :list-id="`website-project-tasks-${project.id}`"
-                                            />
+                                            <!-- Polish 060: start date, deadline, project manager, team. -->
+                                            <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 pl-9 text-xs text-muted-foreground">
+                                                <span v-if="project.start_date" class="inline-flex items-center gap-1 tabular-nums" title="Start date">
+                                                    <CalendarDays class="size-3.5" aria-hidden="true" />
+                                                    <span>Start</span>
+                                                    {{ formatDate(project.start_date) }}
+                                                </span>
+                                                <span
+                                                    v-if="project.deadline"
+                                                    :class="cn('inline-flex items-center gap-1 tabular-nums', overdue(project) && 'font-medium text-destructive')"
+                                                    title="Deadline"
+                                                >
+                                                    <CalendarCheck class="size-3.5" aria-hidden="true" />
+                                                    <span>Due</span>
+                                                    {{ formatDate(project.deadline) }}
+                                                </span>
+                                                <!-- Polish 061: the people assigned to the project (not its manager). -->
+                                                <span v-if="team(project).length" class="inline-flex min-w-0 items-center gap-1" title="Assigned">
+                                                    <Users class="size-3.5 shrink-0" aria-hidden="true" />
+                                                    <span class="sr-only">Assigned:</span>
+                                                    <span class="min-w-0 break-words">{{ team(project).map((member) => member.name).join(', ') }}</span>
+                                                </span>
+                                            </div>
                                         </li>
                                     </ul>
                                 </div>
 
-                                <div class="mt-auto flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                                <!-- Polish 063: View workspace removed; cards keep their own height (no gap). -->
+                                <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
                                     <span class="text-xs text-muted-foreground">Task progress</span>
                                     <span
                                         class="h-2 min-w-20 flex-1 overflow-hidden rounded-full bg-muted"
@@ -654,13 +648,6 @@ function confirmDeactivate(): void {
                                         />
                                     </span>
                                     <span class="text-xs tabular-nums">{{ site.tasks.complete }} / {{ site.tasks.total }}</span>
-                                    <Link
-                                        :href="`/admin/projects/${site.main.id}`"
-                                        class="ml-auto flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-                                    >
-                                        View workspace
-                                        <ArrowRight class="size-4" aria-hidden="true" />
-                                    </Link>
                                 </div>
                             </Card>
                         </li>
