@@ -29,7 +29,7 @@ it('logs a seeded employee in and lands them in the employee shell', function ()
     $yaseen = User::where('email', 'yaseen@goodtechies.test')->firstOrFail();
     $this->assertAuthenticatedAs($yaseen);
 
-    $this->get('/')->assertRedirect('/employee/dashboard');
+    $this->get('/')->assertRedirect('/attendance');
 })->group('phase0');
 
 it('writes exactly one user.login audit row on a successful login', function () {

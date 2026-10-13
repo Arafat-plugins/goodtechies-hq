@@ -31,6 +31,6 @@ class HomeController extends Controller
                 ->with('error', 'Your account has no role yet. Contact an administrator.');
         }
 
-        return redirect()->route($surface->homeRoute());
+        return redirect()->route($surface->landingRoute());
     }
 }

@@ -702,7 +702,7 @@ function permissionMatrix(): array
 
     return [
         // method, uri, expected status per role
-        ['GET', '/', ['guest' => '302 /login', 'ADMIN' => '302 /admin/dashboard', 'MANAGER' => '302 /employee/dashboard', 'EMPLOYEE' => '302 /employee/dashboard', 'REMOTE_EMPLOYEE' => '302 /employee/dashboard', 'ACCOUNTANT' => '302 /accountant/dashboard']],
+        ['GET', '/', ['guest' => '302 /login', 'ADMIN' => '302 /attendance', 'MANAGER' => '302 /attendance', 'EMPLOYEE' => '302 /attendance', 'REMOTE_EMPLOYEE' => '302 /attendance', 'ACCOUNTANT' => '302 /accountant/dashboard']],
 
         // Auth (guest only)
         ['GET', 'login', ['guest' => 200] + $guestOnly],

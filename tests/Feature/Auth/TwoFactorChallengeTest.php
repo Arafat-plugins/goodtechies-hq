@@ -41,7 +41,7 @@ it('logs the admin in with a valid TOTP code and lands on the admin dashboard', 
     $this->assertAuthenticatedAs($this->admin);
     expect(LoginHistory::where('user_id', $this->admin->id)->where('succeeded', true)->count())->toBe(1);
 
-    $this->get('/')->assertRedirect('/admin/dashboard');
+    $this->get('/')->assertRedirect('/attendance');
     $this->get('/admin/dashboard')->assertOk();
 })->group('phase0');
 

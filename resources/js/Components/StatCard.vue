@@ -17,7 +17,7 @@ import { ChevronRight, Minus, TrendingDown, TrendingUp } from '@lucide/vue';
 import type { Component } from 'vue';
 import { computed } from 'vue';
 import IconChip from '@/Components/Dashboard/IconChip.vue';
-import { type Tone, toneBarClass } from '@/Components/Dashboard/tones';
+import type { Tone } from '@/Components/Dashboard/tones';
 import { Card } from '@/Components/ui/card';
 import { cn } from '@/lib/utils';
 
@@ -44,8 +44,8 @@ const props = withDefaults(
         size?: 'default' | 'compact';
         /**
          * Polish 046: the dashboards' colour. With a tone the card stays white, its icon sits in
-         * a tinted circle before the label, a chevron marks a linked card, and a thin bar in the
-         * tone runs along its foot. Without one the card is exactly as before.
+         * a tinted circle before the label, a chevron marks a linked card (polish 064: the coloured
+         * foot bar is gone — it measured nothing). Without one the card is exactly as before.
          */
         tone?: Tone;
     }>(),
@@ -140,7 +140,6 @@ const deltaLabel = computed(() => {
                 <slot name="sparkline" />
             </div>
 
-            <span v-if="tone" :class="cn('mt-auto block h-1 w-full rounded-full', toneBarClass(tone))" aria-hidden="true" />
         </Card>
     </component>
 </template>

@@ -210,7 +210,8 @@ it('lets an enrolled admin and accountant sign in with a password alone when the
     $user = User::where('email', $email)->firstOrFail();
     $this->assertAuthenticatedAs($user);
 
-    $this->get('/')->assertRedirect($dashboard);
+    // Polish 065: `/` lands an Admin on My Attendance; the Accountant on the dashboard.
+    $this->get('/')->assertRedirect(str_starts_with($dashboard, '/accountant') ? $dashboard : '/attendance');
     $this->get($dashboard)->assertOk();
 })->with([
     'admin' => ['shahadat@goodtechies.test', '/admin/dashboard'],

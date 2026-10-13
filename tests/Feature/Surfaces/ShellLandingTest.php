@@ -53,7 +53,8 @@ function assertNoSecretsInPayload(TestResponse $response): void
 it('lands each seeded role in its own shell', function (string $email, string $home, string $component) {
     loginThroughForms($this, $email);
 
-    $this->get('/')->assertRedirect($home);
+    // Polish 065: `/` lands Admins and employees on My Attendance; the dashboard is still theirs.
+    $this->get('/')->assertRedirect(str_starts_with($home, '/accountant') ? $home : '/attendance');
 
     $response = $this->get($home)
         ->assertOk()

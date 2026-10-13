@@ -21,6 +21,12 @@ it('names the home route of each surface', function () {
         ->and(Surface::Accountant->homeRoute())->toBe('accountant.dashboard');
 })->group('phase0');
 
+it('lands Admins and employees on My Attendance and the Accountant on the dashboard (polish 065)', function () {
+    expect(Surface::Admin->landingRoute())->toBe('attendance.show')
+        ->and(Surface::Employee->landingRoute())->toBe('attendance.show')
+        ->and(Surface::Accountant->landingRoute())->toBe('accountant.dashboard');
+});
+
 it('uses dotted audit event values', function () {
     // **This asserted a COUNT until Phase 8, and the count was wrong three times** — once per
     // phase that added an event, each time as a red test in an unrelated file that told whoever

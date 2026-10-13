@@ -33,7 +33,8 @@ it('forces an admin or accountant without 2FA to enrol on every surface and prof
         $this->{$method}($uri)->assertRedirect('/two-factor/enrol');
     }
 
-    $this->get('/')->assertRedirect($home);
+    // Polish 065: `/` lands an Admin on My Attendance; the Accountant on the dashboard.
+    $this->get('/')->assertRedirect(str_starts_with($home, '/accountant') ? $home : '/attendance');
 })->with([
     'admin' => [RoleName::ADMIN, '/admin/dashboard'],
     'accountant' => [RoleName::ACCOUNTANT, '/accountant/dashboard'],
