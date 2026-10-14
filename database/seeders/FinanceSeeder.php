@@ -85,6 +85,8 @@ class FinanceSeeder extends Seeder
         'Payroll',
         'Office',
         'Hosting',
+        'VPS',
+        'Domain',
         'Software',
         'Marketing',
         'Utilities',

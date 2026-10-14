@@ -375,9 +375,9 @@ function remoteTime(row: RemoteTimeRow): string {
  *
  * The **operating result** says what it is and what it is not, because a figure by that name
  * which quietly omitted the largest cost would be worse than no figure at all. Expenses filed
- * under the *Payroll* category are in it — they are expenses somebody entered. What is not in
- * it is the payroll RUN: `payroll_items` is a different table and the rollup never reads it.
- * That was true before Phase 9 and is still true; only the wording lost its phase number.
+ * under the *Payroll* category are in it — they are expenses somebody entered — and so is the
+ * payroll RUN once its month is locked or paid, when the rollup adds the net salaries from
+ * `payroll_items` as an expense line. A draft month's run is not in it.
  */
 const hasFinance = computed(() => props.finance.income !== undefined);
 
@@ -417,11 +417,10 @@ const financeCards = computed(() => [
         key: 'operating_result',
         label: 'Operating result',
         value: formatMoney(props.finance.operating_result ?? '0', props.finance.currency),
-        // Still true after Phase 9, and worth keeping: `payroll_items` is a different table
-        // and `FinanceService::monthlyRollup()` never reads it, so the wage bill on the card
-        // to the left is not inside this figure. Only the tense changed — a sentence still
-        // naming a phase number would read as unbuilt work rather than as an accounting fact.
-        sub: 'Income less expenses. The payroll run is not in it.',
+        // `FinanceService::monthlyRollup()` adds the month's net salaries from `payroll_items`
+        // as an expense line once the payroll month is locked or paid, so the wage bill on the
+        // card to the left is inside this figure from then on — and not while it is a draft.
+        sub: 'Income less expenses. Includes net salaries once the payroll month is locked or paid.',
         icon: Scale,
         href: props.finance.href,
     },

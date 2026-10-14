@@ -366,8 +366,8 @@ final class ProjectClientBoard
                 'tracked_seconds' => (int) $task->tracked_seconds,
                 // Who is doing it — the card's task row shows their initials and names.
                 'assignees' => $task->assignees
-                    ->map(fn (Employee $employee): string => (string) ($employee->user?->name ?? ''))
-                    ->filter()
+                    ->map(fn (Employee $employee): array => ['id' => (int) $employee->getKey(), 'name' => (string) ($employee->user?->name ?? '')])
+                    ->filter(fn (array $person): bool => $person['name'] !== '')
                     ->values()
                     ->all(),
                 'href' => "/{$surface}/tasks/{$task->getKey()}",

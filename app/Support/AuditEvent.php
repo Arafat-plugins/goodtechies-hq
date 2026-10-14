@@ -128,6 +128,10 @@ enum AuditEvent: string
     case PayrollLockReversed = 'payroll.lock_reversed';
     case ExpenseCreated = 'expense.created';
     case ExpenseEdited = 'expense.edited';
+    // A repeating expense (VPS monthly, domain yearly): the template saved or removed. The
+    // expense rows it records on each due date are audited as ExpenseCreated.
+    case RecurringExpenseSaved = 'recurring_expense.saved';
+    case RecurringExpenseDeleted = 'recurring_expense.deleted';
     // Part C §4's list names "expense created" and "expense edited" and stops there, and that
     // is an omission rather than a decision: Part D §13 says "Accountant edits are audit-logged
     // with old/new values" without distinguishing the two sides, and an income is the side the
@@ -304,6 +308,8 @@ enum AuditEvent: string
             self::PayrollLockReversed => 'Payroll lock reversed',
             self::ExpenseCreated => 'Expense recorded',
             self::ExpenseEdited => 'Expense edited',
+            self::RecurringExpenseSaved => 'Repeating expense saved',
+            self::RecurringExpenseDeleted => 'Repeating expense deleted',
             self::IncomeCreated => 'Income recorded',
             self::IncomeEdited => 'Income edited',
             self::FinanceRecordDeleted => 'Finance record deleted',
@@ -381,6 +387,8 @@ enum AuditEvent: string
             self::PayrollLockReversed,
             self::ExpenseCreated,
             self::ExpenseEdited,
+            self::RecurringExpenseSaved,
+            self::RecurringExpenseDeleted,
             self::IncomeCreated,
             self::IncomeEdited,
             self::FinanceRecordDeleted => self::GROUP_MONEY,

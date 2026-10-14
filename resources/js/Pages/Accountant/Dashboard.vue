@@ -115,8 +115,8 @@ const hasFinance = computed(() => props.finance.income !== undefined);
  * Every value is the server's string rendered by `formatMoney()`; nothing here parses one back
  * into a number and nothing adds two together. The operating result says what it is **and what it
  * is not**, because a figure by that name which quietly omitted the largest cost would be worse
- * than no figure: expenses filed under the Payroll category are in it, and the payroll RUN —
- * a different table the rollup never reads — is not.
+ * than no figure: expenses filed under the Payroll category are in it, and so are the payroll
+ * run's net salaries once the payroll month is locked or paid.
  */
 const monthCards = computed(() => [
     {
@@ -152,7 +152,7 @@ const monthCards = computed(() => [
         key: 'operating_result',
         label: 'Operating result',
         value: formatMoney(props.finance.operating_result ?? '0', props.finance.currency),
-        sub: 'Income less expenses. The payroll run is not in it.',
+        sub: 'Income less expenses. Includes net salaries once the payroll month is locked or paid.',
         icon: Scale,
         href: props.finance.href,
     },

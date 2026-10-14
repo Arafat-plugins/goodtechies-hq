@@ -102,10 +102,12 @@ class DashboardController extends Controller
      *
      * The first three are `FinanceService::monthlyRollup()`'s, unmodified. `operating_result` is
      * that rollup's own `net`: income less expenses, in integer cents. Expenses filed under the
-     * *Payroll* category are in it — they are expenses somebody entered — and the payroll RUN is
-     * not, because `payroll_items` is a different table the rollup never reads. The screen says so
-     * in words, because a figure by that name which quietly omitted the largest cost would be
-     * worse than no figure.
+     * *Payroll* category are in it — they are expenses somebody entered — and so is the payroll
+     * RUN once its month is locked or paid: the rollup then reads `SUM(payroll_items.net_salary)`
+     * and adds it as a *Salaries (payroll)* expense line (never for a draft month). The screen
+     * says so in words — *"Includes net salaries once the payroll month is locked or paid."* —
+     * because a figure by that name that left the reader guessing about the largest cost would
+     * be worse than no figure.
      *
      * `{}` for anybody without `finance.view`. Nobody who can reach this route lacks it today;
      * the gate is asked anyway, because that is where the answer lives if that stops being true.

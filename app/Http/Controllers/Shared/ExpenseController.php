@@ -7,7 +7,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Finance\StoreExpenseRequest;
 use App\Http\Resources\ExpenseResource;
 use App\Http\Resources\FinanceCategoryResource;
+use App\Http\Resources\IncomeResource;
 use App\Models\Expense;
+use App\Models\Project;
+use App\Models\RecurringExpense;
 use App\Services\FinanceService;
 use App\Services\SettingsService;
 use App\Support\FinanceCategoryKind;
@@ -29,9 +32,9 @@ use Inertia\Response;
  * month in `?month=YYYY-MM`; and the totals read from `FinanceService::monthlyRollup()` rather
  * than summed a second time in Vue.
  *
- * **The one difference is the project link, which does not exist here.** Part D §20 gives an
- * expense no project column: *Project Cost* is a category, not a reference (decision 8-17). So
- * there is no picker on this form, no project on the payload, and no query for one.
+ * Like income, an expense may name a project and, on this side only, be flagged billable to
+ * the client (decision 8-17b, superseding 8-17). The project picker is the same list income's
+ * form reads, from the same query and the same `IncomeResource::projectPayload()`.
  */
 class ExpenseController extends Controller
 {
@@ -58,7 +61,7 @@ class ExpenseController extends Controller
     {
         Gate::authorize('update', $expense);
 
-        return $this->page($request, $expense->load('category'), true);
+        return $this->page($request, $expense->load(['category', 'project']), true);
     }
 
     public function store(StoreExpenseRequest $request): RedirectResponse
@@ -129,13 +132,15 @@ class ExpenseController extends Controller
         $user = $request->user();
 
         $records = Expense::query()
-            ->with('category')
+            ->with(['category', 'project'])
             ->inMonth($month->year, $month->month)
             ->orderByDesc('date')
             ->orderByDesc('id')
             ->get();
 
         $rollup = $this->finance->monthlyRollup($user, $month->year, $month->month);
+
+        $canCreate = $user !== null && Gate::forUser($user)->allows('create', Expense::class);
 
         return Inertia::render('Shared/Finance/Expenses', [
             'month' => $this->monthPayload($month),
@@ -144,6 +149,13 @@ class ExpenseController extends Controller
             'categories' => FinanceCategoryResource::collection(
                 $this->finance->categories(FinanceCategoryKind::Expense)
             )->resolve($request),
+
+            // Sent while the form is open, and to anyone who may create expenses — the
+            // repeating-expenses card's form needs the same picker.
+            'projects' => $formOpen || $canCreate ? $this->projects() : [],
+
+            // The repeating expenses (VPS, domain, hosting), only to those who may manage them.
+            'recurring' => $canCreate ? $this->recurring() : [],
 
             'form' => $formOpen
                 ? [
@@ -162,9 +174,63 @@ class ExpenseController extends Controller
             'currency' => (string) $this->settings->get('currency'),
 
             'permissions' => [
-                'can_create' => $user !== null && Gate::forUser($user)->allows('create', Expense::class),
+                'can_create' => $canCreate,
             ],
         ]);
+    }
+
+    /**
+     * The expense form's project picker: `IncomeController::projects()`'s query and payload,
+     * deliberately the same — every project, archived included, by name, not scoped by
+     * `Project::visibleTo()` (decision 8-9).
+     *
+     * @return list<array{id: int, name: string, domain: string|null}>
+     */
+    private function projects(): array
+    {
+        return Project::query()
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Project $project): array => IncomeResource::projectPayload($project))
+            ->all();
+    }
+
+    /**
+     * Every repeating expense, running ones first, then by the next date due.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function recurring(): array
+    {
+        return RecurringExpense::query()
+            ->with(['category', 'project'])
+            ->orderByDesc('active')
+            ->orderBy('next_due_date')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (RecurringExpense $template): array => [
+                'id' => (int) $template->getKey(),
+                'category' => $template->category === null
+                    ? null
+                    : ['id' => (int) $template->category->getKey(), 'name' => (string) $template->category->name],
+                'project' => $template->project === null
+                    ? null
+                    : IncomeResource::projectPayload($template->project),
+                'billable' => (bool) $template->billable,
+                'amount' => (string) $template->amount,
+                'frequency' => $template->frequency,
+                'frequency_label' => match ($template->frequency) {
+                    'quarterly' => 'Quarterly',
+                    'yearly' => 'Yearly',
+                    default => 'Monthly',
+                },
+                'start_date' => $template->start_date->toDateString(),
+                'ends_on' => $template->ends_on?->toDateString(),
+                'next_due_date' => $template->next_due_date->toDateString(),
+                'notes' => $template->notes,
+                'active' => (bool) $template->active,
+            ])
+            ->all();
     }
 
     /**

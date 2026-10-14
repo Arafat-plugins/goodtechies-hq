@@ -425,11 +425,11 @@ it('refuses a zero or negative amount, in the service and in the database', func
 |--------------------------------------------------------------------------
 */
 
-it('seeds Part D §13 four income categories and nine expense categories', function () {
+it('seeds Part D §13 four income categories and eleven expense categories', function () {
     expect($this->service->categories(FinanceCategoryKind::Income)->pluck('name')->all())
         ->toBe(['Maintenance', 'SEO', 'Website', 'Other'])
         ->and($this->service->categories(FinanceCategoryKind::Expense)->pluck('name')->all())
-        ->toBe(['Payroll', 'Office', 'Hosting', 'Software', 'Marketing', 'Utilities', 'Operations', 'Project Cost', 'Other']);
+        ->toBe(['Payroll', 'Office', 'Hosting', 'VPS', 'Domain', 'Software', 'Marketing', 'Utilities', 'Operations', 'Project Cost', 'Other']);
 })->group('phase8', 'finance');
 
 it('refuses to delete a category that money is filed under, in the service and in the database', function () {

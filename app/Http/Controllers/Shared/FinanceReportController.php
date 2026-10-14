@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Finance\FinanceReportRequest;
 use App\Services\FinanceService;
 use App\Services\SettingsService;
+use App\Support\PayrollStatus;
+use App\Support\Permission;
+use App\Support\ProjectEarnings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
@@ -91,6 +94,10 @@ class FinanceReportController extends Controller
             // ledgers send, so a figure wears the same symbol on every finance screen.
             'currency' => (string) $this->settings->get('currency'),
             'reportHref' => '/finance/report?month='.$month->format('Y-m'),
+            // Per project: expected vs received vs cost, and one-time contracts. Someone who
+            // may not see projects (the Accountant) gets the money only — no status, start
+            // date or hours.
+            'earnings' => ProjectEarnings::forMonth($month, $request->user()->hasPermission(Permission::ProjectsView)),
         ]);
     }
 
@@ -117,6 +124,10 @@ class FinanceReportController extends Controller
 
             'currency' => (string) $this->settings->get('currency'),
             'dashboardHref' => '/finance?month='.$month->format('Y-m'),
+            // Per project: expected vs received vs cost, and one-time contracts. Someone who
+            // may not see projects (the Accountant) gets the money only — no status, start
+            // date or hours.
+            'earnings' => ProjectEarnings::forMonth($month, $request->user()->hasPermission(Permission::ProjectsView)),
         ]);
     }
 
@@ -212,7 +223,9 @@ class FinanceReportController extends Controller
      * be an invention.
      *
      * **The net is integer cents**, never a subtraction of two floats, exactly as
-     * `FinanceService::monthlyRollup()` computes it.
+     * `FinanceService::monthlyRollup()` computes it — and each point agrees with that month's
+     * rollup, because the expense side includes the same closed-payroll salaries (net salary of
+     * a locked or paid period) that `monthlyRollup()` adds as its *Salaries (payroll)* line.
      *
      * @return array{
      *     months: int,
@@ -228,6 +241,7 @@ class FinanceReportController extends Controller
 
         $income = $this->monthlyTotals('income', $window);
         $expenses = $this->monthlyTotals('expenses', $window);
+        $payroll = $this->monthlyPayrollTotals($window);
 
         $points = [];
 
@@ -236,7 +250,7 @@ class FinanceReportController extends Controller
             $key = $point->format('Y-m');
 
             $in = $income[$key] ?? 0;
-            $out = $expenses[$key] ?? 0;
+            $out = ($expenses[$key] ?? 0) + ($payroll[$key] ?? 0);
 
             $points[] = [
                 'month' => $key,
@@ -278,6 +292,31 @@ class FinanceReportController extends Controller
             ->get([
                 DB::raw("to_char(date, 'YYYY-MM') as bucket"),
                 DB::raw('SUM(amount) as total'),
+            ])
+            ->mapWithKeys(fn (object $row): array => [
+                (string) $row->bucket => $this->cents((string) $row->total),
+            ])
+            ->all();
+    }
+
+    /**
+     * Closed payroll per month over one window, as `YYYY-MM => cents`: SUM(`net_salary`) of the
+     * items of every period whose status closes the month (locked or paid). The same figure
+     * `FinanceService::monthlyRollup()` counts as its *Salaries (payroll)* expense line.
+     *
+     * @param  array{string, string}  $window
+     * @return array<string, int>
+     */
+    private function monthlyPayrollTotals(array $window): array
+    {
+        return DB::table('payroll_periods as period')
+            ->join('payroll_items as item', 'item.payroll_period_id', '=', 'period.id')
+            ->whereIn('period.status', PayrollStatus::closingValues())
+            ->whereBetween('period.month', $window)
+            ->groupByRaw("to_char(period.month, 'YYYY-MM')")
+            ->get([
+                DB::raw("to_char(period.month, 'YYYY-MM') as bucket"),
+                DB::raw('SUM(item.net_salary) as total'),
             ])
             ->mapWithKeys(fn (object $row): array => [
                 (string) $row->bucket => $this->cents((string) $row->total),

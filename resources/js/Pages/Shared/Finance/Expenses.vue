@@ -6,7 +6,9 @@ import type {
     ExpenseRecord,
     FinanceCategory,
     FinanceMonth,
+    FinanceProject,
     LedgerRecord,
+    RecurringExpense,
     RollupSide,
 } from '@/Components/Finance/finance';
 import { financeRoutes } from '@/Components/Finance/finance';
@@ -15,6 +17,7 @@ import LedgerDeleteDialog from '@/Components/Finance/LedgerDeleteDialog.vue';
 import LedgerFormDialog from '@/Components/Finance/LedgerFormDialog.vue';
 import LedgerTable from '@/Components/Finance/LedgerTable.vue';
 import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
+import RecurringExpensesCard from '@/Components/Finance/RecurringExpensesCard.vue';
 import PageActionsHost from '@/Components/PageActionsHost.vue';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
@@ -32,10 +35,9 @@ import type { SharedProps } from '@/types';
  * read from `FinanceService::monthlyRollup()` rather than summed here, and the form as a real
  * route rather than a flag.
  *
- * **There is no project picker**, because Part D §20 gives an expense no project column —
- * *Project Cost* is a category, not a reference (decision 8-17). `projects` is passed empty to
- * the one form component both ledgers share, which is how that component knows to leave the
- * field out rather than draw a disabled one.
+ * Like income, an expense may name a project and be billable to the client (decision 8-17b,
+ * superseding 8-17). `projects` arrives from the server only while the form is open, and is
+ * passed to the one form component both ledgers share.
  */
 defineOptions({
     layout: (props: SharedProps) => {
@@ -54,10 +56,13 @@ const props = defineProps<{
     records: ExpenseRecord[];
     totals: RollupSide;
     categories: FinanceCategory[];
+    projects: FinanceProject[];
     form: { mode: 'create' | 'edit'; record: ExpenseRecord | null } | null;
     currency: string;
     today: string;
     permissions: { can_create: boolean };
+    /** Repeating expenses (VPS, domain, hosting). Empty for anyone who may not manage them. */
+    recurring: RecurringExpense[];
 }>();
 
 const ADD_BUTTON_ID = 'finance-expenses-add';
@@ -213,6 +218,17 @@ function confirmRemove(): void {
                     :empty-text="`No expenses are recorded in ${month.label}, so there is nothing to total.`"
                 />
             </div>
+
+            <div class="min-w-0">
+                <RecurringExpensesCard
+                    :items="recurring"
+                    :categories="categories"
+                    :projects="projects"
+                    :currency="currency"
+                    :today="today"
+                    :can-manage="permissions.can_create"
+                />
+            </div>
         </div>
 
         <LedgerFormDialog
@@ -220,7 +236,7 @@ function confirmRemove(): void {
             kind="expense"
             :record="form?.record ?? null"
             :categories="categories"
-            :projects="[]"
+            :projects="projects"
             :currency="currency"
             :today="today"
             @close="closeForm"

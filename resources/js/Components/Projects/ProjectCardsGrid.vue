@@ -6,15 +6,18 @@
  * "All projects" (type) / "All clients" pickers and ordered by its sort picker.
  */
 import { Link } from '@inertiajs/vue3';
-import { CalendarDays, ChevronDown, Clock, ExternalLink, Folder, FolderKanban, Link2Off, ListTodo, UserRound } from '@lucide/vue';
+import { CalendarDays, ChevronDown, Clock, ExternalLink, Folder, FolderKanban, Link2Off, ListTodo } from '@lucide/vue';
 import { useMediaQuery } from '@vueuse/core';
 import { computed, ref } from 'vue';
 import { initials } from '@/Components/Clients/clientTasks';
 import EmptyState from '@/Components/EmptyState.vue';
+import { personTone } from '@/Components/Messages/people';
 import type { ClientTreeRow } from '@/Components/Projects/ClientProjectsView.vue';
 import { projectTile } from '@/Components/Projects/projectTile';
+import { Avatar, AvatarFallback } from '@/Components/ui/avatar';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/Components/ui/tooltip';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
 import { formatDate } from '@/Components/Tasks/taskDetail';
@@ -98,6 +101,11 @@ const columns = computed(() => {
     return out;
 });
 
+/** All of a project's task times added up (each task's approved tracked time). */
+function totalSeconds(project: { tasks?: { tracked_seconds?: number }[] }): number {
+    return (project.tasks ?? []).reduce((sum, task) => sum + (task.tracked_seconds ?? 0), 0);
+}
+
 const total = computed(() => props.tree.reduce((sum, row) => sum + row.projects.length, 0));
 
 function href(domain: string): string {
@@ -154,19 +162,29 @@ function bare(domain: string): string {
                         </div>
                         <!-- Polish 081: "N tasks" opens the tasks inside the card (like the old project
                              dropdown), not as a popup; the ⋯ menu is gone. -->
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            class="h-7 shrink-0 gap-1.5 px-2 text-sm font-normal text-muted-foreground tabular-nums"
-                            :aria-expanded="isOpen(project.id)"
-                            :aria-controls="`project-tasks-${project.id}`"
-                            @click="toggle(project.id)"
-                        >
-                            <ListTodo class="size-4" aria-hidden="true" />
-                            {{ project.total }} {{ project.total === 1 ? 'task' : 'tasks' }}
-                            <ChevronDown :class="cn('size-3.5 transition-transform', isOpen(project.id) && 'rotate-180')" aria-hidden="true" />
-                        </Button>
+                        <!-- The time spent on all of the project's tasks (the rows' times added up), under "N tasks". -->
+                        <div class="flex shrink-0 flex-col items-end gap-0.5">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                class="h-7 shrink-0 gap-1.5 px-2 text-sm font-normal text-muted-foreground tabular-nums"
+                                :aria-expanded="isOpen(project.id)"
+                                :aria-controls="`project-tasks-${project.id}`"
+                                @click="toggle(project.id)"
+                            >
+                                <ListTodo class="size-4" aria-hidden="true" />
+                                {{ project.total }} {{ project.total === 1 ? 'task' : 'tasks' }}
+                                <ChevronDown :class="cn('size-3.5 transition-transform', isOpen(project.id) && 'rotate-180')" aria-hidden="true" />
+                            </Button>
+                            <span
+                                class="inline-flex items-center gap-1 px-2 text-xs text-muted-foreground tabular-nums"
+                                :title="`Total time spent on this project's tasks: ${formatDuration(totalSeconds(project))}`"
+                            >
+                                <Clock class="size-3" aria-hidden="true" />
+                                {{ formatDuration(totalSeconds(project)) }}
+                            </span>
+                        </div>
                     </div>
                     <div v-if="isOpen(project.id)" :id="`project-tasks-${project.id}`" class="mt-3 border-t pt-3">
                         <p v-if="!project.tasks?.length" class="text-xs text-muted-foreground">No tasks yet</p>
@@ -178,6 +196,33 @@ function bare(domain: string): string {
                                 >
                                     <span class="leading-snug break-words">{{ task.title }}</span>
                                     <span class="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                        <span
+                                            v-if="task.assignees?.length"
+                                            class="flex shrink-0 items-center -space-x-0.5"
+                                            role="img"
+                                            :aria-label="`Assigned: ${task.assignees.map((person) => person.name).join(', ')}`"
+                                        >
+                                            <TooltipProvider>
+                                                <Tooltip v-for="person in task.assignees.slice(0, 4)" :key="person.id">
+                                                    <TooltipTrigger as-child>
+                                                        <Avatar class="size-6 ring-2 ring-background">
+                                                            <AvatarFallback :class="cn('text-xs tracking-tighter', personTone(person.id).avatar)" aria-hidden="true">
+                                                                {{ initials(person.name) }}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>{{ person.name }}</TooltipContent>
+                                                </Tooltip>
+                                                <Tooltip v-if="task.assignees.length > 4">
+                                                    <TooltipTrigger as-child>
+                                                        <span class="inline-flex size-6 items-center justify-center rounded-full bg-muted text-xs ring-2 ring-background" aria-hidden="true">
+                                                            +{{ task.assignees.length - 4 }}
+                                                        </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>{{ task.assignees.slice(4).map((person) => person.name).join(', ') }}</TooltipContent>
+                                                </Tooltip>
+                                            </TooltipProvider>
+                                        </span>
                                         <StatusBadge v-if="task.tone" :status="task.tone as StatusKey" :label="task.status_label ?? undefined" size="sm" />
                                         <span v-if="task.due_date" class="inline-flex items-center gap-1 tabular-nums">
                                             <CalendarDays class="size-3" aria-hidden="true" />
@@ -187,31 +232,6 @@ function bare(domain: string): string {
                                             <Clock class="size-3" aria-hidden="true" />
                                             {{ formatDuration(task.tracked_seconds ?? 0) }}
                                         </span>
-                                    </span>
-                                    <span v-if="task.assignees?.length" class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                                        <span class="flex shrink-0 -space-x-1.5" aria-hidden="true">
-                                            <span
-                                                v-for="person in task.assignees.slice(0, 3)"
-                                                :key="person"
-                                                class="flex size-6 items-center justify-center rounded-full border-2 border-background bg-secondary text-[0.625rem] font-semibold text-secondary-foreground"
-                                                :title="person"
-                                            >
-                                                {{ initials(person) }}
-                                            </span>
-                                            <span
-                                                v-if="task.assignees.length > 3"
-                                                class="flex size-6 items-center justify-center rounded-full border-2 border-background bg-muted text-[0.625rem] font-semibold text-muted-foreground"
-                                            >
-                                                +{{ task.assignees.length - 3 }}
-                                            </span>
-                                        </span>
-                                        <span class="truncate text-foreground" :title="task.assignees.join(', ')">
-                                            <span class="sr-only">Assigned to </span>{{ task.assignees.join(', ') }}
-                                        </span>
-                                    </span>
-                                    <span v-else class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                                        <UserRound class="size-3.5" aria-hidden="true" />
-                                        Unassigned
                                     </span>
                                 </Link>
                             </li>

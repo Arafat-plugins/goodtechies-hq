@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { FileChartColumn, Receipt, Scale, TrendingUp } from '@lucide/vue';
+import { FileChartColumn, HandCoins, Hourglass, Receipt, Scale, Target, TrendingUp } from '@lucide/vue';
 import { computed } from 'vue';
 import FinanceCategoryChart from '@/Components/Finance/FinanceCategoryChart.vue';
 import FinanceMonthNav from '@/Components/Finance/FinanceMonthNav.vue';
 import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
-import type { FinanceMonth, MonthlyRollup } from '@/Components/Finance/finance';
+import PayrollNotice from '@/Components/Finance/PayrollNotice.vue';
+import ProjectEarningsTable from '@/Components/Finance/ProjectEarningsTable.vue';
+import type { FinanceMonth, MonthlyRollup, ProjectEarnings } from '@/Components/Finance/finance';
 import { financeRoutes, formatMoney } from '@/Components/Finance/finance';
 import { moneyValue } from '@/Components/Finance/financeReport';
 import PageActionsHost from '@/Components/PageActionsHost.vue';
@@ -66,6 +68,8 @@ const props = defineProps<{
     /** `settings.currency`. */
     currency: string;
     reportHref: string;
+    /** Per project: expected against received this month, costs, profit, still owed. */
+    earnings: ProjectEarnings;
 }>();
 
 /**
@@ -141,6 +145,41 @@ const isEmptyMonth = computed(
                     :icon="Scale"
                 />
             </div>
+
+            <PayrollNotice :payroll="rollup.payroll" :month-label="month.label" :currency="currency" />
+        </section>
+
+        <section aria-labelledby="finance-projects" class="flex min-w-0 flex-col gap-4">
+            <div class="flex min-w-0 flex-col gap-1">
+                <h2 id="finance-projects" class="text-base font-semibold tracking-tight">Projects this month</h2>
+            </div>
+
+            <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <StatCard
+                    label="Expected from projects"
+                    :value="formatMoney(earnings.totals.expected, currency)"
+                    sub="What billing says is due this month"
+                    :icon="Target"
+                />
+                <StatCard
+                    label="Received from projects"
+                    :value="formatMoney(earnings.totals.received, currency)"
+                    sub="Income linked to a project"
+                    :icon="HandCoins"
+                />
+                <StatCard
+                    label="Still to collect"
+                    :value="formatMoney(earnings.totals.outstanding, currency)"
+                    sub="Expected, not yet received"
+                    :icon="Hourglass"
+                />
+            </div>
+
+            <ProjectEarningsTable :earnings="earnings" :currency="currency" :limit="8" />
+
+            <p class="text-sm">
+                <Link :href="reportHref" class="underline underline-offset-4">Open the full report</Link>
+            </p>
         </section>
 
         <!--

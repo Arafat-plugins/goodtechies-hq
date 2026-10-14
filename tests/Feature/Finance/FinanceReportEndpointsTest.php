@@ -58,8 +58,13 @@ const FINANCE_REPORT_MONTH = '2026-09';
  * side), one for the by-project cut, and **two for the trend however long it is** — each side
  * is one range scan grouped by month, not one call per month. A twelve-month trend built by
  * looping `monthlyRollup()` would be twenty-four round trips instead of two.
+ *
+ * Plus four since the money became a calculation (decision 8-32): the rollup's check for a
+ * hand-entered *Payroll* expense beside a closed payroll month (one), and `ProjectEarnings`'s
+ * three grouped reads — income by project, expenses by project, projects with their billing.
+ * Still flat in the trend's length: the payroll trend reads `payroll_periods`, not the books.
  */
-const FINANCE_REPORT_QUERY_BUDGET = 5;
+const FINANCE_REPORT_QUERY_BUDGET = 9;
 
 /** The tables that count as "the books" when queries are being counted. */
 const FINANCE_REPORT_TABLES = ['income', 'expenses', 'finance_categories', 'projects'];
@@ -395,7 +400,7 @@ it('refuses a trend window that is too short to have a direction, or too long to
 |--------------------------------------------------------------------------
 */
 
-it('builds a twelve-month report in five queries against the books, not one per month', function () {
+it('builds a twelve-month report in nine queries against the books, not one per month', function () {
     [$response, $queries] = financeReportQueriesFor($this->admin, financeReportUrl(FINANCE_REPORT_MONTH, 12));
 
     $response->assertOk();
@@ -462,9 +467,10 @@ it('carries the month payroll total on the dashboard, from the payroll table and
     // never `$0.00`, which reads as "we paid nobody this month".
     //
     // The number comes from `SUM(payroll_items.net_salary)`, summed by PostgreSQL over the
-    // generated column. It is deliberately NOT in `operating_result`: that figure is income
-    // less expenses out of the finance ledger, and `payroll_items` is a different table the
-    // rollup has never read. An expense somebody filed under the *Payroll* category IS in it.
+    // generated column. The rollup reads `payroll_items` too, for locked or paid months only:
+    // it then adds the net salaries to `operating_result` as a *Salaries (payroll)* expense
+    // line. The seeded September is a draft, so here it is not in it. An expense somebody
+    // filed under the *Payroll* category IS in it either way.
     $total = DB::table('payroll_items')
         ->join('payroll_periods', 'payroll_periods.id', '=', 'payroll_items.payroll_period_id')
         ->whereDate('payroll_periods.month', '2026-09-01')
@@ -515,3 +521,43 @@ it('still finds September through the seeded rows, so the demo is not a fixture'
     expect(Income::query()->inMonth(2026, 9)->count())->toBe(6)
         ->and(Project::query()->whereNotNull('domain')->exists())->toBeTrue();
 })->group('phase8', 'finance');
+
+it('gives the Accountant per-project earnings without a project status, a start date or hours', function () {
+    // One of each kind of row that would carry project detail if detailed: recurring from a
+    // start date, hourly with approved time, and a cancelled project.
+    $recurring = Project::factory()->create(['status' => \App\Support\ProjectStatus::Active, 'start_date' => '2026-07-14']);
+    \App\Models\ProjectFinance::factory()->for($recurring)->create([
+        'price' => null, 'recurring_amount' => '300.00', 'billing_frequency' => 'monthly', 'hourly_rate' => null,
+    ]);
+
+    $hourly = Project::factory()->create(['status' => \App\Support\ProjectStatus::Active]);
+    \App\Models\ProjectFinance::factory()->for($hourly)->create([
+        'price' => null, 'recurring_amount' => null, 'billing_frequency' => 'hourly', 'hourly_rate' => '25.00',
+    ]);
+    $task = \App\Models\Task::factory()->for($hourly)->create();
+    \App\Models\TimeEntry::factory()->onTask($task)->on(\Illuminate\Support\Carbon::parse('2026-09-04'))->create(['duration_seconds' => 36000]);
+
+    $cancelled = Project::factory()->create(['status' => \App\Support\ProjectStatus::Cancelled, 'start_date' => '2026-05-03']);
+    \App\Models\ProjectFinance::factory()->for($cancelled)->create([
+        'price' => null, 'recurring_amount' => '100.00', 'billing_frequency' => 'monthly', 'hourly_rate' => null,
+    ]);
+
+    $rows = test()->actingAs($this->accountant)->get(financeReportUrl())->assertOk()
+        ->inertiaProps()['earnings']['rows'];
+
+    expect($rows)->not->toBeEmpty();
+
+    $startDates = DB::table('projects')->whereNotNull('start_date')->pluck('start_date')
+        ->map(fn ($date): string => \Illuminate\Support\Carbon::parse($date)->format('j M Y'))
+        ->all();
+
+    foreach ($rows as $row) {
+        expect($row['hours'])->toBeNull()
+            ->and($row['basis'])->not->toContain('approved hours')
+            ->and($row['basis'])->not->toContain('Project is');
+
+        foreach ($startDates as $date) {
+            expect($row['basis'])->not->toContain('from '.$date);
+        }
+    }
+})->group('finance');

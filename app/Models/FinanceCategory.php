@@ -106,7 +106,8 @@ class FinanceCategory extends Model
     {
         return $this->isIncome()
             ? $this->income()->count()
-            : $this->expenses()->count();
+            // A repeating expense holds the category too: deleting it would fail on the FK.
+            : $this->expenses()->count() + RecurringExpense::query()->where('category_id', $this->getKey())->count();
     }
 
     public function isInUse(): bool

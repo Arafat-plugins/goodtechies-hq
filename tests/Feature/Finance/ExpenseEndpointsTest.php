@@ -4,6 +4,7 @@ use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\Expense;
 use App\Models\FinanceCategory;
+use App\Models\Project;
 use App\Models\User;
 use App\Services\FinanceService;
 use App\Support\AuditEvent;
@@ -13,7 +14,7 @@ use Inertia\Testing\AssertableInertia as Assert;
 
 /*
 |--------------------------------------------------------------------------
-| The expense ledger — the mirror of the income one, minus the project
+| The expense ledger — the mirror of the income one, plus a billable flag
 |--------------------------------------------------------------------------
 |
 | Master prompt Part D §13 and Phase 8. The same six shared routes behind
@@ -23,11 +24,10 @@ use Inertia\Testing\AssertableInertia as Assert;
 |
 | The two things asserted here that are NOT true of income:
 |
-|   - **An expense has no project link at all** (Part D §20; decision 8-17).
-|     There is no `projects` prop, no `project` key on a row, and a
-|     `project_id` in the body is ignored rather than stored — asserted,
-|     because "Project Cost" being a category rather than a reference is
-|     exactly the sort of thing a later phase would quietly reverse.
+|   - **An expense may link a project and be billable** (decision 8-17b,
+|     superseding 8-17). The page has a `projects` prop like income's, and
+|     a `project_id` and a `billable` flag in the body are stored — a cost
+|     for one client's site (hosting, domain, VPS) belongs to that project.
 |   - Part C §4 names *"expense created · expense edited"* explicitly, so
 |     the two audit rows here are the ones the plan asks for by name.
 |
@@ -109,8 +109,8 @@ it('renders the expense ledger for the admin and for the accountant', function (
             ->has('records', 7)
             ->where('permissions.can_create', true)
             ->where('form', null)
-            // There is no project picker on this side, and no key for one.
-            ->missing('projects'));
+            // The project picker's key, as on the income side (decision 8-17b).
+            ->has('projects'));
 })->with(['admin', 'accountant'])->group('phase8', 'finance');
 
 it('opens the expense form on its own address, for a new record and for an existing one', function (string $role) {
@@ -233,16 +233,19 @@ it('refuses a zero and a negative expense amount', function (string $amount) {
         ->assertSessionHasErrors('amount');
 })->with(['0', '0.00', '-1', '-99.99'])->group('phase8', 'finance');
 
-it('ignores a project_id on an expense, because Part D §20 gives an expense none', function () {
+it('stores an optional project and the billable flag on an expense', function () {
+    $project = Project::where('name', 'Buffalo Modular — SEO')->firstOrFail();
+
     $this->actingAs($this->accountant)
-        ->post('/finance/expenses', financeLedgerExpenseBody() + ['project_id' => 1])
-        ->assertSessionHasNoErrors();
+        ->post('/finance/expenses', financeLedgerExpenseBody() + ['project_id' => $project->getKey(), 'billable' => true])
+        ->assertSessionHasNoErrors()
+        ->assertRedirect('/finance/expenses?month=2026-09')
+        ->assertSessionHas('success');
 
     $recorded = Expense::query()->latest('id')->firstOrFail();
 
-    // Not stored, and not even a column: "Project Cost" is a category, not a reference. A row
-    // that quietly grew a project link would be a schema change nobody decided on (8-17).
-    expect($recorded->getAttributes())->not->toHaveKey('project_id');
+    expect($recorded->project_id)->toBe($project->getKey())
+        ->and($recorded->billable)->toBeTrue();
 })->group('phase8', 'finance');
 
 /*

@@ -181,12 +181,11 @@ class DashboardController extends Controller
      * loud because a figure called an operating result that quietly omitted the largest cost
      * would be worse than no figure. Expenses filed under the *Payroll* category ARE in it —
      * they are expenses, entered by the Accountant, and the seeded September has $1,400 of
-     * them. What is **not** in it is the payroll RUN: `payroll_items` is a different table and
-     * `FinanceService::monthlyRollup()` never reads it, which was true before Phase 9 and is
-     * still true now that the run exists. The sentence on the card said *"the Phase 9 payroll
-     * run is not in it"*; the fact has not changed, only the tense, so `Dashboard.vue` now says
-     * *"the payroll run is not in it"* — a card that still pointed at a phase number would read
-     * as unbuilt work rather than as the accounting statement it is.
+     * them. The payroll RUN is in it too, once the month is closed: `FinanceService::
+     * monthlyRollup()` reads `SUM(payroll_items.net_salary)` for the month's period and adds it
+     * as a *Salaries (payroll)* expense line when that period is locked or paid — never while it
+     * is a draft. `Dashboard.vue` says so on the card: *"Includes net salaries once the payroll
+     * month is locked or paid."*
      *
      * Empty for anybody without `finance.view` — absent from the payload rather than sent with
      * zeroes (Part C §1: a field the requester may not see is absent, not null). Today that is

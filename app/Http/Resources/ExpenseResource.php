@@ -14,10 +14,9 @@ use Illuminate\Support\Facades\Gate;
  * `category_kind`, no `recorded_by`, and `amount` as the exact decimal string PostgreSQL
  * stored — formatted by the one function in `Components/Finance/finance.ts` and nowhere else.
  *
- * The one difference is the one Part D §20 draws: **an expense has no project link**, so there
- * is no `project` key here, not even as null. *Project Cost* is an expense category rather than
- * a project reference, and cost-per-project is an open question with the client (decision
- * 8-17), not a key this payload should imply an answer to.
+ * Like an income row, an expense may name a project (decision 8-17b, superseding 8-17), carried
+ * by the very same `IncomeResource::projectPayload()` so the two ledgers expose one key set. The
+ * expense side adds `billable`: true when the cost is charged on to the client.
  *
  * It is a separate class from `IncomeResource` rather than one shared shape with a nullable
  * project, for the reason `ExpensePolicy` is a separate class from `IncomePolicy`: the two
@@ -38,6 +37,8 @@ class ExpenseResource extends JsonResource
             'date' => $this->resource->date?->toDateString(),
             'amount' => (string) $this->resource->amount,
             'category' => $this->category(),
+            'project' => IncomeResource::projectPayload($this->resource->project),
+            'billable' => (bool) $this->resource->billable,
             'notes' => $this->resource->notes,
             'permissions' => $this->permissions($request),
         ];

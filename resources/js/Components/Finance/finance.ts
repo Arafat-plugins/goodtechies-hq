@@ -82,8 +82,37 @@ export interface IncomeRecord extends LedgerRecordBase {
     project: FinanceProject | null;
 }
 
-/** One payment out. `ExpenseResource`. There is no project — Part D §20 gives an expense none. */
-export type ExpenseRecord = LedgerRecordBase;
+/**
+ * One payment out. `ExpenseResource`. Like income it may name a project, and it may be billable
+ * to the client (decision 8-17b).
+ */
+export interface ExpenseRecord extends LedgerRecordBase {
+    /** Optional project the cost belongs to (hosting, domain, VPS for one site). */
+    project: FinanceProject | null;
+    /** True when the cost is to be charged on to the client. */
+    billable: boolean;
+}
+
+/**
+ * A repeating expense (VPS monthly, domain yearly), as `ExpenseController::recurring()` sends
+ * it. The server records an ordinary expense from it on each due date.
+ */
+export interface RecurringExpense {
+    id: number;
+    category: { id: number; name: string } | null;
+    project: FinanceProject | null;
+    billable: boolean;
+    /** The exact decimal string. Rendered only by `formatMoney()`. */
+    amount: string;
+    frequency: 'monthly' | 'quarterly' | 'yearly';
+    frequency_label: string;
+    /** `YYYY-MM-DD`, like every date here. */
+    start_date: string;
+    ends_on: string | null;
+    next_due_date: string;
+    notes: string | null;
+    active: boolean;
+}
 
 /** Either side's row, for anything that renders both. */
 export type LedgerRecord = IncomeRecord | ExpenseRecord;
@@ -94,6 +123,22 @@ export interface RollupLine {
     name: string;
     /** An exact decimal string, like every other amount here. */
     total: string;
+    /** `ledger` for a category's rows; `payroll` for the closed month's salaries line (`category_id` 0). */
+    source?: 'ledger' | 'payroll';
+}
+
+/** The month's payroll as the rollup sees it. Counted as an expense only once locked or paid. */
+export interface RollupPayroll {
+    /** The period's status value, or null when the month has no payroll period. */
+    status: string | null;
+    /** SUM of net salary for the period. Exact decimal string. */
+    total: string;
+    /** True when the period is locked or paid, so the salaries are in the expenses. */
+    counted: boolean;
+    /** Expenses entered by hand this month under a category named "Payroll". */
+    manual_payroll_entries: string;
+    /** Counted payroll AND a manual "Payroll" expense in the same month. */
+    double_count_warning: boolean;
 }
 
 /**
@@ -117,6 +162,57 @@ export interface MonthlyRollup {
     expenses: RollupSide;
     /** Income less expenses, in exact cents. Negative is a real answer, not an error. */
     net: string;
+    /** The month's payroll: counted into `expenses` only when the period is locked or paid. */
+    payroll: RollupPayroll;
+}
+
+/**
+ * One project's month, from `App\Support\ProjectEarnings::forMonth()`: what it should have
+ * earned, what it did, what it cost. Every amount is an exact decimal string.
+ */
+export interface ProjectEarningsRow {
+    project: FinanceProject;
+    type: 'recurring' | 'hourly' | 'one_time' | 'none';
+    type_label: string;
+    /** How `expected` was worked out, in words. */
+    basis: string;
+    /** Null when nothing is expected this month. */
+    expected: string | null;
+    /** Hourly only: approved hours this month, two decimals. */
+    hours: string | null;
+    /** Hourly only. */
+    rate: string | null;
+    received: string;
+    costs: string;
+    billable_costs: string;
+    /** received − costs. */
+    profit: string;
+    /** max(expected − received, 0). */
+    outstanding: string;
+}
+
+/** A one-time project's price against everything ever received for it. */
+export interface ProjectContract {
+    project: FinanceProject;
+    price: string;
+    received_to_date: string;
+    /** price − received_to_date. Negative means overpaid. */
+    balance: string;
+}
+
+/** The `earnings` prop on the finance dashboard and report. */
+export interface ProjectEarnings {
+    /** `YYYY-MM`. */
+    month: string;
+    rows: ProjectEarningsRow[];
+    contracts: ProjectContract[];
+    totals: {
+        expected: string;
+        received: string;
+        costs: string;
+        profit: string;
+        outstanding: string;
+    };
 }
 
 /** The month a screen is on, and the two it can step to. All `YYYY-MM` but `label`. */
@@ -281,6 +377,12 @@ export const financeRoutes = {
         edit: (id: number, month?: string) => withMonth(`/finance/expenses/${id}/edit`, month),
         update: (id: number) => `/finance/expenses/${id}`,
         destroy: (id: number) => `/finance/expenses/${id}`,
+    },
+
+    recurringExpenses: {
+        store: () => '/finance/recurring-expenses',
+        update: (id: number) => `/finance/recurring-expenses/${id}`,
+        destroy: (id: number) => `/finance/recurring-expenses/${id}`,
     },
 
     categories: {

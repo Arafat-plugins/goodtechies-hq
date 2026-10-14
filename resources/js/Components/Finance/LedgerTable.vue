@@ -3,17 +3,17 @@ import { Pencil, Receipt, Trash2, TrendingUp } from '@lucide/vue';
 import { computed } from 'vue';
 import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { ColumnDef } from '@/Components/DataTable/types';
-import type { FinanceCategoryKind, IncomeRecord, LedgerRecord } from '@/Components/Finance/finance';
+import type { ExpenseRecord, FinanceCategoryKind, IncomeRecord, LedgerRecord } from '@/Components/Finance/finance';
 import { formatLedgerDate, formatMoney, ledgerNoun } from '@/Components/Finance/finance';
 import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
 
 /**
  * One month of one side of the ledger.
  *
- * The same component for income and for expenses, because they are the same table with one
- * extra column: Part D §20 gives an expense no project link, so `Project` is dropped rather
- * than rendered empty. Two components would have been the money column written twice, and the
- * money column is the one thing in this slice that must be written once.
+ * The same component for income and for expenses, because they are the same table: both may
+ * link a project (decision 8-17b), and an expense adds one column, `Billable`. Two components
+ * would have been the money column written twice, and the money column is the one thing in this
+ * slice that must be written once.
  *
  * ## What it becomes at 360 px
  *
@@ -56,9 +56,9 @@ const noun = computed(() => ledgerNoun(props.kind));
 
 const isIncome = computed(() => props.kind === 'income');
 
-/** Only an income row has one; `project` is not a key on an expense at all. */
+/** Either side's optional project link (decision 8-17b). */
 function projectOf(record: LedgerRecord): IncomeRecord['project'] {
-    return (record as IncomeRecord).project ?? null;
+    return (record as IncomeRecord | ExpenseRecord).project ?? null;
 }
 
 const columns = computed<ColumnDef<LedgerRecord>[]>(() => {
@@ -67,8 +67,10 @@ const columns = computed<ColumnDef<LedgerRecord>[]>(() => {
         { key: 'category', header: 'Category', nowrap: true, hideable: false, value: (row) => row.category?.name ?? '—' },
     ];
 
-    if (isIncome.value) {
-        defined.push({ key: 'project', header: 'Project', value: (row) => projectOf(row)?.name ?? '' });
+    defined.push({ key: 'project', header: 'Project', value: (row) => projectOf(row)?.name ?? '' });
+
+    if (!isIncome.value) {
+        defined.push({ key: 'billable', header: 'Billable', nowrap: true, value: (row) => ((row as ExpenseRecord).billable ? 'Billable' : '') });
     }
 
     defined.push(
@@ -123,7 +125,7 @@ function rowLabel(record: LedgerRecord): string {
             the domain is what tells four "Website Maintenance" rows apart (Part C §2), and
             there is no client name on this payload for any reader, on any surface.
         -->
-        <template v-if="isIncome" #cell-project="{ row }">
+        <template #cell-project="{ row }">
             <span v-if="projectOf(row)" class="flex min-w-0 flex-col">
                 <span class="truncate">{{ projectOf(row)?.name }}</span>
                 <span v-if="projectOf(row)?.domain" class="truncate text-xs text-muted-foreground">

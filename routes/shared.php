@@ -24,6 +24,7 @@ use App\Http\Controllers\Shared\ProfileSessionController;
 use App\Http\Controllers\Shared\ProfileThemeController;
 use App\Http\Controllers\Shared\ProfileTwoFactorController;
 use App\Http\Controllers\Shared\PushSubscriptionController;
+use App\Http\Controllers\Shared\RecurringExpenseController;
 use App\Http\Controllers\Shared\SalaryController;
 use App\Http\Controllers\Shared\SearchController;
 use App\Http\Controllers\Shared\TaskTimerController;
@@ -501,6 +502,17 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
             Route::delete('/expenses/{expense}', [ExpenseController::class, 'destroy'])
                 ->whereNumber('expense')
                 ->name('expenses.destroy');
+
+            // Repeating expenses: set up once, recorded on every due date by
+            // `hq:generate-recurring-expenses`. Managed from the expenses page.
+            Route::post('/recurring-expenses', [RecurringExpenseController::class, 'store'])
+                ->name('recurring-expenses.store');
+            Route::put('/recurring-expenses/{recurringExpense}', [RecurringExpenseController::class, 'update'])
+                ->whereNumber('recurringExpense')
+                ->name('recurring-expenses.update');
+            Route::delete('/recurring-expenses/{recurringExpense}', [RecurringExpenseController::class, 'destroy'])
+                ->whereNumber('recurringExpense')
+                ->name('recurring-expenses.destroy');
 
             // The category list. It is INSIDE this group, so reading it takes `finance.view`
             // like every other finance screen — the Accountant lives in the pickers these

@@ -19,6 +19,9 @@ use Illuminate\Support\Facades\Schedule;
 // from a `next_run_at` it has to hit exactly. See RecurringTaskEngine::due().
 Schedule::command('hq:generate-recurring-tasks')->dailyAt('00:05')->withoutOverlapping();
 
+// Repeating expenses (VPS, domain, hosting): record every one that has fallen due; idempotent.
+Schedule::command('hq:generate-recurring-expenses')->dailyAt('00:15')->withoutOverlapping();
+
 // Tasks (master prompt §19, Phase 2): one notification per NEWLY overdue task, to its
 // assignees and their manager or the Admins. 08:00 because it is meant to be the first thing
 // somebody sees, and "newly" is answered by the notifications table rather than by this

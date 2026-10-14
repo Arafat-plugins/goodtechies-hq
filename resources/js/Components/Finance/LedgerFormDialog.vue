@@ -4,12 +4,14 @@ import { computed, useId, watch } from 'vue';
 import type {
     FinanceCategory,
     FinanceCategoryKind,
+    ExpenseRecord,
     FinanceProject,
     IncomeRecord,
     LedgerRecord,
 } from '@/Components/Finance/finance';
 import { financeRoutes, formatMoney, ledgerNoun } from '@/Components/Finance/finance';
 import { Button } from '@/Components/ui/button';
+import { Checkbox } from '@/Components/ui/checkbox';
 import {
     Dialog,
     DialogContent,
@@ -63,7 +65,7 @@ const props = defineProps<{
     record: LedgerRecord | null;
     /** This side's categories, in picker order, already filtered by the server. */
     categories: FinanceCategory[];
-    /** Income only. Empty on the expense form, which has no project link. */
+    /** The project picker's options, for either ledger (decision 8-17b). Empty while closed. */
     projects: FinanceProject[];
     currency: string;
     /** Today in the agency's timezone, from the server — the default date on a new record. */
@@ -76,6 +78,7 @@ const categoryId = useId();
 const amountId = useId();
 const dateId = useId();
 const projectId = useId();
+const billableId = useId();
 const notesId = useId();
 
 /** reka's Select has no empty value, so "no project" is a sentinel rather than `''`. */
@@ -91,12 +94,14 @@ const form = useForm<{
     date: string;
     notes: string;
     project_id: string;
+    billable: boolean;
 }>({
     category_id: '',
     amount: '',
     date: '',
     notes: '',
     project_id: NO_PROJECT,
+    billable: false,
 });
 
 const title = computed(() =>
@@ -146,8 +151,10 @@ function submit(): void {
             notes: data.notes,
         };
 
-        if (isIncome.value) {
-            payload.project_id = data.project_id === NO_PROJECT ? null : data.project_id;
+        payload.project_id = data.project_id === NO_PROJECT ? null : data.project_id;
+
+        if (!isIncome.value) {
+            payload.billable = data.billable;
         }
 
         return payload;
@@ -185,8 +192,9 @@ watch(
         form.date = record?.date ?? props.today;
         form.notes = record?.notes ?? '';
 
-        const project = (record as IncomeRecord | null)?.project ?? null;
+        const project = (record as IncomeRecord | ExpenseRecord | null)?.project ?? null;
         form.project_id = project ? String(project.id) : NO_PROJECT;
+        form.billable = !isIncome.value && Boolean((record as ExpenseRecord | null)?.billable);
 
         // What the dialog opened with is the baseline for "unsaved" (reliability slice 3).
         form.defaults();
@@ -275,14 +283,14 @@ useUnsavedGuard(() => props.open && form.isDirty);
                 </div>
 
                 <!--
-                    Income only. Part D §20 gives an expense no project column, so the expense
-                    form has no picker rather than a disabled one (DESIGN.md §5 rule 12).
+                    Both ledgers can link a project (decision 8-17b): a payment in that a
+                    project earned, or a cost out (hosting, domain, VPS) that one project ran up.
 
                     The options carry a project's name and its domain and nothing else — no
                     client, no contact, no status, no count. That is the whole key set this
                     payload has, for an Admin exactly as for the Accountant.
                 -->
-                <div v-if="isIncome" class="flex flex-col gap-2">
+                <div v-if="projects.length" class="flex flex-col gap-2">
                     <Label :for="projectId">Project</Label>
                     <Select v-model="form.project_id">
                         <SelectTrigger :id="projectId" class="w-full">
@@ -303,11 +311,19 @@ useUnsavedGuard(() => props.open && form.isDirty);
                         </SelectContent>
                     </Select>
                     <p class="text-xs text-muted-foreground">
-                        Optional. Linking a payment to a project is what makes the finance-by-project report add up.
+                        {{ isIncome ? 'Optional. Linking a payment to a project is what makes the finance-by-project report add up.' : 'Optional. A cost for one client\'s site (hosting, domain, VPS) belongs to that project, so its profit is right.' }}
                     </p>
                     <p v-if="form.errors.project_id" class="text-xs text-destructive">
                         {{ form.errors.project_id }}
                     </p>
+                </div>
+
+                <div v-if="!isIncome" class="flex items-start gap-2">
+                    <Checkbox :id="billableId" :model-value="form.billable" @update:model-value="form.billable = $event === true" />
+                    <div class="flex flex-col gap-0.5">
+                        <Label :for="billableId">Billable to the client</Label>
+                        <p class="text-xs text-muted-foreground">Tick when the client pays this back, like a domain renewal you charge on.</p>
+                    </div>
                 </div>
 
                 <div class="flex flex-col gap-2">

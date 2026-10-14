@@ -7,6 +7,7 @@ use App\Models\Expense;
 use App\Models\FinanceCategory;
 use App\Models\Income;
 use App\Models\PayrollPeriod;
+use App\Models\RecurringExpense;
 use App\Models\User;
 use App\Support\AuditEvent;
 use App\Support\FinanceCategoryKind;
@@ -102,11 +103,19 @@ class FinanceService
     private const INCOME_FIELDS = ['category_id', 'project_id', 'amount', 'date', 'notes'];
 
     /**
-     * The same, minus the project link Part D §20 does not give an expense.
+     * The same, plus the billable flag (decision 8-17b: an expense may name a project too).
      *
      * @var list<string>
      */
-    private const EXPENSE_FIELDS = ['category_id', 'amount', 'date', 'notes'];
+    private const EXPENSE_FIELDS = ['category_id', 'project_id', 'billable', 'amount', 'date', 'notes'];
+
+    /**
+     * What a repeating expense's form may set. `created_by`, `occurrences` and `next_due_date`
+     * are the service's to keep.
+     *
+     * @var list<string>
+     */
+    private const RECURRING_EXPENSE_FIELDS = ['category_id', 'project_id', 'billable', 'amount', 'frequency', 'start_date', 'ends_on', 'notes', 'active'];
 
     public function __construct(
         private readonly AuditLogger $audit,
@@ -227,7 +236,7 @@ class FinanceService
                 AuditEvent::ExpenseCreated,
                 $expense,
                 null,
-                $expense->fresh('category')->auditValues(),
+                $expense->fresh(['category', 'project'])->auditValues(),
                 $actor,
             );
 
@@ -250,7 +259,7 @@ class FinanceService
         $values = $this->prepare($attributes, self::EXPENSE_FIELDS, FinanceCategoryKind::Expense, $expense);
 
         return DB::transaction(function () use ($actor, $expense, $values): Expense {
-            $old = $expense->fresh('category')->auditValues();
+            $old = $expense->fresh(['category', 'project'])->auditValues();
 
             $expense->fill($values)->save();
 
@@ -258,7 +267,7 @@ class FinanceService
                 AuditEvent::ExpenseEdited,
                 $expense,
                 $old,
-                $expense->fresh('category')->auditValues(),
+                $expense->fresh(['category', 'project'])->auditValues(),
                 $actor,
             );
 
@@ -278,6 +287,240 @@ class FinanceService
         $this->assertPeriodIsOpen($expense->date);
 
         $this->deleteRecord($actor, $expense, $expense->fresh('category')->auditValues());
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Repeating expenses
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Create or change a repeating expense (a VPS every month, a domain every year).
+     *
+     * Anyone who may record an expense may set one up: the template only ever writes the rows
+     * that person could have entered by hand. Changing `start_date` or `frequency`, or switching
+     * a paused template back on, realigns it (`realignRecurringExpense()`) to its first due date
+     * that is today or later and after the last expense it recorded, so an edit never back-fills
+     * past months and never re-records a date that has already been charged.
+     *
+     * @param  array<string, mixed>  $attributes
+     *
+     * @throws AuthorizationException
+     * @throws FinanceStateException
+     */
+    public function saveRecurringExpense(User $actor, array $attributes, ?RecurringExpense $existing = null): RecurringExpense
+    {
+        if (! Gate::forUser($actor)->allows('create', Expense::class)) {
+            throw new AuthorizationException('You are not allowed to manage repeating expenses.');
+        }
+
+        $values = array_intersect_key($attributes, array_flip(self::RECURRING_EXPENSE_FIELDS));
+
+        if (array_key_exists('category_id', $values)) {
+            $this->assertCategoryKind((int) $values['category_id'], FinanceCategoryKind::Expense);
+        }
+
+        if (array_key_exists('amount', $values)) {
+            $amount = (string) $values['amount'];
+
+            if ($this->toCents($amount) <= 0) {
+                throw FinanceStateException::amountNotPositive($amount);
+            }
+        }
+
+        return DB::transaction(function () use ($actor, $values, $existing): RecurringExpense {
+            $old = $existing?->fresh(['category', 'project'])?->auditValues();
+
+            if ($existing === null) {
+                $template = new RecurringExpense($values);
+                $template->created_by = (int) $actor->getKey();
+                $template->occurrences = 0;
+                $template->next_due_date = $template->start_date->copy();
+            } else {
+                $template = $existing;
+                $template->fill($values);
+
+                $reactivated = $template->isDirty('active')
+                    && (bool) $template->active
+                    && ! (bool) $template->getOriginal('active');
+
+                if ($template->isDirty('start_date') || $template->isDirty('frequency') || $reactivated) {
+                    $this->realignRecurringExpense($template);
+                }
+            }
+
+            $template->save();
+
+            $this->audit->record(
+                AuditEvent::RecurringExpenseSaved,
+                $template,
+                $old,
+                $template->fresh(['category', 'project'])->auditValues(),
+                $actor,
+            );
+
+            return $template;
+        });
+    }
+
+    /**
+     * Point a template whose schedule changed (new frequency or start date) or which was just
+     * switched back on at its first due date that is both today or later and after the last
+     * expense it already recorded — so the change never back-fills past months and never
+     * re-records a date that was already charged. The old `occurrences` count is not reused:
+     * it was counted on the old schedule.
+     */
+    private function realignRecurringExpense(RecurringExpense $template): void
+    {
+        $today = Carbon::today(config('app.timezone'))->startOfDay();
+
+        $lastValue = Expense::query()
+            ->where('recurring_expense_id', $template->getKey())
+            ->max('date');
+
+        $last = $lastValue === null ? null : Carbon::parse($lastValue)->startOfDay();
+
+        $n = 0;
+
+        for ($guard = 0; $guard < 1000; $guard++, $n++) {
+            $due = $template->dueDateFor($n)->startOfDay();
+
+            if ($due->gte($today) && ($last === null || $due->gt($last))) {
+                break;
+            }
+        }
+
+        $template->occurrences = $n;
+        $template->next_due_date = $template->dueDateFor($n);
+    }
+
+    /**
+     * Remove a repeating expense. The expenses it already recorded stay: the foreign key is
+     * `ON DELETE SET NULL`, because money that was spent stays spent.
+     *
+     * @throws AuthorizationException
+     */
+    public function deleteRecurringExpense(User $actor, RecurringExpense $template): void
+    {
+        if (! Gate::forUser($actor)->allows('create', Expense::class)) {
+            throw new AuthorizationException('You are not allowed to manage repeating expenses.');
+        }
+
+        $type = $template->getMorphClass();
+        $id = (int) $template->getKey();
+        $old = $template->fresh(['category', 'project'])->auditValues();
+
+        DB::transaction(function () use ($actor, $template, $type, $id, $old): void {
+            $this->audit->recordFor(
+                AuditEvent::RecurringExpenseDeleted,
+                $type,
+                $id,
+                $old,
+                null,
+                $actor,
+            );
+
+            $template->delete();
+        });
+    }
+
+    /**
+     * Record every repeating expense that has fallen due on or before `$today`, catching up on
+     * any days the scheduler missed. Returns how many expense rows were created.
+     *
+     * **Safe to run twice.** Each row is `firstOrCreate`d on `(recurring_expense_id, date)`,
+     * which the database also holds as a unique index, and the template's `next_due_date` only
+     * moves forward — so a second run on the same day finds nothing due and records nothing.
+     *
+     * **A closed month is skipped, not retried.** If the due date falls in a payroll month that
+     * is locked or paid, no row is written (the same rule every hand-entered expense obeys) and
+     * the template moves on to its next date; the Accountant can enter that one by hand if an
+     * Admin reopens the month.
+     *
+     * **No drift.** The next date is always `dueDateFor(occurrences)`, counted from the start.
+     */
+    public function generateDueRecurringExpenses(Carbon $today): int
+    {
+        $today = $today->copy()->startOfDay();
+        $created = 0;
+
+        $templates = RecurringExpense::query()
+            ->with(['category', 'creator'])
+            ->where('active', true)
+            ->whereDate('next_due_date', '<=', $today->toDateString())
+            ->orderBy('id')
+            ->get();
+
+        foreach ($templates as $template) {
+            while (
+                $template->next_due_date->lte($today)
+                && ($template->ends_on === null || $template->next_due_date->lte($template->ends_on))
+            ) {
+                $due = $template->next_due_date->copy();
+
+                DB::transaction(function () use ($template, $due, &$created): void {
+                    // Lock the month's payroll row (if any) before reading its status, so a
+                    // month locked concurrently is respected rather than written into.
+                    DB::table('payroll_periods')
+                        ->whereDate('month', PayrollPeriod::monthKey($due)->toDateString())
+                        ->lockForUpdate()
+                        ->first();
+
+                    $open = true;
+
+                    try {
+                        $this->assertPeriodIsOpen($due);
+                    } catch (FinanceStateException) {
+                        $open = false;
+                    }
+
+                    if ($open) {
+                        $notes = $template->notes !== null && trim($template->notes) !== ''
+                            ? $template->notes
+                            : 'Repeating: '.($template->category?->name ?? 'expense');
+
+                        $expense = Expense::firstOrCreate(
+                            [
+                                'recurring_expense_id' => $template->getKey(),
+                                'date' => $due->toDateString(),
+                            ],
+                            [
+                                'category_id' => $template->category_id,
+                                'project_id' => $template->project_id,
+                                'billable' => (bool) $template->billable,
+                                'amount' => (string) $template->amount,
+                                'notes' => $notes,
+                                'recorded_by' => $template->created_by,
+                            ],
+                        );
+
+                        if ($expense->wasRecentlyCreated) {
+                            $this->audit->record(
+                                AuditEvent::ExpenseCreated,
+                                $expense,
+                                null,
+                                $expense->fresh(['category', 'project'])->auditValues(),
+                                $template->creator,
+                            );
+
+                            $created++;
+                        }
+                    }
+
+                    $template->occurrences = (int) $template->occurrences + 1;
+                    $template->next_due_date = $template->dueDateFor($template->occurrences);
+                    $template->save();
+                });
+            }
+
+            if ($template->ends_on !== null && $template->next_due_date->gt($template->ends_on)) {
+                $template->active = false;
+                $template->save();
+            }
+        }
+
+        return $created;
     }
 
     /*
@@ -454,12 +697,27 @@ class FinanceService
      *     arrive from PostgreSQL as exact decimal strings and go back out as exact decimal
      *     strings; nothing in this method is ever a float.
      *
+     * ## Salaries are an expense — once the payroll month is closed
+     *
+     * The month's payroll (SUM of `payroll_items.net_salary` for that month's period) is added to
+     * the expense side as one extra line, *Salaries (payroll)*, `category_id` 0 and `source`
+     * `payroll` (every ledger line carries `source` `ledger`). It counts **only when the month's
+     * payroll period is in a closing status** (`PayrollStatus::closingValues()`: locked or paid),
+     * and it counts the **net** salary — what actually leaves the bank. A Draft (or any other
+     * open) month is reported under `payroll` as pending — status and figure — and is never
+     * counted, because those figures can still change. The expense total and the net include
+     * the line automatically through `sumCents()`.
+     *
+     * If an expense filed under a category named *Payroll* exists in a month whose payroll is
+     * counted, `payroll.double_count_warning` is true: the same salaries may be in the month twice.
+     *
      * @return array{
      *     month: string,
      *     label: string,
-     *     income: array{categories: list<array{category_id: int, name: string, total: string}>, total: string},
-     *     expenses: array{categories: list<array{category_id: int, name: string, total: string}>, total: string},
+     *     income: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
+     *     expenses: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
      *     net: string,
+     *     payroll: array{status: string|null, total: string, counted: bool, manual_payroll_entries: string, double_count_warning: bool},
      * }
      *
      * @throws AuthorizationException
@@ -472,6 +730,17 @@ class FinanceService
 
         $income = $this->totalsByCategory('income', $year, $month);
         $expenses = $this->totalsByCategory('expenses', $year, $month);
+
+        $payroll = $this->payrollForMonth($year, $month);
+
+        if ($payroll['counted']) {
+            $expenses[] = [
+                'category_id' => 0,
+                'name' => 'Salaries (payroll)',
+                'total' => $payroll['total'],
+                'source' => 'payroll',
+            ];
+        }
 
         $incomeTotal = $this->sumCents($income);
         $expenseTotal = $this->sumCents($expenses);
@@ -490,6 +759,52 @@ class FinanceService
             // Part D §13's "operating result": what came in less what went out. Negative when
             // the month cost more than it earned, which is a real answer and not an error.
             'net' => $this->fromCents($incomeTotal - $expenseTotal),
+            'payroll' => $payroll,
+        ];
+    }
+
+    /**
+     * The month's payroll as the rollup sees it.
+     *
+     * `total` is SUM(`payroll_items.net_salary`) for the month's period ('0.00' when there is no
+     * period or no items); `counted` is whether the period's status closes the month (locked or
+     * paid). `manual_payroll_entries` is what was entered by hand that month under an expense
+     * category named *Payroll*, and `double_count_warning` is true when both are present.
+     *
+     * @return array{status: string|null, total: string, counted: bool, manual_payroll_entries: string, double_count_warning: bool}
+     */
+    private function payrollForMonth(int $year, int $month): array
+    {
+        $start = Carbon::create($year, $month, 1)->startOfDay();
+        $key = PayrollPeriod::monthKey($start);
+
+        $period = DB::table('payroll_periods as period')
+            ->leftJoin('payroll_items as item', 'item.payroll_period_id', '=', 'period.id')
+            ->whereDate('period.month', $key->toDateString())
+            ->groupBy('period.id', 'period.status')
+            ->first([
+                'period.status as status',
+                DB::raw('COALESCE(SUM(item.net_salary), 0) as total'),
+            ]);
+
+        $status = $period === null ? null : (string) $period->status;
+        $totalCents = $period === null ? 0 : $this->toCents((string) $period->total);
+        $counted = $status !== null && in_array($status, PayrollStatus::closingValues(), true);
+
+        $manual = DB::table('expenses as record')
+            ->join('finance_categories as category', 'category.id', '=', 'record.category_id')
+            ->where('category.name', 'Payroll')
+            ->whereBetween('record.date', [$start->toDateString(), $start->copy()->endOfMonth()->toDateString()])
+            ->value(DB::raw('COALESCE(SUM(record.amount), 0)'));
+
+        $manualCents = $this->toCents((string) ($manual ?? '0'));
+
+        return [
+            'status' => $status,
+            'total' => $this->fromCents($totalCents),
+            'counted' => $counted,
+            'manual_payroll_entries' => $this->fromCents($manualCents),
+            'double_count_warning' => $counted && $manualCents > 0,
         ];
     }
 
@@ -498,7 +813,7 @@ class FinanceService
      *
      * The table name is a constant from this class, never anything a caller supplied.
      *
-     * @return list<array{category_id: int, name: string, total: string}>
+     * @return list<array{category_id: int, name: string, total: string, source: string}>
      */
     private function totalsByCategory(string $table, int $year, int $month): array
     {
@@ -519,12 +834,13 @@ class FinanceService
                 'category_id' => (int) $row->category_id,
                 'name' => (string) $row->name,
                 'total' => $this->fromCents($this->toCents((string) $row->total)),
+                'source' => 'ledger',
             ])
             ->all();
     }
 
     /**
-     * @param  list<array{category_id: int, name: string, total: string}>  $lines
+     * @param  list<array{category_id: int, name: string, total: string, source?: string}>  $lines
      */
     private function sumCents(array $lines): int
     {

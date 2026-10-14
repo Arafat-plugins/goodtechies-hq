@@ -20,6 +20,7 @@ use App\Models\PayrollItem;
 use App\Models\PayrollPeriod;
 use App\Models\Permission;
 use App\Models\Project;
+use App\Models\RecurringExpense;
 use App\Models\RecurringTask;
 use App\Models\Tag;
 use App\Models\Task;
@@ -31,6 +32,7 @@ use App\Models\UserProjectPermission;
 use App\Services\ConversationService;
 use App\Services\GroupService;
 use App\Services\MessageService;
+use App\Support\FinanceCategoryKind;
 use App\Support\RoleName;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Route as RoutingRoute;
@@ -209,6 +211,9 @@ function matrixParameters(): array
         // tests assert. See the DELETE note beside the finance rows.
         '{income}' => (string) Income::query()->orderBy('id')->firstOrFail()->id,
         '{expense}' => (string) Expense::query()->orderBy('id')->firstOrFail()->id,
+        // A repeating expense made here, because nothing seeds one — and the DELETE row
+        // consumes it, so it must not be anything another row or test relies on.
+        '{recurringExpense}' => matrixRecurringExpenseId(),
         // An IN-USE category, deliberately: the delete row against it asserts the refusal
         // rather than consuming the list out from under the two rows above.
         '{category}' => (string) FinanceCategory::query()
@@ -446,6 +451,33 @@ function matrixGrantId(): string
             'user_id' => $employee->user_id,
             'project_id' => Project::where('name', 'Buffalo Modular — SEO')->firstOrFail()->id,
             'permission_id' => Permission::where('key', 'projects.view_finance')->firstOrFail()->id,
+        ])->id;
+    }
+
+    return $id;
+}
+
+/**
+ * A repeating expense, created once and remembered (none is seeded). December, so it is not due
+ * in any month the finance tests read.
+ */
+function matrixRecurringExpenseId(): string
+{
+    static $id = null;
+
+    if ($id === null || ! RecurringExpense::whereKey($id)->exists()) {
+        $id = (string) RecurringExpense::query()->create([
+            'category_id' => FinanceCategory::query()
+                ->where('kind', FinanceCategoryKind::Expense->value)
+                ->orderBy('id')
+                ->firstOrFail()->id,
+            'amount' => '20.00',
+            'frequency' => 'monthly',
+            'start_date' => '2026-12-01',
+            'next_due_date' => '2026-12-01',
+            'occurrences' => 0,
+            'active' => true,
+            'created_by' => User::where('email', 'shahadat@goodtechies.test')->firstOrFail()->id,
         ])->id;
     }
 
@@ -1261,6 +1293,8 @@ function permissionMatrix(): array
         ['POST', 'finance/expenses', $finance(302)],
         ['PUT', 'finance/income/{income}', $finance(302)],
         ['PUT', 'finance/expenses/{expense}', $finance(302)],
+        ['POST', 'finance/recurring-expenses', $finance(302)],
+        ['PUT', 'finance/recurring-expenses/{recurringExpense}', $finance(302)],
         // The two category writes are body-less, so they stop at the validation redirect and
         // the ACCOUNTANT cell reads 302 — **which is not the claim that they may write the
         // list.** `FinanceCategoryPolicy` refuses them and the controller asks it per act; that
@@ -1277,6 +1311,9 @@ function permissionMatrix(): array
         // the key; that is asserted directly, on a live row, in tests/Feature/Finance/.
         ['DELETE', 'finance/income/{income}', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404]],
         ['DELETE', 'finance/expenses/{expense}', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404]],
+        // The repeating expense the matrix made for itself: the ADMIN cell consumes it, so the
+        // cells after it are 404 for the same reason as the two rows above.
+        ['DELETE', 'finance/recurring-expenses/{recurringExpense}', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404]],
         // A category that is IN USE cannot be deleted at all — `ON DELETE RESTRICT`, which is
         // why this row is safe to walk: nothing consumes anything. The ADMIN's 302 is the
         // refusal arriving as a flash rather than a 500, which is the behaviour worth pinning.

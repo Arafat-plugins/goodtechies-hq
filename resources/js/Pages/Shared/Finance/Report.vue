@@ -7,7 +7,9 @@ import BarCompare, { type BarCompareItem } from '@/Components/Charts/BarCompare.
 import EmptyState from '@/Components/EmptyState.vue';
 import FinanceMonthNav from '@/Components/Finance/FinanceMonthNav.vue';
 import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
-import type { FinanceMonth, MonthlyRollup } from '@/Components/Finance/finance';
+import PayrollNotice from '@/Components/Finance/PayrollNotice.vue';
+import ProjectEarningsTable from '@/Components/Finance/ProjectEarningsTable.vue';
+import type { FinanceMonth, MonthlyRollup, ProjectEarnings } from '@/Components/Finance/finance';
 import { financeRoutes, formatMoney } from '@/Components/Finance/finance';
 import { financeTrendHref, moneyValue, type FinanceProjectCut, type FinanceTrend } from '@/Components/Finance/financeReport';
 import PageActionsHost from '@/Components/PageActionsHost.vue';
@@ -70,6 +72,8 @@ const props = defineProps<{
     trend: FinanceTrend;
     currency: string;
     dashboardHref: string;
+    /** Per project: expected against received this month, costs, profit, still owed; one-time contracts. */
+    earnings: ProjectEarnings;
 }>();
 
 /** The three windows the length control offers. Each is a link, so each is an address. */
@@ -150,6 +154,18 @@ const trendRange = computed(() => {
                     <p class="text-2xl font-semibold tabular-nums">{{ formatMoney(rollup.net, currency) }}</p>
                 </Card>
             </div>
+
+            <PayrollNotice :payroll="rollup.payroll" :month-label="month.label" :currency="currency" />
+        </section>
+
+        <section aria-labelledby="report-earnings" class="flex min-w-0 flex-col gap-4">
+            <div class="flex min-w-0 flex-col gap-1">
+                <h2 id="report-earnings" class="text-base font-semibold tracking-tight">
+                    Projects — expected vs received
+                </h2>
+            </div>
+
+            <ProjectEarningsTable :earnings="earnings" :currency="currency" />
         </section>
 
         <!-- ── Cut one: by category ─────────────────────────────────────────────────── -->
@@ -187,10 +203,9 @@ const trendRange = computed(() => {
                     By project — {{ month.label }}
                 </h2>
                 <!--
-                    The sentence this cut cannot do without. An expense has no project link
-                    anywhere in this system (Part D §20), so there is no per-project cost — and
-                    an empty expense column beside the income one would invite exactly the wrong
-                    conclusion, that projects cost nothing. Said in words, once, above the table.
+                    This cut is income only. An expense may now name a project (decision 8-17b),
+                    but per-project costs and profit live in "Projects — expected vs received"
+                    above, so this table stays the plain income grouping it always was.
                 -->
             </div>
 
