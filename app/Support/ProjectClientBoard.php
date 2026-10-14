@@ -76,7 +76,7 @@ final class ProjectClientBoard
                 ->notArchived()
                 ->topLevel()
                 ->orderByDesc('id')
-                ->get(['id', 'project_id', 'title', 'status', 'due_date'])
+                ->get(['id', 'project_id', 'title', 'status', 'due_date', 'tracked_seconds'])
                 ->groupBy('project_id')
             : collect();
         $surface = (string) $taskSurface;
@@ -361,6 +361,8 @@ final class ProjectClientBoard
                 'status_label' => $task->status?->label(),
                 'tone' => $task->status?->tone(),
                 'due_date' => $task->due_date?->toDateString(),
+                // The time spent on it (approved tracked time, the task's cache) — the card's task row shows it.
+                'tracked_seconds' => (int) $task->tracked_seconds,
                 'href' => "/{$surface}/tasks/{$task->getKey()}",
             ])->values()->all(),
         ];
