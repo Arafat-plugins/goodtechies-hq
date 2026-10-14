@@ -22,7 +22,7 @@ final class ProjectTaskList
     public const LIMIT = 50;
 
     /**
-     * @return array{total: int, open: int, rows: list<array<string, mixed>>}
+     * @return array{total: int, open: int, tracked_seconds: int, counts: array<string, int>, rows: list<array<string, mixed>>}
      */
     public static function for(User $viewer, Project $project, string $surface): array
     {
@@ -52,6 +52,9 @@ final class ProjectTaskList
                 'status_label' => $task->status?->label(),
                 'tone' => $task->status?->tone(),
                 'is_open' => $task->status?->isOpen() ?? true,
+                // Polish 080: the project page's task cards show the priority.
+                'priority' => $task->priority?->value,
+                'priority_label' => $task->priority?->label(),
                 'due_date' => $task->due_date?->toDateString(),
                 // Polish 030: the time spent on it (approved tracked time, the task's cache).
                 'tracked_seconds' => (int) $task->tracked_seconds,
@@ -72,6 +75,18 @@ final class ProjectTaskList
             ? (int) TimeEntry::query()->tracked()->where('project_id', $project->getKey())->sum('duration_seconds')
             : (int) (clone $base)->sum('tracked_seconds');
 
-        return ['total' => $total, 'open' => $open, 'tracked_seconds' => $tracked, 'rows' => $rows];
+        // Polish 080: the project page's stat cards and board columns (every visible task, not
+        // just the first fifty): to do = backlog+todo, in progress = in_progress+changes_requested
+        // +waiting, review = in_review, complete = completed. Cancelled is in no column.
+        $byStatus = (clone $base)->toBase()->selectRaw('status, count(*) as aggregate')->groupBy('status')->pluck('aggregate', 'status');
+        $sum = fn (array $statuses): int => (int) collect($statuses)->sum(fn (string $status): int => (int) ($byStatus[$status] ?? 0));
+        $counts = [
+            'todo' => $sum(['backlog', 'todo']),
+            'progress' => $sum(['in_progress', 'changes_requested', 'waiting']),
+            'review' => $sum(['in_review']),
+            'complete' => $sum(['completed']),
+        ];
+
+        return ['total' => $total, 'open' => $open, 'tracked_seconds' => $tracked, 'counts' => $counts, 'rows' => $rows];
     }
 }

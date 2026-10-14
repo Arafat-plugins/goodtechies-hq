@@ -26,6 +26,7 @@ use App\Support\ProjectStatus;
 use App\Support\ProjectTaskList;
 use App\Support\ProjectType;
 use App\Support\RoleName;
+use App\Support\TaskPriority;
 use App\Support\UserStatus;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -93,7 +94,7 @@ class ProjectController extends Controller
 
         return Inertia::render('Admin/Projects/Index', [
             'layout' => $layout,
-            'clientTree' => fn (): array => $layout === 'clients' ? ProjectClientBoard::tree($request->user()) : [],
+            'clientTree' => fn (): array => $layout === 'clients' ? ProjectClientBoard::tree($request->user(), taskSurface: 'admin') : [],
             'projectBoard' => function () use ($request, $selected): ?array {
                 if ($selected === null) {
                     return null;
@@ -176,6 +177,8 @@ class ProjectController extends Controller
             'assignableEmployees' => $this->assignableEmployees(),
             // Client request 2026-10-06: every task on this project, listed on its Tasks tab.
             'projectTasks' => fn (): array => ProjectTaskList::for($request->user(), $project, 'admin'),
+            // Polish 080: the page's "Add task" opens the quick-add modal, which needs these.
+            'taskPriorities' => $this->options(TaskPriority::cases()),
 
             // The project's channel (Phase 6). Only its ID travels in the props: the Discussion
             // tab mounts the same thread component the Messages page does, and that component
@@ -350,13 +353,13 @@ class ProjectController extends Controller
     }
 
     /**
-     * @param  list<ProjectType|ProjectStatus|Priority|BillingType|ProjectRecurrenceFrequency|BillingFrequency>  $cases
+     * @param  list<ProjectType|ProjectStatus|Priority|BillingType|ProjectRecurrenceFrequency|BillingFrequency|TaskPriority>  $cases
      * @return list<array{value: string, label: string}>
      */
     private function options(array $cases): array
     {
         return array_map(
-            fn (ProjectType|ProjectStatus|Priority|BillingType|ProjectRecurrenceFrequency|BillingFrequency $case): array => [
+            fn (ProjectType|ProjectStatus|Priority|BillingType|ProjectRecurrenceFrequency|BillingFrequency|TaskPriority $case): array => [
                 'value' => $case->value,
                 'label' => $case->label(),
             ],

@@ -49,7 +49,7 @@ class ProjectController extends Controller
             'projects' => ProjectResource::collection($projects),
             'filters' => $filters,
             // Polish 078: the page draws the Admin's project cards (polish 075) from these.
-            'clientTree' => ProjectClientBoard::tree($request->user()),
+            'clientTree' => ProjectClientBoard::tree($request->user(), taskSurface: 'employee'),
             'projectTypes' => array_map(
                 fn (ProjectType $type): array => ['value' => $type->value, 'label' => $type->label()],
                 ProjectType::cases(),

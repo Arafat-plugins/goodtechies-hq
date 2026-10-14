@@ -637,6 +637,36 @@ function confirmDeactivate(): void {
                                             <!-- Polish 067: one line on a computer — dates drop the year when it is this
                                                  year, nothing wraps, the faces stay at the right. -->
                                             <div class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 pl-9 text-xs whitespace-nowrap text-muted-foreground sm:flex-nowrap">
+                                                <!-- Polish 061: the people assigned to the project (not its manager). -->
+                                                <!-- Polish 066: as initials faces (name on hover), not full names. -->
+                                                <!-- Polish 079: a little smaller (size-6) and first on the line, before the status. -->
+                                                <span
+                                                    v-if="team(project).length"
+                                                    class="flex shrink-0 items-center -space-x-0.5"
+                                                    role="img"
+                                                    :aria-label="`Assigned: ${team(project).map((member) => member.name).join(', ')}`"
+                                                >
+                                                    <TooltipProvider>
+                                                        <Tooltip v-for="member in team(project).slice(0, 4)" :key="member.id">
+                                                            <TooltipTrigger as-child>
+                                                                <Avatar class="size-6 ring-2 ring-card">
+                                                                    <AvatarFallback :class="cn('text-xs tracking-tighter', personTone(member.id).avatar)" aria-hidden="true">
+                                                                        {{ initials(member.name) }}
+                                                                    </AvatarFallback>
+                                                                </Avatar>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>{{ member.name }}</TooltipContent>
+                                                        </Tooltip>
+                                                        <Tooltip v-if="team(project).length > 4">
+                                                            <TooltipTrigger as-child>
+                                                                <span class="inline-flex size-6 items-center justify-center rounded-full bg-muted text-xs ring-2 ring-card" aria-hidden="true">
+                                                                    +{{ team(project).length - 4 }}
+                                                                </span>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>{{ team(project).slice(4).map((member) => member.name).join(', ') }}</TooltipContent>
+                                                        </Tooltip>
+                                                    </TooltipProvider>
+                                                </span>
                                                 <StatusPill :label="project.status_label" :tone="toneForProjectStatus(project.status)" />
                                                 <span v-if="project.start_date" :title="`Start date: ${formatDate(project.start_date)}`" class="inline-flex items-center gap-1 tabular-nums">
                                                     <CalendarDays class="size-3.5" aria-hidden="true" />
@@ -651,35 +681,6 @@ function confirmDeactivate(): void {
                                                     <CalendarCheck class="size-3.5" aria-hidden="true" />
                                                     <span>Due</span>
                                                     {{ shortDate(project.deadline) }}
-                                                </span>
-                                                <!-- Polish 061: the people assigned to the project (not its manager). -->
-                                                <!-- Polish 066: as initials faces (name on hover), not full names. -->
-                                                <span
-                                                    v-if="team(project).length"
-                                                    class="ml-auto flex shrink-0 items-center -space-x-1"
-                                                    role="img"
-                                                    :aria-label="`Assigned: ${team(project).map((member) => member.name).join(', ')}`"
-                                                >
-                                                    <TooltipProvider>
-                                                        <Tooltip v-for="member in team(project).slice(0, 4)" :key="member.id">
-                                                            <TooltipTrigger as-child>
-                                                                <Avatar class="size-7 ring-2 ring-card">
-                                                                    <AvatarFallback :class="cn('text-xs', personTone(member.id).avatar)" aria-hidden="true">
-                                                                        {{ initials(member.name) }}
-                                                                    </AvatarFallback>
-                                                                </Avatar>
-                                                            </TooltipTrigger>
-                                                            <TooltipContent>{{ member.name }}</TooltipContent>
-                                                        </Tooltip>
-                                                        <Tooltip v-if="team(project).length > 4">
-                                                            <TooltipTrigger as-child>
-                                                                <span class="inline-flex size-7 items-center justify-center rounded-full bg-muted text-xs ring-2 ring-card" aria-hidden="true">
-                                                                    +{{ team(project).length - 4 }}
-                                                                </span>
-                                                            </TooltipTrigger>
-                                                            <TooltipContent>{{ team(project).slice(4).map((member) => member.name).join(', ') }}</TooltipContent>
-                                                        </Tooltip>
-                                                    </TooltipProvider>
                                                 </span>
                                             </div>
                                         </li>

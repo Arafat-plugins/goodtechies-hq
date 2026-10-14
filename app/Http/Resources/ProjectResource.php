@@ -41,6 +41,8 @@ class ProjectResource extends JsonResource
             'priority' => $this->priority?->value,
             'priority_label' => $this->priority?->label(),
             'start_date' => $this->start_date?->toDateString(),
+            // Polish 080: "Created" in the project page's header.
+            'created_at' => $this->created_at?->toIso8601String(),
             'deadline' => $this->deadline?->toDateString(),
             'archived_at' => $this->archived_at?->toIso8601String(),
             'is_archived' => $this->isArchived(),

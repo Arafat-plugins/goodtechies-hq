@@ -38,7 +38,7 @@ final class ProjectClientBoard
      *
      * @return list<array<string, mixed>>
      */
-    public static function tree(User $viewer): array
+    public static function tree(User $viewer, ?string $taskSurface = null): array
     {
         $open = array_map(fn (TaskStatus $status): string => $status->value, array_filter(
             TaskStatus::cases(),
@@ -66,7 +66,22 @@ final class ProjectClientBoard
 
         $gate = Gate::forUser($viewer);
 
-        $rows = $groups->map(function (Collection $items, string $key) use ($gate): array {
+        // Polish 080: the project cards' "N tasks" dropdown — every top-level task the viewer
+        // can see on each project (Task::visibleTo), newest first; the count is then this list.
+        $withTasks = $taskSurface !== null;
+        $tasks = $withTasks
+            ? Task::query()
+                ->visibleTo($viewer)
+                ->whereIn('project_id', $projects->modelKeys())
+                ->notArchived()
+                ->topLevel()
+                ->orderByDesc('id')
+                ->get(['id', 'project_id', 'title', 'status', 'due_date'])
+                ->groupBy('project_id')
+            : collect();
+        $surface = (string) $taskSurface;
+
+        $rows = $groups->map(function (Collection $items, string $key) use ($gate, $withTasks, $tasks, $surface): array {
             /** @var Client|null $client */
             $client = $items->first()?->client;
             $nickname = trim((string) ($client?->nickname ?? ''));
@@ -93,6 +108,7 @@ final class ProjectClientBoard
                     'type' => $project->project_type?->value,
                     'created_at' => $project->created_at?->toIso8601String(),
                     'can_archive' => $gate->allows('archive', $project),
+                    ...($withTasks ? self::cardTasks($tasks->get($project->getKey(), collect()), $surface) : []),
                 ])->values()->all(),
             ];
         });
@@ -326,6 +342,27 @@ final class ProjectClientBoard
         return [
             'boxes' => ProjectServiceBoxes::configured(),
             'types' => array_map(fn (ProjectType $type): array => ['value' => $type->value, 'label' => $type->label()], ProjectType::cases()),
+        ];
+    }
+
+    /**
+     * Polish 080: a project card's task list and its count.
+     *
+     * @param  Collection<int, Task>  $tasks
+     * @return array{total: int, tasks: list<array<string, mixed>>}
+     */
+    private static function cardTasks(Collection $tasks, string $surface): array
+    {
+        return [
+            'total' => $tasks->count(),
+            'tasks' => $tasks->map(fn (Task $task): array => [
+                'id' => (int) $task->getKey(),
+                'title' => (string) $task->title,
+                'status_label' => $task->status?->label(),
+                'tone' => $task->status?->tone(),
+                'due_date' => $task->due_date?->toDateString(),
+                'href' => "/{$surface}/tasks/{$task->getKey()}",
+            ])->values()->all(),
         ];
     }
 }

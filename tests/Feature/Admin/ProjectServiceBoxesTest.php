@@ -41,6 +41,24 @@ it('gives each project card its type, created date, all-task count and archive r
         ->and($card['can_archive'])->toBeTrue();
 });
 
+it('lists each project card\'s tasks for its dropdown, and the project page counts them by column (polish 080)', function () {
+    $tree = $this->actingAs($this->admin)->get('/admin/projects')->assertOk()->inertiaProps()['clientTree'];
+    $card = collect($tree)->flatMap(fn (array $row): array => $row['projects'])->firstWhere('id', $this->project->id);
+    $taskIds = Task::query()->where('project_id', $this->project->id)->whereNull('parent_id')->whereNull('archived_at')->pluck('id')->sort()->values()->all();
+
+    expect(collect($card['tasks'])->pluck('id')->sort()->values()->all())->toBe($taskIds)
+        ->and($card['total'])->toBe(count($taskIds))
+        ->and($card['tasks'][0]['href'])->toStartWith('/admin/tasks/');
+
+    $props = $this->actingAs($this->admin)->get("/admin/projects/{$this->project->id}")->assertOk()->inertiaProps();
+    $counts = $props['projectTasks']['counts'];
+
+    expect(array_keys($counts))->toBe(['todo', 'progress', 'review', 'complete'])
+        ->and($counts['complete'])->toBe(Task::query()->where('project_id', $this->project->id)->whereNull('parent_id')->whereNull('archived_at')->where('status', 'completed')->count())
+        ->and($props['projectTasks']['rows'][0])->toHaveKey('priority_label')
+        ->and(collect($props['taskPriorities'])->pluck('value')->all())->toBe(['low', 'medium', 'high', 'urgent']);
+});
+
 it('sorts a client\'s projects into the default boxes with their open tasks only', function () {
     $this->project->update(['project_type' => ProjectType::WooCommerce]);
 

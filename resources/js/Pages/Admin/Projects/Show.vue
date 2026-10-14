@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Archive, ArchiveRestore, Pencil, Trash2 } from '@lucide/vue';
+import { Archive, ArchiveRestore, CalendarCheck, CalendarDays, CalendarPlus, CircleCheck, CirclePlay, Clock, ExternalLink, Folder, KanbanSquare, List, ListChecks, Pencil, Plus, Timer, Trash2, UserRound } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import FilePanel from '@/Components/Files/FilePanel.vue';
 import { fileRoutes, internalFileRoutes } from '@/Components/Files/files';
@@ -12,11 +12,16 @@ import FinanceCard from '@/Components/Projects/FinanceCard.vue';
 import MembersCard from '@/Components/Projects/MembersCard.vue';
 import ProjectTaskList, { type ProjectTasks } from '@/Components/Projects/ProjectTaskList.vue';
 import type { EmployeeOption, Option, Project } from '@/Components/Projects/ProjectForm.vue';
-import ProjectMetaList from '@/Components/Projects/ProjectMetaList.vue';
+import ProjectTaskBoard from '@/Components/Projects/ProjectTaskBoard.vue';
+import { projectTile } from '@/Components/Projects/projectTile';
 import StatusActions from '@/Components/Projects/StatusActions.vue';
 import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import RecurringPanel from '@/Components/Recurring/RecurringPanel.vue';
+import { statusToneClass } from '@/Components/StatusBadge.vue';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
+import QuickAddTaskModal from '@/Components/Tasks/QuickAddTaskModal.vue';
+import { formatDate } from '@/Components/Tasks/taskDetail';
+import { formatDuration } from '@/Components/Timer/timer';
 import { workingNowPing, type WorkingNowRow } from '@/Components/Timer/taskTimer';
 import WorkingNowPanel from '@/Components/Timer/WorkingNowPanel.vue';
 import { Button } from '@/Components/ui/button';
@@ -30,8 +35,10 @@ import {
     DialogTitle,
 } from '@/Components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
+import { ToggleGroup, ToggleGroupItem } from '@/Components/ui/toggle-group';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useUrlTab } from '@/lib/tabState';
+import { cn } from '@/lib/utils';
 
 defineOptions({ layout: AdminLayout });
 
@@ -45,6 +52,8 @@ const props = defineProps<{
     workingNow?: WorkingNowRow[];
     /** Client request 2026-10-06: every task on this project. */
     projectTasks: ProjectTasks;
+    /** Polish 080: for the quick-add task modal. */
+    taskPriorities: Option[];
 }>();
 
 /** A `task.changed` kind `timer` frame re-reads `workingNow` alone (flow F1). */
@@ -127,16 +136,65 @@ const internalFiles = computed(() => internalFileRoutes(project.value.id));
 const tab = useUrlTab(
     [
         'overview',
-        ...(permissions.value.can_view_finance === true ? ['finance'] : []),
-        'members',
+        'tasks',
+        'files',
         'discussion',
         'activity',
-        'tasks',
+        ...(permissions.value.can_view_finance === true ? ['finance'] : []),
+        'members',
         'recurring',
-        'files',
     ],
-    'overview',
+    // Polish 080: the page opens on its tasks, as in the client's reference.
+    'tasks',
 );
+
+/* ------------------------------------------------------------ polish 080 */
+
+/** Board (status columns) or the plain list. */
+const taskView = ref<'board' | 'list'>('board');
+
+function chooseTaskView(value: unknown): void {
+    if (value === 'board' || value === 'list') {
+        taskView.value = value;
+    }
+}
+
+const counts = computed(() => props.projectTasks.counts ?? { todo: 0, progress: 0, review: 0, complete: 0 });
+
+function percent(part: number): number {
+    return props.projectTasks.total > 0 ? Math.round((part / props.projectTasks.total) * 100) : 0;
+}
+
+/** The four cards under the header: total, in progress (+ review), to do, completed. */
+const stats = computed(() => [
+    { key: 'total', label: 'Total tasks', value: props.projectTasks.total, icon: ListChecks, tone: 'changes' as const, note: `${counts.value.complete} completed` },
+    { key: 'progress', label: 'In progress', value: counts.value.progress + counts.value.review, icon: CirclePlay, tone: 'progress' as const, note: `${percent(counts.value.progress + counts.value.review)}%` },
+    { key: 'todo', label: 'To do', value: counts.value.todo, icon: Clock, tone: 'waiting' as const, note: `${percent(counts.value.todo)}%` },
+    { key: 'complete', label: 'Completed', value: counts.value.complete, icon: CircleCheck, tone: 'done' as const, note: `${percent(counts.value.complete)}%` },
+]);
+
+const canAddTask = computed(() => permissions.value.can_update === true && !project.value.is_archived);
+const quickAddOpen = ref(false);
+const quickAddStatus = ref<string | null>(null);
+
+function addTask(status: string | null = null): void {
+    quickAddStatus.value = status;
+    quickAddOpen.value = true;
+}
+
+const thisProject = computed(() => [{ id: project.value.id, name: project.value.name }]);
+const employeeRefs = computed(() => props.assignableEmployees.map((employee) => ({ id: employee.id, name: employee.name })));
+
+function siteHref(domain: string): string {
+    return /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
+}
+
+function bareDomain(domain: string): string {
+    return domain.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+}
+
+const TAB_CLASS =
+    '-mb-px h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 text-muted-foreground shadow-flat data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground dark:data-[state=active]:border-primary dark:data-[state=active]:bg-transparent';
 
 const archiveOpen = ref(false);
 const archiving = ref(false);
@@ -169,42 +227,124 @@ function confirmArchiveToggle(): void {
     <Head :title="project.name" />
 
     <PageShell :title="project.name" description="Money, members and what has happened lately.">
-        <template #actions>
-            <StatusPill :label="project.status_label" :tone="toneForProjectStatus(project.status)" />
-            <span
-                v-if="project.is_archived"
-                class="rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground"
-            >
-                Archived
-            </span>
-            <Button v-if="permissions.can_update" as-child variant="outline" size="sm">
-                <Link :href="`/admin/projects/${project.id}/edit`">
-                    <Pencil aria-hidden="true" />
-                    Edit
-                </Link>
-            </Button>
-            <StatusActions v-if="permissions.can_update" :project="project" :statuses="statuses" />
-            <Button
-                v-if="permissions.can_archive"
-                type="button"
-                :variant="project.is_archived ? 'outline' : 'destructive'"
-                size="sm"
-                @click="archiveOpen = true"
-            >
-                <component :is="project.is_archived ? ArchiveRestore : Archive" aria-hidden="true" />
-                {{ project.is_archived ? 'Unarchive' : 'Archive' }}
-            </Button>
-            <Button
-                v-if="project.is_archived && canForceDelete(project)"
-                type="button"
-                variant="destructive"
-                size="sm"
-                @click="deleteTarget = project"
-            >
-                <Trash2 aria-hidden="true" />
-                Delete permanently…
-            </Button>
-        </template>
+        <!-- Polish 080: the client's reference header — folder tile, name, website, the project's
+             details on one line, its status and the page's buttons. -->
+        <header class="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between" data-testid="project-header">
+            <div class="flex min-w-0 items-start gap-4">
+                <span :class="cn('flex size-16 shrink-0 items-center justify-center rounded-xl border', projectTile(project.id))" aria-hidden="true">
+                    <Folder class="size-8" />
+                </span>
+                <div class="flex min-w-0 flex-col gap-1.5">
+                    <div class="flex min-w-0 flex-wrap items-center gap-2">
+                        <h2 class="min-w-0 text-2xl font-bold break-words">{{ project.name }}</h2>
+                        <StatusPill :label="project.status_label" :tone="toneForProjectStatus(project.status)" />
+                        <span v-if="project.is_archived" class="rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                            Archived
+                        </span>
+                    </div>
+                    <a
+                        v-if="project.domain"
+                        :href="siteHref(project.domain)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-flex w-fit min-w-0 items-center gap-1.5 text-base text-status-progress-fg hover:underline"
+                    >
+                        <span class="truncate">{{ bareDomain(project.domain) }}</span>
+                        <ExternalLink class="size-4 shrink-0" aria-hidden="true" />
+                        <span class="sr-only">(opens in a new tab)</span>
+                    </a>
+                    <dl class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 text-sm">
+                        <div class="inline-flex items-center gap-1.5">
+                            <UserRound class="size-4 text-muted-foreground" aria-hidden="true" />
+                            <dt class="text-muted-foreground">Client</dt>
+                            <dd class="font-medium">
+                                <Link v-if="project.client" :href="`/admin/clients/${project.client.id}`" class="hover:underline">{{ project.client.name }}</Link>
+                                <span v-else>Internal</span>
+                            </dd>
+                        </div>
+                        <div v-if="project.created_at" class="inline-flex items-center gap-1.5">
+                            <CalendarPlus class="size-4 text-muted-foreground" aria-hidden="true" />
+                            <dt class="text-muted-foreground">Created</dt>
+                            <dd class="font-medium tabular-nums">{{ formatDate(project.created_at.slice(0, 10)) }}</dd>
+                        </div>
+                        <div class="inline-flex items-center gap-1.5">
+                            <dt class="text-muted-foreground">Type</dt>
+                            <dd class="font-medium">{{ project.project_type_label }}</dd>
+                        </div>
+                        <div v-if="project.pm" class="inline-flex items-center gap-1.5">
+                            <dt class="text-muted-foreground">Manager</dt>
+                            <dd class="font-medium">{{ project.pm.name }}</dd>
+                        </div>
+                        <div v-if="project.start_date" class="inline-flex items-center gap-1.5">
+                            <CalendarDays class="size-4 text-muted-foreground" aria-hidden="true" />
+                            <dt class="text-muted-foreground">Start</dt>
+                            <dd class="font-medium tabular-nums">{{ formatDate(project.start_date) }}</dd>
+                        </div>
+                        <div v-if="project.deadline" class="inline-flex items-center gap-1.5">
+                            <CalendarCheck class="size-4 text-muted-foreground" aria-hidden="true" />
+                            <dt class="text-muted-foreground">Due</dt>
+                            <dd class="font-medium tabular-nums">{{ formatDate(project.deadline) }}</dd>
+                        </div>
+                        <div class="inline-flex items-center gap-1.5">
+                            <Timer class="size-4 text-muted-foreground" aria-hidden="true" />
+                            <dt class="text-muted-foreground">Time spent</dt>
+                            <dd class="font-medium tabular-nums">{{ formatDuration(projectTasks.tracked_seconds) }}</dd>
+                        </div>
+                    </dl>
+                </div>
+            </div>
+            <div class="flex shrink-0 flex-wrap items-center gap-2">
+                <Button v-if="permissions.can_update" as-child variant="outline">
+                    <Link :href="`/admin/projects/${project.id}/edit`">
+                        <Pencil aria-hidden="true" />
+                        Edit Project
+                    </Link>
+                </Button>
+                <StatusActions v-if="permissions.can_update" :project="project" :statuses="statuses" />
+                <Button v-if="canAddTask" type="button" @click="addTask()">
+                    <Plus aria-hidden="true" />
+                    Add Task
+                </Button>
+                <Button
+                    v-if="permissions.can_archive"
+                    type="button"
+                    :variant="project.is_archived ? 'outline' : 'destructive'"
+                    @click="archiveOpen = true"
+                >
+                    <component :is="project.is_archived ? ArchiveRestore : Archive" aria-hidden="true" />
+                    {{ project.is_archived ? 'Unarchive' : 'Archive' }}
+                </Button>
+                <Button
+                    v-if="project.is_archived && canForceDelete(project)"
+                    type="button"
+                    variant="destructive"
+                    @click="deleteTarget = project"
+                >
+                    <Trash2 aria-hidden="true" />
+                    Delete permanently…
+                </Button>
+            </div>
+        </header>
+
+        <!-- Polish 080: the task numbers, as four cards. -->
+        <ul class="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Task numbers">
+            <li v-for="stat in stats" :key="stat.key">
+                <Card class="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center sm:gap-4">
+                    <span :class="cn('flex size-12 shrink-0 items-center justify-center rounded-lg border', statusToneClass(stat.tone))" aria-hidden="true">
+                        <component :is="stat.icon" class="size-6" />
+                    </span>
+                    <div class="flex min-w-0 flex-col gap-1">
+                        <span class="text-sm text-muted-foreground">{{ stat.label }}</span>
+                        <span class="flex flex-wrap items-center gap-2">
+                            <span class="text-2xl font-semibold tabular-nums">{{ stat.value }}</span>
+                            <span :class="cn('rounded-full border px-2 py-0.5 text-xs font-medium tabular-nums', statusToneClass(stat.tone))">
+                                {{ stat.note }}
+                            </span>
+                        </span>
+                    </div>
+                </Card>
+            </li>
+        </ul>
 
         <section v-if="workingNow?.length" aria-labelledby="project-working-now" class="min-w-0">
             <WorkingNowPanel :rows="workingNow" heading-id="project-working-now" />
@@ -212,17 +352,37 @@ function confirmArchiveToggle(): void {
 
         <Tabs v-model="tab" class="min-w-0 gap-4">
             <!-- The trigger row scrolls on its own at 375 so the page itself never does. -->
-            <div class="min-w-0 max-w-full overflow-x-auto">
-                <TabsList>
-                    <TabsTrigger value="overview">Overview</TabsTrigger>
-                    <TabsTrigger v-if="permissions.can_view_finance" value="finance">Finance</TabsTrigger>
-                    <TabsTrigger value="members">Members</TabsTrigger>
-                    <TabsTrigger value="discussion">Discussion</TabsTrigger>
-                    <TabsTrigger value="activity">Activity</TabsTrigger>
-                    <TabsTrigger value="tasks">Tasks</TabsTrigger>
-                    <TabsTrigger value="recurring">Recurring</TabsTrigger>
-                    <TabsTrigger value="files">Files</TabsTrigger>
-                </TabsList>
+            <div class="flex min-w-0 flex-wrap items-center gap-2 border-b">
+                <div class="min-w-0 flex-1 basis-full overflow-x-auto [scrollbar-width:none] md:basis-auto [&::-webkit-scrollbar]:hidden">
+                    <TabsList class="h-auto w-max gap-1 rounded-none bg-transparent p-0">
+                        <TabsTrigger value="overview" :class="TAB_CLASS">Overview</TabsTrigger>
+                        <TabsTrigger value="tasks" :class="TAB_CLASS">Tasks</TabsTrigger>
+                        <TabsTrigger value="files" :class="TAB_CLASS">Files</TabsTrigger>
+                        <TabsTrigger value="discussion" :class="TAB_CLASS">Discussions</TabsTrigger>
+                        <TabsTrigger value="activity" :class="TAB_CLASS">Activity</TabsTrigger>
+                        <TabsTrigger v-if="permissions.can_view_finance" value="finance" :class="TAB_CLASS">Finance</TabsTrigger>
+                        <TabsTrigger value="members" :class="TAB_CLASS">Members</TabsTrigger>
+                        <TabsTrigger value="recurring" :class="TAB_CLASS">Recurring</TabsTrigger>
+                    </TabsList>
+                </div>
+                <ToggleGroup
+                    v-if="tab === 'tasks'"
+                    type="single"
+                    variant="outline"
+                    class="mb-2 shrink-0"
+                    :model-value="taskView"
+                    aria-label="How to show tasks"
+                    @update:model-value="chooseTaskView"
+                >
+                    <ToggleGroupItem value="board" class="px-3">
+                        <KanbanSquare aria-hidden="true" />
+                        Board
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="list" class="px-3">
+                        <List aria-hidden="true" />
+                        List
+                    </ToggleGroupItem>
+                </ToggleGroup>
             </div>
 
             <!--
@@ -232,8 +392,7 @@ function confirmArchiveToggle(): void {
                 component, exactly as `Pages/Shared/Notifications.vue` does it.
             -->
             <TabsContent value="overview" class="flex flex-col gap-4 rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
-                <ProjectMetaList :project="project" :tracked-seconds="projectTasks.tracked_seconds" />
-
+                <!-- Polish 080: the details moved up into the header; Overview keeps the notes. -->
                 <div class="grid items-start gap-4 lg:grid-cols-2">
                     <Card class="min-w-0 gap-2">
                         <CardHeader>
@@ -295,7 +454,10 @@ function confirmArchiveToggle(): void {
                 real one, pre-filtered, and says so.
             -->
             <TabsContent value="tasks" class="rounded-lg focus-visible:ring-3 focus-visible:ring-ring">
+                <!-- Polish 080: a grid of status columns (Board) or the plain list. -->
+                <ProjectTaskBoard v-if="taskView === 'board'" :tasks="projectTasks" :can-add="canAddTask" @add="addTask" />
                 <ProjectTaskList
+                    v-else
                     :tasks="projectTasks"
                     scope-label="All tasks"
                     :all-href="`/admin/tasks?project_id=${project.id}`"
@@ -415,4 +577,14 @@ function confirmArchiveToggle(): void {
     </Dialog>
 
     <DeleteProjectDialog :project="deleteTarget" @close="deleteTarget = null" />
+
+    <QuickAddTaskModal
+        v-if="canAddTask"
+        v-model:open="quickAddOpen"
+        :projects="thisProject"
+        :priorities="taskPriorities"
+        :employees="employeeRefs"
+        :project-id="project.id"
+        :status="quickAddStatus"
+    />
 </template>

@@ -60,6 +60,7 @@ export interface Project {
     priority_label: string;
     start_date?: string | null;
     deadline?: string | null;
+    created_at?: string | null;
     archived_at?: string | null;
     is_archived?: boolean;
     employee_notes?: string | null;

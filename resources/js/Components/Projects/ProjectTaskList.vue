@@ -24,6 +24,9 @@ export interface ProjectTaskRow {
     status_label: string | null;
     tone: StatusKey | null;
     is_open: boolean;
+    /** Polish 080: shown on the project page's board cards. */
+    priority?: string | null;
+    priority_label?: string | null;
     due_date: string | null;
     /** Polish 030: approved time spent on this task. */
     tracked_seconds: number;
@@ -36,6 +39,8 @@ export interface ProjectTasks {
     open: number;
     /** Polish 030: approved time spent on the whole project. */
     tracked_seconds: number;
+    /** Polish 080: every visible task by board column (stat cards + column headers). */
+    counts?: { todo: number; progress: number; review: number; complete: number };
     rows: ProjectTaskRow[];
 }
 

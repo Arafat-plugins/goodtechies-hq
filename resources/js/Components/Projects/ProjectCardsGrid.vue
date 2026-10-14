@@ -1,23 +1,21 @@
 <script setup lang="ts">
 /**
- * Polish 075: Admin → Projects (By client, nothing chosen) as one card per project — the client's
+ * Polish 075/080: Admin → Projects (By client, nothing chosen) as one card per project — the client's
  * image 2: a coloured folder tile, the name, the website (or "Website not added"), "N tasks" (all
  * top-level tasks), "Client: <name>" and a ⋯ menu (Open, Edit, Archive). Filtered by the page's
  * "All projects" (type) / "All clients" pickers and ordered by its sort picker.
  */
 import { Link } from '@inertiajs/vue3';
-import { Archive, ExternalLink, Folder, FolderKanban, Link2Off, ListTodo, MoreHorizontal, Pencil, UserRound } from '@lucide/vue';
-import { computed } from 'vue';
+import { CalendarDays, ChevronDown, ExternalLink, Folder, FolderKanban, Link2Off, ListTodo } from '@lucide/vue';
+import { computed, ref } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
 import type { ClientTreeRow } from '@/Components/Projects/ClientProjectsView.vue';
+import { projectTile } from '@/Components/Projects/projectTile';
 import { Button } from '@/Components/ui/button';
 import { Card } from '@/Components/ui/card';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/Components/ui/dropdown-menu';
+import type { StatusKey } from '@/Components/StatusBadge.vue';
+import StatusBadge from '@/Components/StatusBadge.vue';
+import { formatDate } from '@/Components/Tasks/taskDetail';
 import { cn } from '@/lib/utils';
 
 export type ProjectSort = 'newest' | 'oldest' | 'name';
@@ -31,32 +29,41 @@ const props = defineProps<{
     sort: ProjectSort;
     /** Polish 078: where a project opens (the employee's own project page). */
     base?: string;
-    /** Polish 078: false = the ⋯ menu offers Open only (employees). */
+    /** Polish 078: false = employees (no manage actions; the ⋯ menu itself went in 081). */
     canManage?: boolean;
 }>();
 
 const openBase = computed(() => props.base ?? '/admin/projects');
+
+/** Polish 081: which cards show their tasks (collapsed by default). */
+const openIds = ref<Set<number>>(new Set());
+
+function isOpen(id: number): boolean {
+    return openIds.value.has(id);
+}
+
+function toggle(id: number): void {
+    const next = new Set(openIds.value);
+
+    if (next.has(id)) {
+        next.delete(id);
+    } else {
+        next.add(id);
+    }
+
+    openIds.value = next;
+}
 
 const emit = defineEmits<{
     archive: [project: { id: number; name: string; is_archived: boolean }];
     clear: [];
 }>();
 
-/** The folder tile's colour, varied by project like the reference (status tokens only). */
-const TILES = [
-    'border-status-progress-border bg-status-progress-bg text-status-progress-fg',
-    'border-status-done-border bg-status-done-bg text-status-done-fg',
-    'border-status-changes-border bg-status-changes-bg text-status-changes-fg',
-    'border-status-review-border bg-status-review-bg text-status-review-fg',
-    'border-status-backlog-border bg-status-backlog-bg text-status-backlog-fg',
-    'border-status-waiting-border bg-status-waiting-bg text-status-waiting-fg',
-];
-
 const cards = computed(() => {
     const rows = props.tree
         .filter((row) => props.client === '' || row.key === props.client)
         .flatMap((row) =>
-            row.projects.map((project) => ({ ...project, clientName: row.name ?? 'Internal' })),
+            row.projects.map((project) => ({ ...project })),
         )
         .filter((project) => props.type === '' || project.type === props.type);
 
@@ -92,10 +99,10 @@ function bare(domain: string): string {
     </Card>
     <ul v-else class="grid min-w-0 items-start gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Projects">
         <li v-for="project in cards" :key="project.id" class="min-w-0">
-            <Card class="flex min-w-0 flex-col gap-4 p-4 hover:border-ring" data-testid="project-card">
+            <Card class="flex min-w-0 flex-col gap-0 p-4 hover:border-ring" data-testid="project-card">
                 <div class="flex min-w-0 items-start gap-3">
                     <span
-                        :class="cn('flex size-11 shrink-0 items-center justify-center rounded-lg border', TILES[project.id % TILES.length])"
+                        :class="cn('flex size-11 shrink-0 items-center justify-center rounded-lg border', projectTile(project.id))"
                         aria-hidden="true"
                     >
                         <Folder class="size-5" />
@@ -124,50 +131,41 @@ function bare(domain: string): string {
                             <Link2Off class="size-3.5" aria-hidden="true" />
                         </span>
                     </div>
-                    <span class="inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground tabular-nums">
+                    <!-- Polish 081: "N tasks" opens the tasks inside the card (like the old project
+                         dropdown), not as a popup; the ⋯ menu is gone. -->
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 shrink-0 gap-1.5 px-2 text-sm font-normal text-muted-foreground tabular-nums"
+                        :aria-expanded="isOpen(project.id)"
+                        :aria-controls="`project-tasks-${project.id}`"
+                        @click="toggle(project.id)"
+                    >
                         <ListTodo class="size-4" aria-hidden="true" />
                         {{ project.total }} {{ project.total === 1 ? 'task' : 'tasks' }}
-                    </span>
+                        <ChevronDown :class="cn('size-3.5 transition-transform', isOpen(project.id) && 'rotate-180')" aria-hidden="true" />
+                    </Button>
                 </div>
-                <div class="flex min-w-0 items-center gap-2 text-sm">
-                    <UserRound class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <span class="text-muted-foreground">Client:</span>
-                    <span class="min-w-0 flex-1 truncate font-medium">{{ project.clientName }}</span>
-                    <DropdownMenu>
-                        <DropdownMenuTrigger as-child>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                class="shrink-0 text-muted-foreground"
-                                :aria-label="`More for ${project.name}`"
+                <div v-if="isOpen(project.id)" :id="`project-tasks-${project.id}`" class="mt-3 border-t pt-3">
+                    <p v-if="!project.tasks?.length" class="text-xs text-muted-foreground">No tasks yet</p>
+                    <ul v-else class="flex min-w-0 flex-col gap-2" :aria-label="`Tasks in ${project.name}`">
+                        <li v-for="task in project.tasks" :key="task.id">
+                            <Link
+                                :href="task.href"
+                                class="flex min-w-0 flex-col gap-1.5 rounded-md border bg-background px-2.5 py-2.5 text-sm hover:border-ring focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                             >
-                                <MoreHorizontal aria-hidden="true" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem as-child>
-                                <Link :href="`${openBase}/${project.id}`" class="w-full">
-                                    <FolderKanban aria-hidden="true" />
-                                    Open
-                                </Link>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem v-if="canManage !== false" as-child>
-                                <Link :href="`/admin/projects/${project.id}/edit`" class="w-full">
-                                    <Pencil aria-hidden="true" />
-                                    Edit
-                                </Link>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                v-if="canManage !== false && project.can_archive"
-                                variant="destructive"
-                                @select="emit('archive', { id: project.id, name: project.name, is_archived: false })"
-                            >
-                                <Archive aria-hidden="true" />
-                                Archive
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                                <span class="leading-snug break-words">{{ task.title }}</span>
+                                <span class="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                    <StatusBadge v-if="task.tone" :status="task.tone as StatusKey" :label="task.status_label ?? undefined" size="sm" />
+                                    <span v-if="task.due_date" class="inline-flex items-center gap-1 tabular-nums">
+                                        <CalendarDays class="size-3" aria-hidden="true" />
+                                        {{ formatDate(task.due_date) }}
+                                    </span>
+                                </span>
+                            </Link>
+                        </li>
+                    </ul>
                 </div>
             </Card>
         </li>
