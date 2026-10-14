@@ -180,7 +180,7 @@ function confirmRemove(): void {
             <Button v-if="permissions.can_create" :id="ADD_BUTTON_ID" as-child>
                 <Link :href="financeRoutes.income.create(month.value)">
                     <Plus aria-hidden="true" />
-                    Record income
+                    Add extra income
                 </Link>
             </Button>
         </template>
@@ -213,7 +213,7 @@ function confirmRemove(): void {
                         <Button v-if="permissions.can_create" as-child>
                             <Link :href="financeRoutes.income.create(month.value)">
                                 <Plus aria-hidden="true" />
-                                Record income
+                                Add extra income
                             </Link>
                         </Button>
                     </template>

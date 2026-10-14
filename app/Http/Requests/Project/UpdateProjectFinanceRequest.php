@@ -58,6 +58,7 @@ class UpdateProjectFinanceRequest extends FormRequest
             ],
             $prefix.'contract_terms' => ['nullable', 'string', 'max:5000'],
             $prefix.'profitability_snapshot' => ['nullable', 'numeric'],
+            $prefix.'auto_income' => ['sometimes', 'boolean'],
         ];
     }
 

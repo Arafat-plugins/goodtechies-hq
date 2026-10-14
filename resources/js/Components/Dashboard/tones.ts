@@ -29,6 +29,25 @@ export function toneChipClass(tone: Tone): string {
     return statusToneClass(tone);
 }
 
+/**
+ * The icon alone, in the status's text colour — no fill, no border (client request 2026-10-14:
+ * the dashboard icons lose their circle). Same `-fg` step the badge text uses, so it stays legible.
+ */
+const TONE_ICON: Record<Tone, string> = {
+    backlog: 'text-status-backlog-fg',
+    todo: 'text-status-todo-fg',
+    progress: 'text-status-progress-fg',
+    review: 'text-status-review-fg',
+    changes: 'text-status-changes-fg',
+    done: 'text-status-done-fg',
+    waiting: 'text-status-waiting-fg',
+    cancelled: 'text-status-cancelled-fg',
+};
+
+export function toneIconClass(tone: Tone): string {
+    return TONE_ICON[tone];
+}
+
 /** The thin bar along a card's foot. */
 export function toneBarClass(tone: Tone): string {
     return TONE_BAR[tone];

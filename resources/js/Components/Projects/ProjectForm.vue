@@ -34,6 +34,10 @@ export interface ProjectFinance {
     contract_value?: string | number | null;
     contract_terms?: string | null;
     profitability_snapshot?: string | number | null;
+    /** Income recorded automatically from these billing settings (on by default). */
+    auto_income?: boolean;
+    /** `YYYY-MM-DD`: nothing before this day is billed automatically. */
+    auto_income_from?: string | null;
 }
 
 export interface ProjectPermissions {

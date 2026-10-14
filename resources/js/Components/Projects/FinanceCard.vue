@@ -83,7 +83,9 @@ import {
     type Option,
 } from '@/Components/Projects/ProjectForm.vue';
 import { Button } from '@/Components/ui/button';
+import { formatDate } from '@/Components/Tasks/taskDetail';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
+import { Checkbox } from '@/Components/ui/checkbox';
 import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
@@ -105,6 +107,7 @@ const form = useForm({
     recurring_amount: moneyInputValue(finance.value?.recurring_amount),
     billing_frequency: finance.value?.billing_frequency ?? NO_FREQUENCY,
     hourly_rate: moneyInputValue(finance.value?.hourly_rate),
+    auto_income: finance.value?.auto_income ?? true,
     contract_value: moneyInputValue(finance.value?.contract_value),
     contract_terms: finance.value?.contract_terms ?? '',
     profitability_snapshot: moneyInputValue(finance.value?.profitability_snapshot),
@@ -130,6 +133,7 @@ function startEditing(): void {
     form.recurring_amount = moneyInputValue(finance.value?.recurring_amount);
     form.billing_frequency = finance.value?.billing_frequency ?? NO_FREQUENCY;
     form.hourly_rate = moneyInputValue(finance.value?.hourly_rate);
+    form.auto_income = finance.value?.auto_income ?? true;
     form.contract_value = moneyInputValue(finance.value?.contract_value);
     form.contract_terms = finance.value?.contract_terms ?? '';
     form.profitability_snapshot = moneyInputValue(finance.value?.profitability_snapshot);
@@ -146,6 +150,7 @@ function submit(): void {
         recurring_amount: blankToNull(data.recurring_amount),
         billing_frequency: data.billing_frequency === NO_FREQUENCY ? null : data.billing_frequency,
         hourly_rate: data.billing_frequency === 'hourly' ? blankToNull(data.hourly_rate) : null,
+        auto_income: data.auto_income,
         contract_value: blankToNull(data.contract_value),
         contract_terms: blankToNull(data.contract_terms),
         profitability_snapshot: blankToNull(data.profitability_snapshot),
@@ -167,6 +172,13 @@ const rows = computed(() => [
     ...(blankToNull(finance.value?.hourly_rate) === null
         ? []
         : [{ label: 'Hourly rate', value: formatRate(finance.value?.hourly_rate) }]),
+    {
+        label: 'Income',
+        value:
+            finance.value?.auto_income === false
+                ? 'Recorded by hand'
+                : 'Automatic' + (finance.value?.auto_income_from ? ` since ${formatDate(finance.value.auto_income_from)}` : ''),
+    },
     { label: 'Contract value', value: formatMoney(finance.value?.contract_value) },
     { label: 'Profitability snapshot', value: formatMoney(finance.value?.profitability_snapshot) },
 ]);
@@ -276,6 +288,26 @@ const rows = computed(() => [
                         />
                         <p v-if="form.errors.hourly_rate" class="text-xs text-destructive">
                             {{ form.errors.hourly_rate }}
+                        </p>
+                    </div>
+
+                    <div class="flex min-w-0 flex-col gap-2 md:col-span-2">
+                        <div class="flex items-center gap-2">
+                            <Checkbox
+                                id="finance-auto-income"
+                                :model-value="form.auto_income"
+                                :disabled="form.processing"
+                                aria-describedby="finance-auto-income-hint"
+                                @update:model-value="form.auto_income = $event === true"
+                            />
+                            <Label for="finance-auto-income">Record income automatically</Label>
+                        </div>
+                        <p id="finance-auto-income-hint" class="text-xs text-muted-foreground">
+                            Income is added to Finance on its own: recurring amounts on each due date, hourly work
+                            monthly, a one-time price when the project is completed.
+                        </p>
+                        <p v-if="form.errors.auto_income" class="text-xs text-destructive">
+                            {{ form.errors.auto_income }}
                         </p>
                     </div>
 

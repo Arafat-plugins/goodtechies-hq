@@ -53,6 +53,7 @@ use Illuminate\Support\Carbon;
     'date',
     'notes',
     'recorded_by',
+    'source',
 ])]
 // Decision 10-18: `search_vector` is a STORED GENERATED tsvector of this row's own
 // searchable text. `select *` loads it (~282 B a row on `tasks`, measured with

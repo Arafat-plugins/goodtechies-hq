@@ -22,6 +22,9 @@ Schedule::command('hq:generate-recurring-tasks')->dailyAt('00:05')->withoutOverl
 // Repeating expenses (VPS, domain, hosting): record every one that has fallen due; idempotent.
 Schedule::command('hq:generate-recurring-expenses')->dailyAt('00:15')->withoutOverlapping();
 
+// Project income (recurring amounts on due dates, hourly once a month): idempotent, see ProjectIncomeService.
+Schedule::command('hq:generate-project-income')->dailyAt('00:20')->withoutOverlapping();
+
 // Tasks (master prompt §19, Phase 2): one notification per NEWLY overdue task, to its
 // assignees and their manager or the Admins. 08:00 because it is meant to be the first thing
 // somebody sees, and "newly" is answered by the notifications table rather than by this

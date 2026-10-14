@@ -1008,7 +1008,7 @@ class FinanceService
      *
      * @throws FinanceStateException
      */
-    private function assertPeriodIsOpen(mixed $date): void
+    public function assertPeriodIsOpen(mixed $date): void
     {
         if ($date === null || $date === '') {
             return;

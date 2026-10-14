@@ -87,6 +87,12 @@ class MessageController extends Controller
 
         $active = $this->requestedConversation($request, $conversations, $latest, $unread);
 
+        // Asked for by name (`?conversation=`) or by the top bar's unread icon: that is a
+        // conversation they opened, so it is the one Messages reopens next time.
+        if ($active !== null && ($request->integer('conversation') > 0 || $request->boolean('unread'))) {
+            $this->remember($user, $active);
+        }
+
         // Messaging polish: rendering the page does NOT mark the open thread read. A page loaded
         // into a background tab, or re-read by the rail's poll, has not been read by anybody.
         // The thread marks itself once somebody is actually looking at it — `GET
@@ -202,6 +208,11 @@ class MessageController extends Controller
         $conversation = $this->visibleConversation($request, $conversation);
 
         $before = $request->integer('before');
+
+        // A real open, not walking back through older history: this is what Messages reopens.
+        if ($before < 1) {
+            $this->remember($user, $conversation);
+        }
 
         if ($before < 1 && $request->query('read') !== '0') {
             $this->conversations->markRead($user, $conversation);
@@ -559,6 +570,10 @@ class MessageController extends Controller
      * whose newest message is the newest, read from the counts and latest messages the page has
      * already fetched. With nothing unread it falls through to the default below.
      *
+     * The order (2026-10-14): an explicit `?conversation=` → `?unread=1` → the conversation they
+     * last had open (`users.last_conversation_id`, honoured only while it is still in the inbox)
+     * → the team channel.
+     *
      * @param  Collection<int, Conversation>  $inbox
      * @param  Collection<int, Message>  $latest
      * @param  array<int, int>  $unread
@@ -592,11 +607,37 @@ class MessageController extends Controller
             }
         }
 
-        // Nothing asked for, or nothing they may open: the team channel, which everybody with
-        // `messages.use` can read, is the honest default for a page called Messages.
+        // Nothing asked for: the conversation they last had open, if it is still in the inbox. A
+        // remembered id they can no longer see is simply not found there, and is ignored.
+        $last = (int) $request->user()->last_conversation_id;
+
+        if ($last > 0) {
+            $remembered = $inbox->first(fn (Conversation $conversation): bool => (int) $conversation->getKey() === $last);
+
+            if ($remembered !== null) {
+                return $remembered;
+            }
+        }
+
+        // Nothing asked for or remembered, or nothing they may open: the team channel, which
+        // everybody with `messages.use` can read, is the honest default for a page called Messages.
         return $inbox->first(
             fn (Conversation $conversation): bool => $conversation->type === ConversationType::Team,
         ) ?? $inbox->first();
+    }
+
+    /**
+     * Remember this as the conversation Messages reopens for this person (2026-10-14).
+     *
+     * One UPDATE, and no write at all when it is already the remembered one — opening the same
+     * thread again, or the screen re-reading it, costs nothing beyond the WHERE.
+     */
+    private function remember(User $user, Conversation $conversation): void
+    {
+        User::query()
+            ->whereKey($user->getKey())
+            ->where(fn ($q) => $q->whereNull('last_conversation_id')->orWhere('last_conversation_id', '!=', $conversation->getKey()))
+            ->update(['last_conversation_id' => $conversation->getKey()]);
     }
 
     /**

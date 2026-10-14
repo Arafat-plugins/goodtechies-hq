@@ -253,44 +253,6 @@ function confirmArchiveToggle(): void {
                         <ExternalLink class="size-4 shrink-0" aria-hidden="true" />
                         <span class="sr-only">(opens in a new tab)</span>
                     </a>
-                    <dl class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 text-sm">
-                        <div class="inline-flex items-center gap-1.5">
-                            <UserRound class="size-4 text-muted-foreground" aria-hidden="true" />
-                            <dt class="text-muted-foreground">Client</dt>
-                            <dd class="font-medium">
-                                <Link v-if="project.client" :href="`/admin/clients/${project.client.id}`" class="hover:underline">{{ project.client.name }}</Link>
-                                <span v-else>Internal</span>
-                            </dd>
-                        </div>
-                        <div v-if="project.created_at" class="inline-flex items-center gap-1.5">
-                            <CalendarPlus class="size-4 text-muted-foreground" aria-hidden="true" />
-                            <dt class="text-muted-foreground">Created</dt>
-                            <dd class="font-medium tabular-nums">{{ formatDate(project.created_at.slice(0, 10)) }}</dd>
-                        </div>
-                        <div class="inline-flex items-center gap-1.5">
-                            <dt class="text-muted-foreground">Type</dt>
-                            <dd class="font-medium">{{ project.project_type_label }}</dd>
-                        </div>
-                        <div v-if="project.pm" class="inline-flex items-center gap-1.5">
-                            <dt class="text-muted-foreground">Manager</dt>
-                            <dd class="font-medium">{{ project.pm.name }}</dd>
-                        </div>
-                        <div v-if="project.start_date" class="inline-flex items-center gap-1.5">
-                            <CalendarDays class="size-4 text-muted-foreground" aria-hidden="true" />
-                            <dt class="text-muted-foreground">Start</dt>
-                            <dd class="font-medium tabular-nums">{{ formatDate(project.start_date) }}</dd>
-                        </div>
-                        <div v-if="project.deadline" class="inline-flex items-center gap-1.5">
-                            <CalendarCheck class="size-4 text-muted-foreground" aria-hidden="true" />
-                            <dt class="text-muted-foreground">Due</dt>
-                            <dd class="font-medium tabular-nums">{{ formatDate(project.deadline) }}</dd>
-                        </div>
-                        <div class="inline-flex items-center gap-1.5">
-                            <Timer class="size-4 text-muted-foreground" aria-hidden="true" />
-                            <dt class="text-muted-foreground">Time spent</dt>
-                            <dd class="font-medium tabular-nums">{{ formatDuration(projectTasks.tracked_seconds) }}</dd>
-                        </div>
-                    </dl>
                 </div>
             </div>
             <div class="flex shrink-0 flex-wrap items-center gap-2">
@@ -325,6 +287,46 @@ function confirmArchiveToggle(): void {
                 </Button>
             </div>
         </header>
+        <!-- The details sit under the header across the full width (client request 2026-10-14):
+             beside the buttons they wrapped, and "Time spent" fell onto a line of its own. -->
+        <dl class="-mt-2 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-sm sm:pl-20" data-testid="project-details">
+            <div class="inline-flex items-center gap-1.5">
+                <UserRound class="size-4 text-muted-foreground" aria-hidden="true" />
+                <dt class="text-muted-foreground">Client</dt>
+                <dd class="font-medium">
+                    <Link v-if="project.client" :href="`/admin/clients/${project.client.id}`" class="hover:underline">{{ project.client.name }}</Link>
+                    <span v-else>Internal</span>
+                </dd>
+            </div>
+            <div v-if="project.created_at" class="inline-flex items-center gap-1.5">
+                <CalendarPlus class="size-4 text-muted-foreground" aria-hidden="true" />
+                <dt class="text-muted-foreground">Created</dt>
+                <dd class="font-medium tabular-nums">{{ formatDate(project.created_at.slice(0, 10)) }}</dd>
+            </div>
+            <div class="inline-flex items-center gap-1.5">
+                <dt class="text-muted-foreground">Type</dt>
+                <dd class="font-medium">{{ project.project_type_label }}</dd>
+            </div>
+            <div v-if="project.pm" class="inline-flex items-center gap-1.5">
+                <dt class="text-muted-foreground">Manager</dt>
+                <dd class="font-medium">{{ project.pm.name }}</dd>
+            </div>
+            <div v-if="project.start_date" class="inline-flex items-center gap-1.5">
+                <CalendarDays class="size-4 text-muted-foreground" aria-hidden="true" />
+                <dt class="text-muted-foreground">Start</dt>
+                <dd class="font-medium tabular-nums">{{ formatDate(project.start_date) }}</dd>
+            </div>
+            <div v-if="project.deadline" class="inline-flex items-center gap-1.5">
+                <CalendarCheck class="size-4 text-muted-foreground" aria-hidden="true" />
+                <dt class="text-muted-foreground">Due</dt>
+                <dd class="font-medium tabular-nums">{{ formatDate(project.deadline) }}</dd>
+            </div>
+            <div class="inline-flex items-center gap-1.5">
+                <Timer class="size-4 text-muted-foreground" aria-hidden="true" />
+                <dt class="text-muted-foreground">Time spent</dt>
+                <dd class="font-medium tabular-nums">{{ formatDuration(projectTasks.tracked_seconds) }}</dd>
+            </div>
+        </dl>
 
         <!-- Polish 080: the task numbers, as four cards. -->
         <ul class="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Task numbers">
@@ -337,7 +339,8 @@ function confirmArchiveToggle(): void {
                         <span class="text-sm text-muted-foreground">{{ stat.label }}</span>
                         <span class="flex flex-wrap items-center gap-2">
                             <span class="text-2xl font-semibold tabular-nums">{{ stat.value }}</span>
-                            <span :class="cn('rounded-full border px-2 py-0.5 text-xs font-medium tabular-nums', statusToneClass(stat.tone))">
+                            <!-- One quiet colour for every figure here (client request 2026-10-14), not each card's tone. -->
+                            <span class="rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">
                                 {{ stat.note }}
                             </span>
                         </span>

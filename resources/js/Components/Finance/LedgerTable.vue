@@ -56,6 +56,11 @@ const noun = computed(() => ledgerNoun(props.kind));
 
 const isIncome = computed(() => props.kind === 'income');
 
+/** An income row the project's billing wrote on its own, rather than one entered by hand. */
+function isAutoIncome(record: LedgerRecord): boolean {
+    return isIncome.value && (record as IncomeRecord).source === 'auto';
+}
+
 /** Either side's optional project link (decision 8-17b). */
 function projectOf(record: LedgerRecord): IncomeRecord['project'] {
     return (record as IncomeRecord | ExpenseRecord).project ?? null;
@@ -108,7 +113,7 @@ function rowLabel(record: LedgerRecord): string {
         :empty-title="`Nothing recorded in ${monthLabel}`"
         :empty-description="
             isIncome
-                ? 'Income is entered a payment at a time — a category, an amount, the date it arrived and, where it belongs to one, the project. The month’s totals are worked out from these rows.'
+                ? 'Income is recorded automatically from projects — recurring amounts on their due dates, hourly work when the month ends, one-time prices when a project is completed. Use Add extra income for anything else.'
                 : 'Expenses are entered a payment at a time — a category, an amount and the date it went out. The month’s totals are worked out from these rows.'
         "
     >
@@ -133,6 +138,19 @@ function rowLabel(record: LedgerRecord): string {
                 </span>
             </span>
             <span v-else class="text-muted-foreground">Not linked</span>
+        </template>
+
+        <template #cell-category="{ row }">
+            <span class="inline-flex items-center gap-2">
+                <span>{{ row.category?.name ?? '—' }}</span>
+                <span
+                    v-if="isAutoIncome(row)"
+                    class="rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                    title="Recorded automatically from the project's billing"
+                >
+                    Auto
+                </span>
+            </span>
         </template>
 
         <template #cell-amount="{ row }">

@@ -5,7 +5,7 @@
  */
 import type { Component } from 'vue';
 import { cn } from '@/lib/utils';
-import { type Tone, toneChipClass } from '@/Components/Dashboard/tones';
+import { type Tone, toneIconClass } from '@/Components/Dashboard/tones';
 
 withDefaults(defineProps<{ icon: Component; tone: Tone; size?: 'sm' | 'md' }>(), { size: 'sm' });
 </script>
@@ -14,9 +14,11 @@ withDefaults(defineProps<{ icon: Component; tone: Tone; size?: 'sm' | 'md' }>(),
     <span
         :class="
             cn(
-                'flex shrink-0 items-center justify-center rounded-full border',
+                // No circle behind the icon any more (client request 2026-10-14): the box keeps its
+                // size so the label beside it does not move, the icon carries the tone's colour.
+                'flex shrink-0 items-center justify-center',
                 size === 'md' ? 'size-8 sm:size-10' : 'size-8',
-                toneChipClass(tone),
+                toneIconClass(tone),
             )
         "
         aria-hidden="true"

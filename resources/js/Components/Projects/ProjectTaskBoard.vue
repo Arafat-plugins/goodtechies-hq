@@ -6,13 +6,14 @@
  * no column. Each card opens the task; "Add task" sits under the two columns a task may start in.
  */
 import { Link } from '@inertiajs/vue3';
-import { CalendarDays, Circle, CircleCheck, CirclePlay, Eye, Plus } from '@lucide/vue';
+import { CalendarDays, Circle, CircleCheck, CirclePlay, Clock, Eye, Plus } from '@lucide/vue';
 import type { Component } from 'vue';
 import { computed } from 'vue';
 import type { ProjectTaskRow, ProjectTasks } from '@/Components/Projects/ProjectTaskList.vue';
 import type { StatusKey } from '@/Components/StatusBadge.vue';
 import StatusBadge, { statusToneClass } from '@/Components/StatusBadge.vue';
 import { formatDate } from '@/Components/Tasks/taskDetail';
+import { formatDuration } from '@/Components/Timer/timer';
 import { cn } from '@/lib/utils';
 
 const props = defineProps<{
@@ -106,6 +107,15 @@ function overdue(row: ProjectTaskRow): boolean {
                         :class="cn('inline-flex h-5 items-center rounded-full border px-2 text-xs font-medium', PRIORITY[row.priority] ?? 'text-muted-foreground')"
                     >
                         {{ row.priority_label }}
+                    </span>
+                    <!-- The time spent on the task (approved tracked time), at the right of the line
+                         (client request 2026-10-14). -->
+                    <span
+                        class="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums"
+                        :title="`Time spent: ${formatDuration(row.tracked_seconds)}`"
+                    >
+                        <Clock class="size-3.5" aria-hidden="true" />
+                        {{ formatDuration(row.tracked_seconds) }}
                     </span>
                 </span>
                 <span class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">

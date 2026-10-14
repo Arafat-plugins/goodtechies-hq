@@ -18,7 +18,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'timezone', 'status'])]
+#[Fillable(['name', 'email', 'password', 'timezone', 'status', 'last_conversation_id'])]
 // Decision 10-18: `search_vector` is a STORED GENERATED tsvector of this row's own
 // searchable text. `select *` loads it (~282 B a row on `tasks`, measured with
 // `pg_column_size`), and it belongs in no payload — so it is hidden from every

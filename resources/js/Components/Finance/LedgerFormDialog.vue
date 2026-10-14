@@ -105,7 +105,7 @@ const form = useForm<{
 });
 
 const title = computed(() =>
-    isEdit.value ? `Edit this ${noun.value}` : isIncome.value ? 'Record income' : 'Record an expense',
+    isEdit.value ? `Edit this ${noun.value}` : isIncome.value ? 'Add extra income' : 'Record an expense',
 );
 
 /**

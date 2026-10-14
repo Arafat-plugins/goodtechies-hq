@@ -8,6 +8,7 @@ use App\Models\ProjectFinance;
 use App\Models\User;
 use App\Support\AuditEvent;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
@@ -33,6 +34,7 @@ class ProjectFinanceService
         'contract_value',
         'contract_terms',
         'profitability_snapshot',
+        'auto_income',
     ];
 
     public function __construct(
@@ -59,10 +61,21 @@ class ProjectFinanceService
             $existed = $finance !== null;
             $old = $existed ? $this->auditedValues($finance) : null;
 
+            // Automatic income bills from `auto_income_from` onwards: the day the row is
+            // created, and the day the switch goes back on — never the stretch before or while
+            // it was off (see ProjectIncomeService).
+            $today = Carbon::today(config('app.timezone'))->toDateString();
+
             if ($existed) {
-                $finance->fill($attributes)->save();
+                $finance->fill($attributes);
+
+                if ($finance->isDirty('auto_income') && $finance->auto_income && ! $finance->getOriginal('auto_income')) {
+                    $finance->auto_income_from = $today;
+                }
+
+                $finance->save();
             } else {
-                $finance = $project->finance()->create($attributes);
+                $finance = $project->finance()->create($attributes + ['auto_income_from' => $today]);
             }
 
             $finance->refresh();

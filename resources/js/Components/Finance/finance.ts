@@ -80,6 +80,8 @@ interface LedgerRecordBase {
 export interface IncomeRecord extends LedgerRecordBase {
     /** Part D §13's optional project link. Null on most rows. */
     project: FinanceProject | null;
+    /** `auto` when recorded from the project's billing settings; `manual` when typed in. */
+    source: 'manual' | 'auto';
 }
 
 /**

@@ -65,7 +65,7 @@ function hours(seconds: number): string {
             </div>
         </div>
 
-        <div class="grid grid-cols-7 gap-1 text-center" role="grid" :aria-label="`Tracked time in ${month.label}`">
+        <div class="grid grid-cols-7 gap-1.5 text-center" role="grid" :aria-label="`Tracked time in ${month.label}`">
             <span v-for="heading in HEADINGS" :key="heading" class="text-xs text-muted-foreground" aria-hidden="true">
                 {{ heading.slice(0, 2) }}
             </span>
@@ -80,22 +80,23 @@ function hours(seconds: number): string {
                 :aria-label="`${day.date}${day.seconds > 0 ? `, ${formatDuration(day.seconds)} tracked` : ', nothing tracked'}`"
                 :class="
                     cn(
-                        'relative flex aspect-square min-w-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-md border text-xs hover:border-ring focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
+                        'relative flex min-h-12 min-w-0 flex-col items-center justify-start gap-1 overflow-hidden rounded-md border px-0.5 pt-1.5 pb-2.5 text-xs hover:border-ring focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
                         day.date === selected ? 'border-primary bg-brand-tint font-semibold' : 'bg-card',
                         day.date > today && 'opacity-50',
                         day.date === today && day.date !== selected && 'ring-1 ring-ring',
                     )
                 "
             >
-                <!-- How full the day was, as a thin bar along the bottom edge. -->
+                <!-- How full the day was, as a thin bar inset from the bottom edge (it no longer
+                     runs under the hours, which made both hard to read in a small cell). -->
                 <span
                     v-if="day.seconds > 0"
-                    class="absolute bottom-0 left-0 h-1 rounded-r-sm bg-chart-2"
-                    :style="{ width: `${Math.max(12, Math.round((day.seconds / most) * 100))}%` }"
+                    class="absolute bottom-1 left-1 h-0.5 rounded-full bg-chart-2"
+                    :style="{ width: `calc((100% - 0.5rem) * ${Math.max(12, Math.round((day.seconds / most) * 100)) / 100})` }"
                     aria-hidden="true"
                 />
-                <span class="relative tabular-nums">{{ dayNumber(day.date) }}</span>
-                <span class="relative text-xs leading-none text-muted-foreground tabular-nums">{{ hours(day.seconds) }}</span>
+                <span class="relative leading-none tabular-nums">{{ dayNumber(day.date) }}</span>
+                <span class="relative truncate text-xs leading-none text-muted-foreground tabular-nums">{{ hours(day.seconds) }}</span>
             </Link>
         </div>
     </Card>

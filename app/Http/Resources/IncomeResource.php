@@ -69,6 +69,7 @@ class IncomeResource extends JsonResource
             'category' => $this->category(),
             'project' => self::projectPayload($this->resource->project),
             'notes' => $this->resource->notes,
+            'source' => (string) ($this->resource->source ?? 'manual'),
 
             'permissions' => $this->permissions($request),
         ];
