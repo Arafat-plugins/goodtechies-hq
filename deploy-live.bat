@@ -6,7 +6,9 @@ REM  Double-click it after push-to-github.bat. It:
 REM    1. warns you if something on this PC is not on GitHub yet
 REM    2. connects to the server (paste the root password, or set up
 REM       password-free login once - it offers)
-REM    3. runs deploy/live-deploy.sh on the server, which removes junk,
+REM    3. builds the site's assets on this PC and uploads them (when this
+REM       PC is exactly the GitHub version), then runs deploy/live-deploy.sh
+REM       on the server, which removes junk,
 REM       backs up the database and checks the backup, frees memory for
 REM       the build, releases, retries once, rolls back by itself if the
 REM       release fails, and checks the site
@@ -115,9 +117,64 @@ echo     Paste the server root password when asked - right-click pastes - then p
 echo     Nothing shows while you paste; that is normal.
 
 :deploy
+REM ---------- 3a. build the assets on this PC (the server has 1 GB and no swap) ----------
+REM  `npm run build` needs ~0.95 GB. On the server it gets killed and the release rolls back,
+REM  and the site shows "offline" while it tries. So this PC builds, with the SERVER's VITE_*
+REM  values, and uploads the result; the server only unpacks it (deploy.sh, PREBUILT=...).
+REM  Only when this PC is exactly what is on GitHub - otherwise the server builds as before.
+echo.
+echo [3/4] Building the site's assets on this PC...
+set "BEHIND=0"
+for /f %%n in ('git rev-list --count HEAD..origin/main 2^>nul') do set "BEHIND=%%n"
+if not "!DIRTY!!AHEAD!!BEHIND!"=="000" (
+    echo     [skip] This PC is not exactly the GitHub version - the server builds instead.
+    goto :release
+)
+where npm >nul 2>&1
+if errorlevel 1 (
+    echo     [skip] npm is not installed on this PC - the server builds instead.
+    goto :release
+)
+set "VITE_FILE=%TEMP%\hq-live-vite.env"
+del /q "%VITE_FILE%" >nul 2>&1
+ssh %SSHOPT% %SERVER% "php" < "deploy\print-vite-env.php" > "%VITE_FILE%"
+if errorlevel 1 (
+    echo     [skip] Could not read the server's settings - the server builds instead.
+    goto :release
+)
+findstr /b /c:"VITE_REALTIME=" "%VITE_FILE%" >nul 2>&1
+if errorlevel 1 (
+    echo     [skip] The server sent no VITE settings - the server builds instead.
+    goto :release
+)
+for /f "usebackq tokens=1,* delims==" %%a in ("%VITE_FILE%") do set "%%a=%%b"
+echo     using the live server's VITE settings
+call npm run build
+if errorlevel 1 (
+    echo     [skip] The build failed on this PC - the server builds instead.
+    goto :release
+)
+set "BUILD_TGZ=%TEMP%\hq-live-build.tgz"
+del /q "%BUILD_TGZ%" >nul 2>&1
+tar -czf "%BUILD_TGZ%" -C public build
+if errorlevel 1 (
+    echo     [skip] Could not pack the build - the server builds instead.
+    goto :release
+)
+scp %SSHOPT% "%BUILD_TGZ%" %SERVER%:/root/hq-prebuilt.tgz
+if errorlevel 1 (
+    echo     [skip] Could not upload the build - the server builds instead.
+    goto :release
+)
+set "REMOTE_ENV=!REMOTE_ENV!PREBUILT=/root/hq-prebuilt.tgz "
+echo     [ok] Built here and uploaded - the server will not build.
+echo     Note: this PC's public\build now has the LIVE settings. Run npm run build again
+echo     before testing realtime features locally.
+
+:release
 REM ---------- 3. run the safe release on the server ----------
 echo.
-echo [3/4] Deploying. This takes 2 to 5 minutes.
+echo [3/4] Deploying. This takes 1 to 5 minutes.
 echo       For about a minute the site shows "back in a moment" - that is normal.
 echo.
 REM The script is sent from this PC, so the server always runs the newest version of it.

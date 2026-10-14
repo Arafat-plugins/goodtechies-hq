@@ -160,6 +160,25 @@ step "composer install"
 composer install --no-dev --optimize-autoloader --no-interaction --working-dir="$APP_DIR"
 
 step "build frontend assets"
+# PREBUILT=<path to a .tgz of public/build> (set by deploy-live.bat, which builds on the PC): the
+# assets were built off the server with the server's own VITE_* values, so this box only unpacks
+# them. `npm run build` needs ~0.95 GB here and this box has 1 GB and no swap; building on the PC
+# is what stops a release dying mid-build and the site going "offline" for its duration.
+if [ -n "${PREBUILT:-}" ] && [ -s "${PREBUILT}" ]; then
+    echo "using the assets built on the PC: $PREBUILT"
+    rm -rf "$APP_DIR/public/build.incoming"
+    mkdir -p "$APP_DIR/public/build.incoming"
+    tar -xzf "$PREBUILT" -C "$APP_DIR/public/build.incoming"
+    if [ ! -f "$APP_DIR/public/build.incoming/build/manifest.json" ]; then
+        echo "ERROR: $PREBUILT has no build/manifest.json; not using it" >&2
+        rm -rf "$APP_DIR/public/build.incoming"
+        exit 1
+    fi
+    rm -rf "$APP_DIR/public/build"
+    mv "$APP_DIR/public/build.incoming/build" "$APP_DIR/public/build"
+    rm -rf "$APP_DIR/public/build.incoming"
+    chown -R "$APP_USER:$APP_USER" "$APP_DIR/public/build" 2> /dev/null || true
+else
 # Measured (brief 030, Docker capped at 1 GB, one CPU): `npm run build` peaks at about 0.95 GB
 # resident, mostly the bundler's native memory rather than Node's heap. With no swap the kernel
 # killed it; with install.sh's 2 GB swap file it finished in 12 s using ~80 MB of swap. So swap
@@ -184,6 +203,7 @@ else
     npm ci --include=dev --no-audit --no-fund
 fi
 npm run build
+fi
 
 step "migrate (pgsql_migrator)"
 artisan migrate --force --database=pgsql_migrator
