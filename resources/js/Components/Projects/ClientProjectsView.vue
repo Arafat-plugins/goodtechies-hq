@@ -13,7 +13,7 @@ export interface ClientTreeProject {
     created_at?: string | null;
     can_archive?: boolean;
     /** Polish 080: the card's "N tasks" dropdown (page tree only). */
-    tasks?: { id: number; title: string; status_label: string | null; tone: string | null; due_date: string | null; tracked_seconds?: number; href: string }[];
+    tasks?: { id: number; title: string; status_label: string | null; tone: string | null; due_date: string | null; tracked_seconds?: number; assignees?: string[]; href: string }[];
 }
 
 export interface ClientTreeRow {

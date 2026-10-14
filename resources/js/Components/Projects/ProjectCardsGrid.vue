@@ -6,9 +6,10 @@
  * "All projects" (type) / "All clients" pickers and ordered by its sort picker.
  */
 import { Link } from '@inertiajs/vue3';
-import { CalendarDays, ChevronDown, Clock, ExternalLink, Folder, FolderKanban, Link2Off, ListTodo } from '@lucide/vue';
+import { CalendarDays, ChevronDown, Clock, ExternalLink, Folder, FolderKanban, Link2Off, ListTodo, UserRound } from '@lucide/vue';
 import { useMediaQuery } from '@vueuse/core';
 import { computed, ref } from 'vue';
+import { initials } from '@/Components/Clients/clientTasks';
 import EmptyState from '@/Components/EmptyState.vue';
 import type { ClientTreeRow } from '@/Components/Projects/ClientProjectsView.vue';
 import { projectTile } from '@/Components/Projects/projectTile';
@@ -186,6 +187,31 @@ function bare(domain: string): string {
                                             <Clock class="size-3" aria-hidden="true" />
                                             {{ formatDuration(task.tracked_seconds ?? 0) }}
                                         </span>
+                                    </span>
+                                    <span v-if="task.assignees?.length" class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                                        <span class="flex shrink-0 -space-x-1.5" aria-hidden="true">
+                                            <span
+                                                v-for="person in task.assignees.slice(0, 3)"
+                                                :key="person"
+                                                class="flex size-6 items-center justify-center rounded-full border-2 border-background bg-secondary text-[0.625rem] font-semibold text-secondary-foreground"
+                                                :title="person"
+                                            >
+                                                {{ initials(person) }}
+                                            </span>
+                                            <span
+                                                v-if="task.assignees.length > 3"
+                                                class="flex size-6 items-center justify-center rounded-full border-2 border-background bg-muted text-[0.625rem] font-semibold text-muted-foreground"
+                                            >
+                                                +{{ task.assignees.length - 3 }}
+                                            </span>
+                                        </span>
+                                        <span class="truncate text-foreground" :title="task.assignees.join(', ')">
+                                            <span class="sr-only">Assigned to </span>{{ task.assignees.join(', ') }}
+                                        </span>
+                                    </span>
+                                    <span v-else class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <UserRound class="size-3.5" aria-hidden="true" />
+                                        Unassigned
                                     </span>
                                 </Link>
                             </li>

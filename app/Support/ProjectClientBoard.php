@@ -76,6 +76,7 @@ final class ProjectClientBoard
                 ->notArchived()
                 ->topLevel()
                 ->orderByDesc('id')
+                ->with(['assignees.user:id,name'])
                 ->get(['id', 'project_id', 'title', 'status', 'due_date', 'tracked_seconds'])
                 ->groupBy('project_id')
             : collect();
@@ -363,6 +364,12 @@ final class ProjectClientBoard
                 'due_date' => $task->due_date?->toDateString(),
                 // The time spent on it (approved tracked time, the task's cache) — the card's task row shows it.
                 'tracked_seconds' => (int) $task->tracked_seconds,
+                // Who is doing it — the card's task row shows their initials and names.
+                'assignees' => $task->assignees
+                    ->map(fn (Employee $employee): string => (string) ($employee->user?->name ?? ''))
+                    ->filter()
+                    ->values()
+                    ->all(),
                 'href' => "/{$surface}/tasks/{$task->getKey()}",
             ])->values()->all(),
         ];
