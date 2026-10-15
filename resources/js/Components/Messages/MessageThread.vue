@@ -272,10 +272,9 @@ const bodyEl = ref<InstanceType<typeof Textarea> | null>(null);
 const body = ref('');
 const picked = ref<File | null>(null);
 /**
- * Polish 005: more files waiting behind `picked`. One message still carries one attachment
- * (`StoreMessageRequest`), so several are sent Telegram-style as consecutive messages: the
- * typed text goes with the first, and each queued file follows on its own once the one before
- * it has landed.
+ * Polish 005: more files waiting behind `picked`. Photos picked together go up as ONE message
+ * (`files[]` beside `file`), so they show side by side; any other file still follows on its own
+ * once the one before it has landed.
  */
 const queued = ref<File[]>([]);
 /** At most this many files wait in the composer at once. */
@@ -610,7 +609,10 @@ function sendOnStrayEnter(event: KeyboardEvent): boolean {
 
     const target = event.target instanceof HTMLElement ? event.target : null;
 
-    if (target && target !== document.body && target.closest('button, a, input, textarea, select, [role], [contenteditable="true"]')) {
+    // The message list itself (`role="log"`, focused by a click on the thread) is not a control.
+    const onList = target?.getAttribute('role') === 'log';
+
+    if (target && target !== document.body && !onList && target.closest('button, a, input, textarea, select, [role], [contenteditable="true"]')) {
         return false;
     }
 
@@ -879,6 +881,9 @@ function onPaste(event: ClipboardEvent): void {
     const type = image.type !== '' ? image.type : 'image/png';
 
     adoptFile(new File([image], pastedFileName(type, at), { type, lastModified: at.getTime() }));
+
+    // Pasted with the thread (not the field) focused: bring focus to the composer so Enter sends.
+    focusForSend(true);
 }
 
 /**
@@ -1309,7 +1314,14 @@ const unreadCount = computed(() => thread.value.messages.filter(isUnread).length
 const firstUnreadId = computed(() => thread.value.messages.find(isUnread)?.id ?? null);
 
 /** Every message, with what it needs to know about its neighbours to be drawn. */
-const rendered = computed(() => renderThread(thread.value.messages, firstUnreadId.value));
+// A message deleted for everyone leaves no trace in the thread (client request 2026-10-15):
+// no "This message was deleted" row. A reply that quoted it still says its original is gone.
+const rendered = computed(() =>
+    renderThread(
+        thread.value.messages.filter((message) => !message.is_deleted),
+        firstUnreadId.value,
+    ),
+);
 
 /**
  * `sided` for a DM, `stacked` for every channel. Read from the payload's own `type`, so the
@@ -2116,11 +2128,13 @@ function post(): void {
     const carrying: Outgoing['carrying'] = clip !== null ? 'voice' : file !== null ? 'file' : null;
     const text = body.value;
     const replyTo = replyingTo.value;
+    // Photos picked together ride on one message with the first photo (up to ten in all).
+    const extras = clip === null && file !== null && isImage(file) ? queued.value.filter(isImage).slice(0, MAX_ATTACHMENTS - 1) : [];
 
     // Nothing at all: let the server say its own sentence, as before, but without a ghost row.
     if (carrying === null && text.trim() === '') {
         typing.stopTyping();
-        void send({ tempId: null, text, people: [...mentions.picked.value], named: mentions.ids(), carrying, file, clip, replyTo });
+        void send({ tempId: null, text, people: [...mentions.picked.value], named: mentions.ids(), carrying, file, extras: [], clip, replyTo });
 
         return;
     }
@@ -2132,6 +2146,7 @@ function post(): void {
         named: mentions.ids(),
         carrying,
         file,
+        extras,
         clip,
         replyTo,
     };
@@ -2157,6 +2172,8 @@ interface Outgoing {
     named: number[];
     carrying: 'voice' | 'file' | null;
     file: File | null;
+    /** More photos sent in the same message as `file`. */
+    extras: File[];
     clip: VoiceClip | null;
     /** Brief 013: the message this one answers (`reply_to_id`), or `null`. */
     replyTo: ThreadMessage | null;
@@ -2279,6 +2296,10 @@ async function send(outgoing: Outgoing): Promise<void> {
     } else if (file !== null) {
         // Polish 017: a big photo or screenshot goes up as a far smaller JPEG.
         data.append('file', await shrinkImage(file));
+
+        for (const [index, extra] of outgoing.extras.entries()) {
+            data.append(`files[${index}]`, await shrinkImage(extra));
+        }
     }
 
     if (tempId !== null) {
@@ -2333,8 +2354,8 @@ async function send(outgoing: Outgoing): Promise<void> {
             }
 
             if (carrying !== null) {
-                // Polish 005: files still waiting go next, each as its own message.
-                const rest = carrying === 'file' && stillHere() ? [...queued.value] : [];
+                // Polish 005: files still waiting go next. The photos that rode along are done.
+                const rest = carrying === 'file' && stillHere() ? queued.value.filter((waiting) => !outgoing.extras.includes(waiting)) : [];
 
                 // Sent: the draft goes with it, before anything else can read it back.
                 dropDraft();
@@ -2697,6 +2718,7 @@ const isAnnouncements = computed(() => thread.value.type === 'announcement');
                                 :links-stale="messageLinksStale(entry.message)"
                                 :layout="layout"
                                 :author-line="layout === 'sided' && thread.type !== 'dm'"
+                                :wide-media="thread.type === 'task'"
                                 :conversation-id="thread.conversation_id"
                                 :can-reply="thread.can_post"
                                 @announce="actionStatus = $event"

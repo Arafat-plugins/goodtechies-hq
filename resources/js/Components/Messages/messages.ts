@@ -199,15 +199,18 @@ export type ConversationTypeKey = 'team' | 'project' | 'task' | 'dm' | 'announce
  * - `stacked` — every message left with its avatar and its author line, the viewer's own with a
  *   tint rather than a side.
  *
- * Every conversation on the Messages page is drawn Telegram-style (`sided`): DMs, groups, team,
- * announcements and project channels alike. Only a task's discussion (inside the task drawer)
- * keeps the stacked layout (2026-10-04, client asked for the Telegram reference). A `null`
- * type — the project Discussion tab before its first fetch — is `sided` too.
+ * Every conversation is drawn Telegram-style (`sided`): DMs, groups, team, announcements,
+ * project channels and — since 2026-10-15 — a task's discussion too (the client found the
+ * stacked task thread odd beside the Messages page: no gap between a person's messages, and
+ * attachments piled on each other). A `null` type — the project Discussion tab before its first
+ * fetch — is `sided` too. `stacked` stays a valid treatment of MessageRow, it is just unused.
  */
 export type ThreadLayout = 'sided' | 'stacked';
 
 export function threadLayout(type: ConversationTypeKey | null): ThreadLayout {
-    return type === 'task' ? 'stacked' : 'sided';
+    void type;
+
+    return 'sided';
 }
 
 /** One row of the Messages page's left rail. */

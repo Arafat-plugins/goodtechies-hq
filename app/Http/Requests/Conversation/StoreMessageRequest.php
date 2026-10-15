@@ -67,6 +67,9 @@ class StoreMessageRequest extends FormRequest
      */
     public const MAX_MENTIONS = 20;
 
+    /** Photos that may ride along with `file` in one message (ten in all). */
+    public const MAX_EXTRA_IMAGES = 9;
+
     public function authorize(): bool
     {
         return true;
@@ -86,12 +89,19 @@ class StoreMessageRequest extends FormRequest
                 // `kind=voice` through on text alone, which would store a bubble that claims to
                 // be a recording and has nothing to play.
                 'required_if:kind,'.AttachmentKind::Voice->value,
+                // Extra photos ride along with this one; they never arrive on their own.
+                'required_with:files',
                 'bail',
                 'file',
                 // No `max:` here: messages carry no application size cap (12-82); the
                 // transport limit in nginx/PHP is what bounds them.
                 $this->acceptable(),
             ],
+
+            // More photos sent together with `file`, so they land as ONE message and show side
+            // by side. Images only, and never with a voice note.
+            'files' => ['sometimes', 'array', 'max:'.self::MAX_EXTRA_IMAGES, 'prohibited_if:kind,'.AttachmentKind::Voice->value],
+            'files.*' => ['bail', 'file', 'mimetypes:'.implode(',', MessageService::ALBUM_TYPES), $this->acceptable()],
 
             // How the file rides on the bubble, when the sender is the one who knows. `voice` is
             // the only word accepted: see the class docblock for why `file` and `image` are not
@@ -135,6 +145,8 @@ class StoreMessageRequest extends FormRequest
             'file.required_without' => 'Write something, or attach a file.',
             'body.max' => 'That message is too long. The limit is '.self::MAX_BODY.' characters.',
             'mentions.max' => 'That is more people than one message can name.',
+            'files.max' => 'Up to '.(self::MAX_EXTRA_IMAGES + 1).' photos in one message.',
+            'files.*.mimetypes' => 'Only photos can be sent together in one message.',
             'file.required_if' => 'A voice note needs its recording.',
             'kind.in' => 'That is not a kind of attachment this endpoint accepts.',
             'duration.prohibited_unless' => 'A length belongs to a voice note. Leave it off an ordinary attachment.',
@@ -182,6 +194,22 @@ class StoreMessageRequest extends FormRequest
         $upload = $this->file('file');
 
         return $upload instanceof UploadedFile ? $upload : null;
+    }
+
+    /**
+     * The extra photos sent together with `file`, in the order they were picked.
+     *
+     * @return list<UploadedFile>
+     */
+    public function extraImages(): array
+    {
+        $files = $this->file('files');
+
+        if (! is_array($files)) {
+            return [];
+        }
+
+        return array_values(array_filter($files, fn ($file) => $file instanceof UploadedFile));
     }
 
     /**

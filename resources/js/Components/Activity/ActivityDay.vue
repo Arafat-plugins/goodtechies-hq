@@ -70,7 +70,7 @@ const STATE_STATUS: Record<ActivitySession['state'], StatusKey> = {
         />
 
         <!-- Polish 031: one day, one line — and the month beside it as a calendar. -->
-        <div class="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div class="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
             <div class="flex min-w-0 flex-col gap-4">
                 <Card class="min-w-0 gap-4">
                     <CardHeader class="min-w-0">

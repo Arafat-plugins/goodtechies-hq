@@ -88,6 +88,7 @@ trait ManagesDiscussion
                 $request->mentionIds(),
                 $request->attachmentKind(),
                 $request->duration(),
+                extraImages: $request->extraImages(),
             );
         } catch (ConversationStateException|FileStateException $exception) {
             return back()->with('error', $exception->getMessage());

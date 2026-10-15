@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { Lock } from '@lucide/vue';
-import { computed } from 'vue';
+import { Lock, Pencil } from '@lucide/vue';
+import { computed, ref } from 'vue';
 import PageShell from '@/Components/PageShell.vue';
+import type { Option } from '@/Components/Projects/ProjectForm.vue';
+import ProjectTypeNamesDialog from '@/Components/Projects/ProjectTypeNamesDialog.vue';
 import SettingsSectionCard from '@/Components/Settings/SettingsSectionCard.vue';
 import type { IntegrationRow, SettingField, SettingRow } from '@/Components/Settings/settings';
 import { valuesByKey } from '@/Components/Settings/settings';
@@ -43,6 +45,9 @@ const props = defineProps<{
     fields: SettingField[];
     sections: string[];
     backup: { lastVerifiedAt: string | null };
+    /** The project types with their current names, and the built-in name of each. */
+    projectTypes: Option[];
+    projectTypeDefaults: Record<string, string>;
     /** Polish 030: the Google account that creates Meet links on the api driver. */
     google: { driver: string; configured: boolean; connected: boolean; email: string | null };
     drivers: {
@@ -54,6 +59,9 @@ const props = defineProps<{
         googleCalendarWhy: string;
     };
 }>();
+
+/** The project type rename dialog (shared with the project form). */
+const renamingTypes = ref(false);
 
 const values = computed(() => valuesByKey(props.settings));
 
@@ -110,6 +118,31 @@ const verifiedAt = computed(() => {
                 :fields="section.fields"
                 :values="values"
             />
+
+            <!-- Client request 2026-10-15: the project type names, renamed here as well as from
+                 the project form. They are the Projects page's "All projects" filter options. -->
+            <Card class="min-w-0 gap-4" data-testid="project-type-names">
+                <CardHeader class="flex flex-row items-center justify-between gap-2">
+                    <CardTitle class="text-sm font-medium">Project types</CardTitle>
+                    <Button type="button" variant="outline" size="sm" @click="renamingTypes = true">
+                        <Pencil aria-hidden="true" />
+                        Rename
+                    </Button>
+                </CardHeader>
+                <CardContent>
+                    <ul class="flex min-w-0 flex-col divide-y text-sm">
+                        <li v-for="type in projectTypes" :key="type.value" class="flex min-w-0 items-center justify-between gap-3 py-2">
+                            <span class="truncate font-medium">{{ type.label }}</span>
+                            <span
+                                v-if="projectTypeDefaults[type.value] && projectTypeDefaults[type.value] !== type.label"
+                                class="shrink-0 truncate text-xs text-muted-foreground"
+                            >
+                                was {{ projectTypeDefaults[type.value] }}
+                            </span>
+                        </li>
+                    </ul>
+                </CardContent>
+            </Card>
 
             <Card class="min-w-0 gap-4">
                 <CardHeader>
@@ -194,5 +227,6 @@ const verifiedAt = computed(() => {
                 </CardContent>
             </Card>
         </div>
+        <ProjectTypeNamesDialog v-model:open="renamingTypes" :types="projectTypes" :defaults="projectTypeDefaults" />
     </PageShell>
 </template>

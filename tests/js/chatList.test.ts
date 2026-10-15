@@ -91,8 +91,8 @@ test('formatListTime writes the time as Telegram does', () => {
     assert.equal(formatListTime(null, now), '');
 });
 
-test('only a task discussion keeps the stacked layout', () => {
-    assert.equal(threadLayout('task'), 'stacked');
+test('every conversation, a task discussion included, is drawn two-sided', () => {
+    assert.equal(threadLayout('task'), 'sided');
     assert.equal(threadLayout('team'), 'sided');
     assert.equal(threadLayout('dm'), 'sided');
 });

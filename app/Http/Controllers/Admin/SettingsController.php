@@ -7,6 +7,7 @@ use App\Http\Requests\Settings\UpdateSettingsRequest;
 use App\Models\GoogleAccount;
 use App\Services\Calendar\GoogleOAuth;
 use App\Services\SettingsService;
+use App\Support\ProjectType;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -62,6 +63,18 @@ class SettingsController extends Controller
 
         return Inertia::render('Admin/Settings', [
             'settings' => $list,
+            // Client request 2026-10-15: the project type names (the Projects page's "All
+            // projects" filter and every Type box) are renamed from Settings too, through the
+            // same `PUT /admin/project-types` the project form's rename dialog uses.
+            'projectTypes' => array_map(
+                fn (ProjectType $type): array => ['value' => $type->value, 'label' => $type->label()],
+                ProjectType::cases(),
+            ),
+            'projectTypeDefaults' => array_column(
+                array_map(fn (ProjectType $type): array => [$type->value, $type->defaultLabel()], ProjectType::cases()),
+                1,
+                0,
+            ),
             // The editable half of Part D §20, described once — see the Form Request.
             'fields' => $this->fields(),
             'sections' => UpdateSettingsRequest::SECTIONS,

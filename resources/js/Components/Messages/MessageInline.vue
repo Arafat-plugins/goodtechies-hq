@@ -56,7 +56,7 @@ function reveal(index: number): void {
 
         <code
             v-else-if="node.kind === 'code'"
-            class="rounded border bg-background px-1 py-0.5 font-mono text-xs break-all text-foreground"
+            class="rounded border bg-background box-decoration-clone px-1.5 py-px font-mono text-xs break-words text-foreground"
         >{{ node.value }}</code>
 
         <strong v-else-if="node.kind === 'bold'" class="font-bold"><MessageInline :nodes="node.children" :link-class="linkClass" :mention-class="mentionClass" /></strong>

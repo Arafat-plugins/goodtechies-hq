@@ -179,6 +179,12 @@ function confirmDelete(): void {
     <div
         class="flex min-w-0 flex-col gap-6 [&_[data-slot=card]]:gap-3 [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:border-0 [&_[data-slot=card]]:bg-transparent [&_[data-slot=card]]:py-0 [&_[data-slot=card]]:shadow-flat [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-description]]:hidden [&_[data-slot=card-header]]:px-0 [&_[data-slot=card-title]]:font-semibold"
     >
+        <!-- The task's name, on the page (client request 2026-10-15). The drawer already shows it
+             in its own header, so only the full page draws it here. -->
+        <h2 v-if="variant === 'page'" class="min-w-0 text-2xl font-bold break-words" data-testid="task-title">
+            {{ task.title }}
+        </h2>
+
         <!-- Where the task stands, and what it can do next. -->
         <!--
             Brief 025: one line — the status, Archived, and the moves beside them. Overdue lives

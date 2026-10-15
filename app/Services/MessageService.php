@@ -252,6 +252,14 @@ class MessageService
         return $message;
     }
 
+    /** The photo types several of which may share one message (File::INLINE_TYPES' images). */
+    public const ALBUM_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+    private static function isAlbumImage(UploadedFile $upload): bool
+    {
+        return in_array(strtolower((string) $upload->getMimeType()), self::ALBUM_TYPES, true);
+    }
+
     /**
      * Post a message, optionally with a file on it and optionally naming people.
      *
@@ -275,6 +283,8 @@ class MessageService
      * @param  int|null  $replyToId  the message this one replies to (12-82): it must exist, be in
      *                               THIS conversation and not be deleted, or a ValidationException
      *                               on `reply_to_id`
+     * @param  list<UploadedFile>  $extraImages  more photos sent together with `$upload`, stored
+     *                                           on the same message so they show side by side
      *
      * @throws AuthorizationException
      * @throws ConversationStateException
@@ -289,6 +299,7 @@ class MessageService
         ?AttachmentKind $kind = null,
         ?int $duration = null,
         ?int $replyToId = null,
+        array $extraImages = [],
     ): Message {
         if (! Gate::forUser($actor)->allows('post', $conversation)) {
             throw new AuthorizationException('You are not allowed to post in this discussion.');
@@ -311,6 +322,30 @@ class MessageService
             FileService::assertAcceptable($upload, $kind, forMessage: true);
         }
 
+        // Several photos sent together ride on ONE message, so they show side by side. Only
+        // photos, only alongside a photo, and never on a voice note.
+        $extraImages = array_values(array_filter($extraImages, fn ($image) => $image instanceof UploadedFile));
+
+        if ($extraImages !== []) {
+            if ($upload === null || $kind === AttachmentKind::Voice || ! self::isAlbumImage($upload)) {
+                throw FileStateException::typeNotAllowed(
+                    strtolower($upload?->getClientOriginalExtension() ?? 'file'),
+                    ['png', 'jpg', 'jpeg', 'gif', 'webp'],
+                );
+            }
+
+            foreach ($extraImages as $image) {
+                FileService::assertAcceptable($image, null, forMessage: true);
+
+                if (! self::isAlbumImage($image)) {
+                    throw FileStateException::typeNotAllowed(
+                        strtolower($image->getClientOriginalExtension()),
+                        ['png', 'jpg', 'jpeg', 'gif', 'webp'],
+                    );
+                }
+            }
+        }
+
         if ($replyToId !== null) {
             $this->assertRepliable($conversation, $replyToId);
         }
@@ -326,6 +361,7 @@ class MessageService
             $kind,
             $duration,
             $replyToId,
+            $extraImages,
         ): Message {
             $message = Message::create([
                 'conversation_id' => $conversation->getKey(),
@@ -345,6 +381,15 @@ class MessageService
                 $message->attachments()->attach($file->getKey(), [
                     'kind' => ($kind ?? AttachmentKind::forFile($file))->value,
                     'duration_seconds' => self::voiceSeconds($kind, $duration),
+                ]);
+            }
+
+            foreach ($extraImages as $image) {
+                $extra = $this->files->store($actor, $message, $image);
+
+                $message->attachments()->attach($extra->getKey(), [
+                    'kind' => AttachmentKind::forFile($extra)->value,
+                    'duration_seconds' => null,
                 ]);
             }
 

@@ -298,6 +298,9 @@ class ConversationService
 
         $latest = Message::query()
             ->whereIn('conversation_id', $ids)
+            // A message deleted for everyone is not shown anywhere (client request 2026-10-15), so
+            // the list previews the newest message that still exists.
+            ->whereNull('deleted_at')
             ->selectRaw('DISTINCT ON (conversation_id) *')
             ->orderBy('conversation_id')
             ->orderByDesc('id')

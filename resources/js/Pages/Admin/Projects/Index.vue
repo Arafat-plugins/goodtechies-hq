@@ -20,6 +20,7 @@ import ProjectWorkingNow from '@/Components/Projects/ProjectWorkingNow.vue';
 import { useLiveTaskProps } from '@/Components/Realtime/reload';
 import StatusPill, { toneForProjectStatus } from '@/Components/StatusPill.vue';
 import { workingNowPing, type WorkingNowRow } from '@/Components/Timer/taskTimer';
+import ProjectTypeNamesDialog from '@/Components/Projects/ProjectTypeNamesDialog.vue';
 import { Button } from '@/Components/ui/button';
 import {
     Dialog,
@@ -66,6 +67,9 @@ const props = defineProps<{
     priorities: Option[];
     billingTypes: Option[];
     billingFrequencies: Option[];
+    /** Polish 026: the built-in name of each type, and whether this viewer may rename them. */
+    projectTypeDefaults?: Record<string, string>;
+    canRenameProjectTypes?: boolean;
     /** Open task timers by project id (flow F3) — absent for anybody without `watchLive`. */
     workingNowByProject?: Record<number, WorkingNowRow[]>;
 }>();
@@ -74,6 +78,9 @@ const props = defineProps<{
  * "Working now" follows the timers live: a `task.changed` kind `timer` frame (flow F1) becomes a
  * partial reload of this one prop. A reader without the prop never asks for it.
  */
+/** Client request 2026-10-15: rename the "All projects" options from beside the filter. */
+const renamingTypes = ref(false);
+
 if (props.workingNowByProject !== undefined) {
     useLiveTaskProps(['workingNowByProject'], { accept: workingNowPing });
 }
@@ -331,6 +338,18 @@ function closeDelete(): void {
                             {{ option.label }}
                         </option>
                     </NativeSelect>
+                    <Button
+                        v-if="canRenameProjectTypes"
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        class="size-9"
+                        title="Rename project types"
+                        @click="renamingTypes = true"
+                    >
+                        <Pencil aria-hidden="true" />
+                        <span class="sr-only">Rename project types</span>
+                    </Button>
                     <NativeSelect v-model="cardClient" aria-label="Filter projects by client" class="h-9 max-w-60">
                         <option value="">All clients</option>
                         <option v-for="option in cardClients" :key="option.key" :value="option.key">
@@ -510,6 +529,12 @@ function closeDelete(): void {
                 </template>
             </DataTable>
         </div>
+        <ProjectTypeNamesDialog
+            v-if="canRenameProjectTypes"
+            v-model:open="renamingTypes"
+            :types="projectTypes"
+            :defaults="projectTypeDefaults ?? {}"
+        />
     </PageShell>
 
     <Dialog

@@ -39,7 +39,8 @@ const props = defineProps<{
 
 const shown = computed<PreviewMessage[]>(() => {
     if (props.messages !== null) {
-        return props.messages;
+        // Deleted messages are not shown in the thread, so not in its placeholder either.
+        return props.messages.filter((message) => !message.deleted);
     }
 
     if (props.last === null) {

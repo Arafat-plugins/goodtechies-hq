@@ -382,6 +382,7 @@ class MessageController extends Controller
                 $request->attachmentKind(),
                 $request->duration(),
                 $request->replyToId(),
+                $request->extraImages(),
             );
         } catch (ConversationStateException|FileStateException $exception) {
             return $request->expectsJson()

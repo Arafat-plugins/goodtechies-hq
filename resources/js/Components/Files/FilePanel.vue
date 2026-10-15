@@ -15,6 +15,7 @@ import {
 } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import EmptyState from '@/Components/EmptyState.vue';
+import ImageLightbox from '@/Components/Messages/ImageLightbox.vue';
 import { cn } from '@/lib/utils';
 import type {
     FileHistoryResponse,
@@ -137,6 +138,32 @@ const failedToSend = ref(false);
 const UPLOAD_FAILED_TEXT = 'Upload failed — check your connection. Your file is still here; try again.';
 
 const confirming = ref<number | null>(null);
+
+/**
+ * The task's Attachments (`compact`, client request 2026-10-15): pictures as small tiles that open
+ * in the lightbox, other files as cards — "ZIP File · Download" — and a dashed + tile to add.
+ */
+const previewing = ref<FileSummary | null>(null);
+
+const TYPE_NAMES: Record<string, string> = {
+    zip: 'ZIP File',
+    rar: 'RAR File',
+    doc: 'Word Document',
+    docx: 'Word Document',
+    xls: 'Excel Spreadsheet',
+    xlsx: 'Excel Spreadsheet',
+    csv: 'CSV File',
+    ppt: 'PowerPoint',
+    pptx: 'PowerPoint',
+    pdf: 'PDF Document',
+    txt: 'Text File',
+};
+
+function typeName(file: FileSummary): string {
+    const extension = (file.extension ?? '').toLowerCase();
+
+    return TYPE_NAMES[extension] ?? (extension !== '' ? `${extension.toUpperCase()} File` : 'File');
+}
 const busy = ref<number | null>(null);
 
 const replacingName = computed(
@@ -634,6 +661,125 @@ function destroy(file: FileSummary): void {
                     title="No files yet"
                     :description="emptyDescription"
                 />
+
+                <!-- The task's Attachments: tiles and cards side by side, then a dashed + tile. -->
+                <template v-if="compact">
+                    <ul v-if="files.length > 0 || canUpload" class="flex min-w-0 flex-wrap gap-2" data-testid="attachment-grid">
+                        <li v-for="file in files" :key="file.id" class="group relative min-w-0 max-w-full">
+                            <button
+                                v-if="file.is_image && !linksStale"
+                                type="button"
+                                class="block h-16 w-24 cursor-zoom-in overflow-hidden rounded-lg border bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                                :aria-label="`Open ${file.name}`"
+                                :title="file.name"
+                                @click="previewing = file"
+                            >
+                                <img :src="file.url" :alt="file.name" loading="lazy" class="size-full object-cover" />
+                            </button>
+                            <div
+                                v-else
+                                class="flex h-16 w-60 max-w-full min-w-0 items-center gap-3 rounded-lg border bg-card px-3 text-card-foreground"
+                            >
+                                <span class="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                                    <component :is="iconFor(file)" class="size-5" aria-hidden="true" />
+                                </span>
+                                <span class="flex min-w-0 flex-col gap-0.5">
+                                    <span class="truncate text-sm font-medium" :title="file.name">{{ file.name }}</span>
+                                    <span class="truncate text-xs text-muted-foreground">
+                                        {{ typeName(file) }} ·
+                                        <a
+                                            v-if="!linksStale"
+                                            :href="file.url"
+                                            :target="file.is_previewable ? '_blank' : undefined"
+                                            rel="noopener noreferrer"
+                                            class="rounded-sm hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                                        >Download<span class="sr-only"> {{ file.name }}</span></a>
+                                        <span v-else>Link expired</span>
+                                    </span>
+                                </span>
+                                <Badge v-if="file.version > 1" variant="outline" class="ml-auto shrink-0">v{{ file.version }}</Badge>
+                            </div>
+                            <span
+                                v-if="file.permissions.can_replace || file.permissions.can_delete"
+                                class="absolute -top-2 -right-2 hidden gap-1 group-focus-within:flex group-hover:flex"
+                            >
+                                <Button
+                                    v-if="file.permissions.can_replace"
+                                    type="button"
+                                    variant="outline"
+                                    size="icon-sm"
+                                    class="size-6 rounded-full bg-background"
+                                    :disabled="uploading"
+                                    :aria-label="`Upload a new version of ${file.name}`"
+                                    @click="replace(file)"
+                                >
+                                    <Replace aria-hidden="true" />
+                                </Button>
+                                <Button
+                                    v-if="file.permissions.can_delete"
+                                    type="button"
+                                    variant="outline"
+                                    size="icon-sm"
+                                    class="size-6 rounded-full bg-background"
+                                    :disabled="busy === file.id"
+                                    :aria-label="`Delete ${file.name}`"
+                                    @click="confirmDelete(file)"
+                                >
+                                    <Trash2 aria-hidden="true" />
+                                </Button>
+                            </span>
+                        </li>
+                        <li v-if="canUpload">
+                            <button
+                                type="button"
+                                class="flex h-16 w-24 items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:border-ring hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                                :disabled="uploading"
+                                :aria-label="`Add to ${title}`"
+                                @click="pickFile"
+                            >
+                                <Plus class="size-6" aria-hidden="true" />
+                            </button>
+                        </li>
+                    </ul>
+
+                    <template v-for="file in files" :key="`confirm-${file.id}`">
+                        <div
+                            v-if="confirming === file.id"
+                            class="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                            @keydown.esc="confirming = null"
+                        >
+                            <p class="text-sm">
+                                Delete <span class="font-medium break-all">{{ file.name }}</span>? The
+                                file is removed for everyone and cannot be recovered.
+                            </p>
+                            <div class="flex shrink-0 gap-2">
+                                <Button type="button" variant="outline" size="sm" :disabled="busy === file.id" @click="confirming = null">
+                                    Cancel
+                                </Button>
+                                <Button
+                                    :id="confirmButtonId"
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    :disabled="busy === file.id"
+                                    @click="destroy(file)"
+                                >
+                                    {{ busy === file.id ? 'Deleting…' : 'Delete' }}
+                                </Button>
+                            </div>
+                        </div>
+                    </template>
+
+                    <ImageLightbox
+                        v-if="previewing"
+                        :open="previewing !== null"
+                        :src="previewing.url"
+                        :name="previewing.name"
+                        :href="previewing.url"
+                        :image-id="previewing.id"
+                        @update:open="(value: boolean) => { if (!value) previewing = null; }"
+                    />
+                </template>
 
                 <ul v-else-if="files.length > 0" :class="compact ? 'flex flex-col' : 'divide-y'">
                     <li

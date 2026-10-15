@@ -72,8 +72,13 @@ const props = withDefaults(
          * lightbox the picture opens. Files that are not pictures keep their card.
          */
         bare?: boolean;
+        /**
+         * One of several pictures in a message (2026-10-15): a fixed tile, cropped to fill it, so
+         * the pictures sit side by side in a row. The parent sizes the tile.
+         */
+        thumb?: boolean;
     }>(),
-    { stale: false, inline: false, onAccent: false, bare: false },
+    { stale: false, inline: false, onAccent: false, bare: false, thumb: false },
 );
 
 const rendersImage = computed(() => props.inline && !props.stale && props.file.kind === 'image');
@@ -166,7 +171,7 @@ const meta = computed(() => {
                 // 12-77: a voice note is only its player, sitting straight on the bubble and
                 // taking the bubble's own foreground — no card, no border, no padding.
                 rendersVoice || bareImage
-                    ? cn('border-0 bg-transparent p-0', rendersVoice ? 'w-64' : 'w-fit')
+                    ? cn('border-0 bg-transparent p-0', rendersVoice ? 'w-64' : thumb && rendersImage ? 'size-full' : 'w-fit')
                     : 'w-fit rounded-lg border bg-card p-1.5 text-card-foreground shadow-flat',
                 !rendersImage && !rendersVoice && 'w-full sm:max-w-xs',
                 onAccent && !rendersVoice && 'border-transparent',
@@ -182,9 +187,9 @@ const meta = computed(() => {
             aria-haspopup="dialog"
             :class="
                 cn(
-                    'relative block w-fit max-w-full min-w-0 cursor-zoom-in overflow-hidden bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
-                    bareImage ? 'rounded-2xl' : 'rounded-md',
-                    !imageReady && 'shimmer h-44 w-60',
+                    'relative block max-w-full min-w-0 cursor-zoom-in overflow-hidden bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none',
+                    thumb ? 'size-full rounded-lg' : cn('w-fit', bareImage ? 'rounded-2xl' : 'rounded-md'),
+                    !imageReady && (thumb ? 'shimmer' : 'shimmer h-44 w-60'),
                 )
             "
             :aria-busy="!imageReady || undefined"
@@ -197,8 +202,9 @@ const meta = computed(() => {
                 loading="lazy"
                 :class="
                     cn(
-                        'block h-auto w-auto max-w-full object-contain',
-                        bareImage ? 'max-h-80 sm:max-w-sm' : 'max-h-64 sm:max-w-xs',
+                        thumb
+                            ? 'block size-full object-cover'
+                            : cn('block h-auto w-auto max-w-full object-contain', bareImage ? 'max-h-80 sm:max-w-sm' : 'max-h-64 sm:max-w-xs'),
                         !imageReady && 'absolute inset-0 size-full opacity-0',
                     )
                 "
