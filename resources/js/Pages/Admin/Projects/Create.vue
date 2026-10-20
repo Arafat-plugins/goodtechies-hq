@@ -21,6 +21,8 @@ defineProps<{
     billingTypes: Option[];
     recurrenceFrequencies: Option[];
     billingFrequencies: Option[];
+    currencies?: Option[];
+    defaultCurrency?: string;
 }>();
 </script>
 
@@ -40,6 +42,8 @@ defineProps<{
             :billing-types="billingTypes"
             :recurrence-frequencies="recurrenceFrequencies"
             :billing-frequencies="billingFrequencies"
+            :currencies="currencies"
+            :default-currency="defaultCurrency"
             submit-label="Create project"
         />
     </PageShell>

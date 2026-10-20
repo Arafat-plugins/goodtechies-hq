@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\Currency;
+use App\Services\BonusService;
 use App\Exceptions\FinanceStateException;
 use App\Models\AuditLog;
 use App\Models\Employee;
@@ -54,7 +56,7 @@ const PAYROLL_ENDPOINTS_MONTH = '2026-09-01';
 const PAYROLL_ENDPOINTS_MONTH_DAY = '2026-09-18';
 
 /** The seeded September draft's five lines, at their seeded figures, come to this. */
-const PAYROLL_ENDPOINTS_NET_TOTAL = '7400.00';
+const PAYROLL_ENDPOINTS_NET_TOTAL = '7900.00'; // includes the seeded 500.00 approved Eid bonus
 
 /** Every route in the group, as method + path. */
 function payrollEndpointsRoutes(int $period, int $item): array
@@ -367,12 +369,21 @@ it('recalculates the net IN THE DATABASE when a figure is adjusted', function ()
     // Yaseen: base 800 + allowance 100. A 250 bonus and a 50 deduction make the net 1,100.
     expect(payrollEndpointsNetInDatabase($this->item->id))->toBe('900.00');
 
+    // The bonus comes from an approved bonus record now, never from the item form.
+    app(BonusService::class)->create($this->admin, [(int) $this->item->employee_id], [
+        'type' => 'custom',
+        'title' => 'Adjusted bonus',
+        'amount' => '250.00',
+        'currency' => Currency::default()->value,
+        'payment_date' => '2026-09-15',
+        'status' => 'approved',
+    ]);
+
     $this->actingAs($this->accountant)
         ->from("/payroll/{$this->period->id}")
         ->put("/payroll/{$this->period->id}/items/{$this->item->id}", [
             'base_salary' => '800.00',
             'allowance' => '100.00',
-            'bonus' => '250.00',
             'deduction' => '50.00',
             'advance' => '0.00',
         ])
@@ -441,7 +452,7 @@ it('refuses an edit once the month is locked, with a sentence rather than a 403'
 
     $this->actingAs($this->admin)
         ->from("/payroll/{$period->id}")
-        ->put("/payroll/{$period->id}/items/{$this->item->id}", ['bonus' => '10.00'])
+        ->put("/payroll/{$period->id}/items/{$this->item->id}", ['deduction' => '10.00'])
         ->assertRedirect("/payroll/{$period->id}")
         ->assertSessionHas('error', fn (string $message) => str_contains($message, 'locked'));
 })->group('phase9', 'payroll');

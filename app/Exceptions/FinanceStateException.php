@@ -90,4 +90,20 @@ class FinanceStateException extends RuntimeException
             $amount,
         ));
     }
+
+    /**
+     * A repeating expense was recorded (or skipped) before its next due date.
+     */
+    public static function recurringNotDue(string $date): self
+    {
+        return new self(sprintf('This repeating expense is not due yet. It is next due on %s.', $date));
+    }
+
+    /**
+     * A repeating expense that is paused, or past its end date, has nothing due.
+     */
+    public static function recurringInactive(): self
+    {
+        return new self('This repeating expense is paused or finished.');
+    }
 }

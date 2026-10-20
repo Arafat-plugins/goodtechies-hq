@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Finance;
 
+use App\Support\Currency;
 use App\Support\FinanceCategoryKind;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -44,6 +45,8 @@ class StoreExpenseRequest extends FormRequest
                 'max:'.StoreIncomeRequest::MAX_AMOUNT,
             ],
 
+            'currency' => ['required', 'string', Rule::in(Currency::values())],
+
             'date' => ['required', 'date_format:Y-m-d'],
 
             'notes' => ['nullable', 'string', 'max:'.StoreIncomeRequest::MAX_NOTES],
@@ -63,6 +66,7 @@ class StoreExpenseRequest extends FormRequest
             'category_id.exists' => 'Choose an expense category. An income category cannot be used on an expense record.',
             'amount.gt' => 'An expense needs an amount greater than zero.',
             'amount.decimal' => 'An amount has at most two decimal places.',
+            'currency.in' => 'Choose BDT or USD.',
         ];
     }
 
@@ -70,7 +74,7 @@ class StoreExpenseRequest extends FormRequest
      * `project_id` and `billable` are only included when the request sent them, so an edit that
      * leaves them out keeps the stored link and flag instead of clearing them.
      *
-     * @return array{category_id: int, project_id?: int|null, billable?: bool, amount: string, date: string, notes: string|null}
+     * @return array{category_id: int, project_id?: int|null, billable?: bool, amount: string, currency: string, date: string, notes: string|null}
      */
     public function expenseAttributes(): array
     {
@@ -81,6 +85,7 @@ class StoreExpenseRequest extends FormRequest
         $attributes = [
             'category_id' => (int) $validated['category_id'],
             'amount' => (string) $validated['amount'],
+            'currency' => (string) $validated['currency'],
             'date' => (string) $validated['date'],
             'notes' => $notes === '' ? null : $notes,
         ];

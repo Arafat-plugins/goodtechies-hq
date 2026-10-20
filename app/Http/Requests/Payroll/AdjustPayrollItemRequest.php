@@ -63,6 +63,9 @@ class AdjustPayrollItemRequest extends FormRequest
             $rules[$field] = $money;
         }
 
+        // `bonus` is not adjustable: it is the sum of the item's approved bonus records
+        // (`BonusService::syncPeriodFor()`), so it is not in ADJUSTABLE and has no rule here.
+
         $rules['admin_notes'] = ['sometimes', 'nullable', 'string', 'max:'.self::MAX_NOTES];
 
         // See the class note. Refused loudly rather than dropped quietly.

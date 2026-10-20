@@ -1,44 +1,33 @@
 <script lang="ts">
+import { formatMoney as formatLedgerMoney } from '@/Components/Finance/finance';
 import type { Project, ProjectFinance } from '@/Components/Projects/ProjectForm.vue';
 
-/**
- * There is no currency prop on this payload yet, so USD is hard-coded here — one helper,
- * shared by every project surface that shows money. Move it to a shared place when a
- * currency arrives.
- */
-const MONEY = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-});
+/** The currency a project's figures are shown in when it has no finance row to say. */
+export const PROJECT_FALLBACK_CURRENCY = 'BDT';
 
-export function formatMoney(amount: string | number | null | undefined): string | null {
+/**
+ * A project figure in the project's own currency (`finance.currency`). Blank stays null so the
+ * read-only view can show an em dash.
+ */
+export function formatMoney(
+    amount: string | number | null | undefined,
+    currency: string = PROJECT_FALLBACK_CURRENCY,
+): string | null {
     if (amount === null || amount === undefined || amount === '') {
         return null;
     }
 
     const value = typeof amount === 'number' ? amount : Number(amount);
 
-    return Number.isFinite(value) ? MONEY.format(value) : null;
+    return Number.isFinite(value) ? formatLedgerMoney(value, currency) : null;
 }
 
-/** An hourly rate always shows its cents: "$40.00/hr", not "$40/hr". */
-const RATE = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-});
-
-export function formatRate(amount: string | number | null | undefined): string | null {
-    if (amount === null || amount === undefined || amount === '') {
-        return null;
-    }
-
-    const value = typeof amount === 'number' ? amount : Number(amount);
-
-    return Number.isFinite(value) ? RATE.format(value) : null;
+/** An hourly rate in the project's currency. */
+export function formatRate(
+    amount: string | number | null | undefined,
+    currency: string = PROJECT_FALLBACK_CURRENCY,
+): string | null {
+    return formatMoney(amount, currency);
 }
 
 /** The suffix a recurring amount carries; custom or no frequency keeps the historic `/mo`. */
@@ -53,15 +42,17 @@ const RECURRING_SUFFIX: Record<string, string> = {
  * one-off price. Absent finance renders nothing at all.
  */
 export function moneyLine(finance: ProjectFinance | null | undefined): string | null {
+    const currency = finance?.currency || PROJECT_FALLBACK_CURRENCY;
+
     if (finance?.billing_frequency === 'hourly') {
-        const rate = formatRate(finance.hourly_rate);
+        const rate = formatRate(finance.hourly_rate, currency);
 
         if (rate) {
             return `${rate}/hr`;
         }
     }
 
-    const recurring = formatMoney(finance?.recurring_amount);
+    const recurring = formatMoney(finance?.recurring_amount, currency);
 
     if (recurring) {
         const suffix = RECURRING_SUFFIX[finance?.billing_frequency ?? ''] ?? '/mo';
@@ -69,7 +60,7 @@ export function moneyLine(finance: ProjectFinance | null | undefined): string | 
         return `${recurring}${suffix}`;
     }
 
-    return formatMoney(finance?.price);
+    return formatMoney(finance?.price, currency);
 }
 </script>
 
@@ -83,9 +74,7 @@ import {
     type Option,
 } from '@/Components/Projects/ProjectForm.vue';
 import { Button } from '@/Components/ui/button';
-import { formatDate } from '@/Components/Tasks/taskDetail';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
-import { Checkbox } from '@/Components/ui/checkbox';
 import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
@@ -96,9 +85,25 @@ const props = defineProps<{
     billingFrequencies: Option[];
     /** False hides the Edit button — the payload is read-only for this viewer. */
     canEdit: boolean;
+    /** BDT / USD. Falls back to BDT and USD when the page sends none. */
+    currencies?: Option[];
+    /** The currency used when the project has no finance row yet. */
+    defaultCurrency?: string;
 }>();
 
 const finance = computed(() => props.project.finance ?? null);
+
+const currencyOptions = computed<Option[]>(() =>
+    props.currencies && props.currencies.length > 0
+        ? props.currencies
+        : [
+              { value: 'BDT', label: 'Bangladeshi taka (BDT)' },
+              { value: 'USD', label: 'US dollar (USD)' },
+          ],
+);
+
+/** The project's own currency, else the page's default, else BDT. */
+const currency = computed(() => finance.value?.currency || props.defaultCurrency || PROJECT_FALLBACK_CURRENCY);
 
 const editing = ref(false);
 
@@ -107,10 +112,10 @@ const form = useForm({
     recurring_amount: moneyInputValue(finance.value?.recurring_amount),
     billing_frequency: finance.value?.billing_frequency ?? NO_FREQUENCY,
     hourly_rate: moneyInputValue(finance.value?.hourly_rate),
-    auto_income: finance.value?.auto_income ?? true,
     contract_value: moneyInputValue(finance.value?.contract_value),
     contract_terms: finance.value?.contract_terms ?? '',
     profitability_snapshot: moneyInputValue(finance.value?.profitability_snapshot),
+    currency: currency.value,
 });
 
 /** The rate is asked for only while the frequency is Hourly. */
@@ -133,10 +138,10 @@ function startEditing(): void {
     form.recurring_amount = moneyInputValue(finance.value?.recurring_amount);
     form.billing_frequency = finance.value?.billing_frequency ?? NO_FREQUENCY;
     form.hourly_rate = moneyInputValue(finance.value?.hourly_rate);
-    form.auto_income = finance.value?.auto_income ?? true;
     form.contract_value = moneyInputValue(finance.value?.contract_value);
     form.contract_terms = finance.value?.contract_terms ?? '';
     form.profitability_snapshot = moneyInputValue(finance.value?.profitability_snapshot);
+    form.currency = currency.value;
     editing.value = true;
 }
 
@@ -150,10 +155,10 @@ function submit(): void {
         recurring_amount: blankToNull(data.recurring_amount),
         billing_frequency: data.billing_frequency === NO_FREQUENCY ? null : data.billing_frequency,
         hourly_rate: data.billing_frequency === 'hourly' ? blankToNull(data.hourly_rate) : null,
-        auto_income: data.auto_income,
         contract_value: blankToNull(data.contract_value),
         contract_terms: blankToNull(data.contract_terms),
         profitability_snapshot: blankToNull(data.profitability_snapshot),
+        currency: data.currency,
     }));
 
     form.put(`/admin/projects/${props.project.id}/finance`, {
@@ -166,29 +171,26 @@ function submit(): void {
 
 /** Label / value pairs for the read-only view; a null value shows an em dash. */
 const rows = computed(() => [
-    { label: 'Price', value: formatMoney(finance.value?.price) },
-    { label: 'Recurring amount', value: formatMoney(finance.value?.recurring_amount) },
+    { label: 'Currency', value: finance.value ? currency.value : null },
+    { label: 'Price', value: formatMoney(finance.value?.price, currency.value) },
+    { label: 'Recurring amount', value: formatMoney(finance.value?.recurring_amount, currency.value) },
     { label: 'Billing frequency', value: finance.value?.billing_frequency_label ?? null },
     ...(blankToNull(finance.value?.hourly_rate) === null
         ? []
-        : [{ label: 'Hourly rate', value: formatRate(finance.value?.hourly_rate) }]),
-    {
-        label: 'Income',
-        value:
-            finance.value?.auto_income === false
-                ? 'Recorded by hand'
-                : 'Automatic' + (finance.value?.auto_income_from ? ` since ${formatDate(finance.value.auto_income_from)}` : ''),
-    },
-    { label: 'Contract value', value: formatMoney(finance.value?.contract_value) },
-    { label: 'Profitability snapshot', value: formatMoney(finance.value?.profitability_snapshot) },
+        : [{ label: 'Hourly rate', value: formatRate(finance.value?.hourly_rate, currency.value) }]),
+    { label: 'Contract value', value: formatMoney(finance.value?.contract_value, currency.value) },
+    { label: 'Profitability snapshot', value: formatMoney(finance.value?.profitability_snapshot, currency.value) },
 ]);
 </script>
 
 <template>
     <Card class="min-w-0 gap-4">
         <CardHeader>
-            <CardTitle class="text-sm font-medium">Finance</CardTitle>
-            <CardDescription>What this project bills, and on what terms.</CardDescription>
+            <CardTitle class="text-sm font-medium">Pricing</CardTitle>
+            <CardDescription>
+                What this project is billed at. Pricing records nothing by itself — record actual amounts in Project
+                financials below.
+            </CardDescription>
             <CardAction v-if="canEdit && !editing">
                 <Button type="button" variant="outline" size="sm" @click="startEditing">
                     <Pencil aria-hidden="true" />
@@ -215,6 +217,25 @@ const rows = computed(() => [
 
             <form v-else class="flex flex-col gap-4" novalidate @submit.prevent="submit">
                 <div class="grid gap-4 md:grid-cols-2">
+                    <div class="flex min-w-0 flex-col gap-2 md:col-span-2">
+                        <Label for="finance-currency">Currency</Label>
+                        <Select v-model="form.currency" :disabled="form.processing">
+                            <SelectTrigger
+                                id="finance-currency"
+                                class="w-full md:w-64"
+                                :aria-invalid="form.errors.currency ? true : undefined"
+                            >
+                                <SelectValue placeholder="Choose a currency" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem v-for="option in currencyOptions" :key="option.value" :value="option.value">
+                                    {{ option.label }}
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <p v-if="form.errors.currency" class="text-xs text-destructive">{{ form.errors.currency }}</p>
+                    </div>
+
                     <div class="flex min-w-0 flex-col gap-2">
                         <Label for="finance-price">Price</Label>
                         <Input
@@ -291,25 +312,10 @@ const rows = computed(() => [
                         </p>
                     </div>
 
-                    <div class="flex min-w-0 flex-col gap-2 md:col-span-2">
-                        <div class="flex items-center gap-2">
-                            <Checkbox
-                                id="finance-auto-income"
-                                :model-value="form.auto_income"
-                                :disabled="form.processing"
-                                aria-describedby="finance-auto-income-hint"
-                                @update:model-value="form.auto_income = $event === true"
-                            />
-                            <Label for="finance-auto-income">Record income automatically</Label>
-                        </div>
-                        <p id="finance-auto-income-hint" class="text-xs text-muted-foreground">
-                            Income is added to Finance on its own: recurring amounts on each due date, hourly work
-                            monthly, a one-time price when the project is completed.
-                        </p>
-                        <p v-if="form.errors.auto_income" class="text-xs text-destructive">
-                            {{ form.errors.auto_income }}
-                        </p>
-                    </div>
+                    <p class="text-xs text-muted-foreground md:col-span-2">
+                        Income is never recorded automatically. Record payments in Finance → Income, and project
+                        earnings in Project financials below.
+                    </p>
 
                     <div class="flex min-w-0 flex-col gap-2">
                         <Label for="finance-contract-value">Contract value</Label>

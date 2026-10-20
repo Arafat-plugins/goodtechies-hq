@@ -75,6 +75,8 @@ export interface PayslipRow {
     leave_impact: string;
     /** PostgreSQL's generated column. Never computed here (see rule 1). */
     net_salary: string;
+    /** The bonus records that make up `bonus`, one line each. May be absent on older payloads. */
+    bonuses?: { id: number; display_name: string; type_label: string; amount: string; status: string; status_label: string; payment_date: string }[];
     permissions: { can_update: boolean; can_annotate: boolean };
     release: PayslipRelease;
 }

@@ -46,6 +46,10 @@ enum AuditEvent: string
     case PasswordResetByEmail = 'user.password_reset_by_email';
     case ProjectCreated = 'project.created';
     case ProjectPriceChanged = 'project.price_changed';
+    // A hand-recorded project financial entry (contract value, earned, received) added, corrected or removed.
+    case ProjectEarningRecorded = 'project_earning.recorded';
+    case ProjectEarningEdited = 'project_earning.edited';
+    case ProjectEarningDeleted = 'project_earning.deleted';
     // An archived project deleted for good. The row and its activity timeline go with it, so
     // this is the only record left that it ever existed.
     case ProjectDeleted = 'project.deleted';
@@ -126,6 +130,11 @@ enum AuditEvent: string
     // Polish 005: a draft moved to the month it actually pays for (old and new month).
     case PayrollMonthChanged = 'payroll.month_changed';
     case PayrollLockReversed = 'payroll.lock_reversed';
+    // Bonuses (Eid, annual, performance, custom) created, edited, approved or cancelled.
+    case BonusCreated = 'bonus.created';
+    case BonusEdited = 'bonus.edited';
+    case BonusApproved = 'bonus.approved';
+    case BonusCancelled = 'bonus.cancelled';
     case ExpenseCreated = 'expense.created';
     case ExpenseEdited = 'expense.edited';
     // A repeating expense (VPS monthly, domain yearly): the template saved or removed. The
@@ -271,6 +280,9 @@ enum AuditEvent: string
 
             self::ProjectCreated => 'Project created',
             self::ProjectPriceChanged => 'Project price changed',
+            self::ProjectEarningRecorded => 'Project earning recorded',
+            self::ProjectEarningEdited => 'Project earning edited',
+            self::ProjectEarningDeleted => 'Project earning deleted',
             self::ProjectDeleted => 'Project deleted',
 
             self::TaskAssigned => 'Task assigned',
@@ -306,6 +318,10 @@ enum AuditEvent: string
             self::PayrollApproved => 'Payroll approved',
             self::PayrollMonthChanged => 'Payroll month changed',
             self::PayrollLockReversed => 'Payroll lock reversed',
+            self::BonusCreated => 'Bonus created',
+            self::BonusEdited => 'Bonus edited',
+            self::BonusApproved => 'Bonus approved',
+            self::BonusCancelled => 'Bonus cancelled',
             self::ExpenseCreated => 'Expense recorded',
             self::ExpenseEdited => 'Expense edited',
             self::RecurringExpenseSaved => 'Repeating expense saved',
@@ -350,6 +366,9 @@ enum AuditEvent: string
 
             self::ProjectCreated,
             self::ProjectPriceChanged,
+            self::ProjectEarningRecorded,
+            self::ProjectEarningEdited,
+            self::ProjectEarningDeleted,
             self::ProjectDeleted => self::GROUP_PROJECTS,
 
             self::TaskAssigned,
@@ -385,6 +404,10 @@ enum AuditEvent: string
             self::PayrollApproved,
             self::PayrollMonthChanged,
             self::PayrollLockReversed,
+            self::BonusCreated,
+            self::BonusEdited,
+            self::BonusApproved,
+            self::BonusCancelled,
             self::ExpenseCreated,
             self::ExpenseEdited,
             self::RecurringExpenseSaved,

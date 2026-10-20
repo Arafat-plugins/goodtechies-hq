@@ -21,14 +21,15 @@ class SettingsService
     /**
      * Keys only the system writes; admins cannot change them.
      */
-    public const READ_ONLY = ['backup_last_verified_at'];
+    public const READ_ONLY = ['backup_last_verified_at', 'usd_bdt_rate_updated_at'];
 
     /**
      * Keys an admin edits on a screen of their own rather than Admin → Settings (polish 026:
      * the project type names, renamed beside the Type box on the project form; polish 033: the
-     * service boxes, edited on Admin → Projects).
+     * service boxes, edited on Admin → Projects; D7: the USD→BDT rate and its mode, edited on the
+     * finance report screen).
      */
-    public const OWN_SCREEN = ['project_type_labels', 'project_service_boxes'];
+    public const OWN_SCREEN = ['project_type_labels', 'project_service_boxes', 'usd_bdt_rate', 'usd_bdt_rate_mode'];
 
     /**
      * @var array<string, mixed>|null
@@ -71,7 +72,7 @@ class SettingsService
      * @throws UnknownSettingException
      * @throws AuthorizationException
      */
-    public function set(string $key, mixed $value, User $actor): void
+    public function set(string $key, mixed $value, User $actor, Permission $permission = Permission::SettingsManage): void
     {
         $this->assertKnown($key);
 
@@ -79,7 +80,9 @@ class SettingsService
             throw UnknownSettingException::readOnly($key);
         }
 
-        if (! $actor->isActive() || ! $actor->hasPermission(Permission::SettingsManage)) {
+        // `$permission` lets a screen of its own ask its own key (D7: the exchange rate is
+        // changed by whoever holds finance.manage); it defaults to settings.manage.
+        if (! $actor->isActive() || ! $actor->hasPermission($permission)) {
             throw new AuthorizationException('You are not allowed to change settings.');
         }
 
@@ -116,6 +119,19 @@ class SettingsService
             ['key' => 'backup_last_verified_at'],
             ['value' => $at->toIso8601String()],
         );
+
+        $this->values = null;
+    }
+
+    /**
+     * Written by the system (the exchange-rate refresh): no actor and no audit row, and it may
+     * write a READ_ONLY key.
+     */
+    public function setSystem(string $key, mixed $value): void
+    {
+        $this->assertKnown($key);
+
+        Setting::query()->updateOrCreate(['key' => $key], ['value' => $value]);
 
         $this->values = null;
     }

@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Finance;
 
 use App\Models\RecurringExpense;
+use App\Support\Currency;
 use App\Support\FinanceCategoryKind;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Carbon;
@@ -61,6 +62,8 @@ class StoreRecurringExpenseRequest extends FormRequest
                 'max:'.StoreIncomeRequest::MAX_AMOUNT,
             ],
 
+            'currency' => ['required', 'string', Rule::in(Currency::values())],
+
             'frequency' => ['required', 'in:monthly,quarterly,yearly'],
 
             'start_date' => $startRules,
@@ -83,6 +86,7 @@ class StoreRecurringExpenseRequest extends FormRequest
             'category_id.exists' => 'Choose an expense category. An income category cannot be used on an expense.',
             'amount.gt' => 'A repeating expense needs an amount greater than zero.',
             'amount.decimal' => 'An amount has at most two decimal places.',
+            'currency.in' => 'Choose BDT or USD.',
             'frequency.in' => 'Choose how often it repeats: monthly, quarterly or yearly.',
             'start_date.required' => 'Choose the first date it is due.',
             'start_date.after_or_equal' => 'A repeating expense can start this month or later. Record earlier months as normal expenses.',
@@ -91,7 +95,7 @@ class StoreRecurringExpenseRequest extends FormRequest
     }
 
     /**
-     * @return array{category_id: int, project_id: int|null, billable: bool, amount: string, frequency: string, start_date: string, ends_on: string|null, notes: string|null, active: bool}
+     * @return array{category_id: int, project_id: int|null, billable: bool, amount: string, currency: string, frequency: string, start_date: string, ends_on: string|null, notes: string|null, active: bool}
      */
     public function templateAttributes(): array
     {
@@ -104,6 +108,7 @@ class StoreRecurringExpenseRequest extends FormRequest
             'project_id' => isset($validated['project_id']) ? (int) $validated['project_id'] : null,
             'billable' => (bool) ($validated['billable'] ?? false),
             'amount' => (string) $validated['amount'],
+            'currency' => (string) $validated['currency'],
             'frequency' => (string) $validated['frequency'],
             'start_date' => (string) $validated['start_date'],
             'ends_on' => isset($validated['ends_on']) && $validated['ends_on'] !== '' ? (string) $validated['ends_on'] : null,

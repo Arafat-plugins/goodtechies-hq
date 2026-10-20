@@ -3,9 +3,11 @@
 namespace App\Http\Requests\Settings;
 
 use App\Services\SettingsService;
+use App\Support\Currency;
 use Database\Seeders\SettingsSeeder;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * Admin → Settings, the write half (master prompt Part E, Phase 12: *"settings changes
@@ -30,10 +32,9 @@ use Illuminate\Foundation\Http\FormRequest;
  *     "today" in the application resolves through (`AttendanceService`, `hq:mark-absent`, every
  *     report's day boundary); a value Carbon cannot construct a timezone from is not a wrong
  *     answer, it is an exception on the next scheduled run.
- *   - **`currency`** — three letters, upper-cased on the way in. ISO 4217 alpha-3 is the shape
- *     every money label in finance, payroll and the payslip prints. Not an allow-list of codes:
- *     Part H §2 records the value as *"single value; spec examples use `$`"* and *"payroll
- *     currency to be confirmed"*, so closing the list here would be a decision nobody has made.
+ *   - **`currency`** — one of `Currency::values()` (BDT or USD), upper-cased on the way in. It is
+ *     the default currency for new finance records and the one payroll is paid in; every record
+ *     carries its own currency, so there is no conversion to configure.
  *   - **`late_grace_minutes` 0–120.** 0 is meaningful — no grace, a minute late is Late. 120 is
  *     the far end at which the rule stops meaning anything: two hours after a 09:00 start is
  *     most of a morning, and an agency that wants that does not want a Late rule.
@@ -92,7 +93,7 @@ class UpdateSettingsRequest extends FormRequest
             'section' => 'General',
             'label' => 'Currency',
             'type' => 'currency',
-            'help' => 'A three-letter ISO code such as USD. It labels every amount in finance, payroll and payslips; it does not convert anything.',
+            'help' => 'The default currency for new finance records, and the currency payroll, bonuses and payslips are paid in. It does not convert anything.',
             'placeholder' => 'USD',
         ],
         'late_grace_minutes' => [
@@ -193,6 +194,17 @@ class UpdateSettingsRequest extends FormRequest
     public const SECTIONS = ['General', 'Attendance', 'Timer', 'Notifications'];
 
     /**
+     * Upper-case the currency before it is checked, so `usd` and `USD` are one value and
+     * `Rule::in(Currency::values())` sees the stored spelling.
+     */
+    protected function prepareForValidation(): void
+    {
+        if (is_string($this->input('currency'))) {
+            $this->merge(['currency' => strtoupper(trim($this->input('currency')))]);
+        }
+    }
+
+    /**
      * One rule set per key, generated from `FIELDS` so the range on screen is the range enforced.
      *
      * @return array<string, mixed>
@@ -206,8 +218,8 @@ class UpdateSettingsRequest extends FormRequest
                 // PHP's own identifier list. `Rule::in(DateTimeZone::listIdentifiers())` would
                 // say the same thing in a message nobody could read.
                 'timezone' => ['sometimes', 'required', 'string', 'timezone:all'],
-                // Shape, not membership — see the class docblock on why the list stays open.
-                'currency' => ['sometimes', 'required', 'string', 'size:3', 'regex:/^[A-Za-z]{3}$/'],
+                // Membership: the currencies the books are kept in (`App\Support\Currency`).
+                'currency' => ['sometimes', 'required', 'string', Rule::in(Currency::values())],
                 'boolean' => ['sometimes', 'required', 'boolean'],
                 'integer' => ['sometimes', 'required', 'integer', 'min:'.$field['min'], 'max:'.$field['max']],
             };
@@ -296,8 +308,7 @@ class UpdateSettingsRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'currency.regex' => 'The currency is a three-letter code, such as USD.',
-            'currency.size' => 'The currency is a three-letter code, such as USD.',
+            'currency.in' => 'Choose BDT or USD.',
             'timezone.timezone' => 'That is not a timezone name. Use an IANA identifier such as Asia/Dhaka.',
         ];
     }

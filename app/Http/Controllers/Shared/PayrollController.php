@@ -9,11 +9,14 @@ use App\Http\Requests\Payroll\PayrollMonthRequest;
 use App\Http\Requests\Payroll\ReverseLockRequest;
 use App\Http\Resources\PayrollItemResource;
 use App\Http\Resources\PayrollPeriodResource;
+use App\Models\EmployeeBonus;
 use App\Models\PayrollItem;
 use App\Models\PayrollPeriod;
 use App\Services\PayrollService;
 use App\Services\SettingsService;
+use App\Support\BonusStatus;
 use App\Support\PayrollStatus;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -191,6 +194,20 @@ class PayrollController extends Controller
         $period->loadCount('items');
         $period->loadSum('items', 'net_salary');
         $period->load('lockReverser');
+
+        // Each line's bonus records, in one query for the month rather than one per item.
+        $bonusLines = EmployeeBonus::query()
+            ->where('payroll_period_id', $period->getKey())
+            ->whereIn('status', [BonusStatus::Approved->value, BonusStatus::Paid->value])
+            ->orderBy('payment_date')
+            ->orderBy('id')
+            ->get()
+            ->groupBy('employee_id');
+
+        $items->each(fn (PayrollItem $item) => $item->setRelation(
+            'linkedBonusLines',
+            $bonusLines->get($item->employee_id, new EloquentCollection),
+        ));
 
         return Inertia::render('Shared/Payroll/Show', [
             'period' => (new PayrollPeriodResource($period))->resolve($request),

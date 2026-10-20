@@ -68,6 +68,8 @@ interface LedgerRecordBase {
     date: string;
     /** The exact decimal string the column holds. Rendered only by `formatMoney()`. */
     amount: string;
+    /** The record's own currency (`BDT` or `USD`). Never mixed with another in a sum. */
+    currency: string;
     category: { id: number; name: string | null } | null;
     notes: string | null;
     permissions: {
@@ -80,7 +82,7 @@ interface LedgerRecordBase {
 export interface IncomeRecord extends LedgerRecordBase {
     /** Part D §13's optional project link. Null on most rows. */
     project: FinanceProject | null;
-    /** `auto` when recorded from the project's billing settings; `manual` when typed in. */
+    /** `manual` when typed in (all income now); `auto` only on old rows generated before 2026-11. */
     source: 'manual' | 'auto';
 }
 
@@ -97,7 +99,7 @@ export interface ExpenseRecord extends LedgerRecordBase {
 
 /**
  * A repeating expense (VPS monthly, domain yearly), as `ExpenseController::recurring()` sends
- * it. The server records an ordinary expense from it on each due date.
+ * it. It is never recorded on its own: when it is due (`is_due`), somebody records it by hand.
  */
 export interface RecurringExpense {
     id: number;
@@ -106,6 +108,8 @@ export interface RecurringExpense {
     billable: boolean;
     /** The exact decimal string. Rendered only by `formatMoney()`. */
     amount: string;
+    /** The template's own currency; every expense it records carries it. */
+    currency: string;
     frequency: 'monthly' | 'quarterly' | 'yearly';
     frequency_label: string;
     /** `YYYY-MM-DD`, like every date here. */
@@ -114,6 +118,25 @@ export interface RecurringExpense {
     next_due_date: string;
     notes: string | null;
     active: boolean;
+    /** Active, `next_due_date` reached (agency timezone) and not past `ends_on`. */
+    is_due: boolean;
+}
+
+/** The currencies a record may be kept in. `App\Support\Currency`. There is no exchange rate. */
+export type CurrencyCode = 'BDT' | 'USD';
+
+/** One entry of the currency picker, as `Currency::options()` sends it. */
+export interface CurrencyOption {
+    value: CurrencyCode;
+    label: string;
+}
+
+/** The list filters, as the ledger controllers read them back from the query string. */
+export interface LedgerFilters {
+    category: number | null;
+    currency: string | null;
+    project: number | 'none' | null;
+    q: string;
 }
 
 /** Either side's row, for anything that renders both. */
@@ -141,6 +164,8 @@ export interface RollupPayroll {
     manual_payroll_entries: string;
     /** Counted payroll AND a manual "Payroll" expense in the same month. */
     double_count_warning: boolean;
+    /** The currency payroll is paid in (the default currency). */
+    currency: string;
 }
 
 /**
@@ -154,65 +179,97 @@ export interface RollupSide {
     total: string;
 }
 
-/** A whole month, both sides and the operating result. */
+/** One side of a month in one currency. Totals in different currencies are never added. */
+export interface RollupCurrencySide extends RollupSide {
+    currency: string;
+}
+
+/**
+ * A whole month **in BDT** (D7): both sides and the operating result, as the finance dashboard
+ * and report receive it (`FinanceService::monthlyRollup()`'s `bdt` entry plus the month, label
+ * and payroll). Every USD figure is converted at the stored rate (`ExchangeRate`).
+ */
 export interface MonthlyRollup {
     /** `YYYY-MM`. */
     month: string;
     /** "September 2026", formatted by the server. */
     label: string;
+    /** The month's income, in BDT. */
     income: RollupSide;
+    /** The month's expenses, in BDT (payroll counted once the period is locked or paid). */
     expenses: RollupSide;
-    /** Income less expenses, in exact cents. Negative is a real answer, not an error. */
+    /** Income less expenses, in exact cents. Negative is a real answer. */
     net: string;
     /** The month's payroll: counted into `expenses` only when the period is locked or paid. */
     payroll: RollupPayroll;
 }
 
+/** The USD→BDT rate the reports convert at, and whether the viewer may change it (D7). */
+export interface ExchangeRate {
+    /** BDT for 1 USD, two decimals. */
+    usd_bdt: string;
+    /** `auto` follows the live market rate; `manual` is the Admin's own figure. */
+    mode: 'auto' | 'manual';
+    /** ISO time the rate was last fetched or set; null when never. */
+    updated_at: string | null;
+    can_edit: boolean;
+}
+
 /**
  * One project's month, from `App\Support\ProjectEarnings::forMonth()`: what it should have
- * earned, what it did, what it cost. Every amount is an exact decimal string.
+ * earned and what it did, in the project's own currency and in BDT (`*_bdt`). Every amount is
+ * an exact decimal string.
  */
 export interface ProjectEarningsRow {
     project: FinanceProject;
+    /** The project's pricing currency — the one `expected`, `received` and `outstanding` are in. */
+    currency: string;
     type: 'recurring' | 'hourly' | 'one_time' | 'none';
     type_label: string;
     /** How `expected` was worked out, in words. */
     basis: string;
     /** Null when nothing is expected this month. */
     expected: string | null;
+    expected_bdt: string | null;
     /** Hourly only: approved hours this month, two decimals. */
     hours: string | null;
     /** Hourly only. */
     rate: string | null;
+    /** Income in the project's own currency. */
     received: string;
-    costs: string;
-    billable_costs: string;
-    /** received − costs. */
-    profit: string;
+    /** All income linked to the project, any currency, in BDT. */
+    received_bdt: string;
     /** max(expected − received, 0). */
     outstanding: string;
+    outstanding_bdt: string;
 }
 
 /** A one-time project's price against everything ever received for it. */
 export interface ProjectContract {
     project: FinanceProject;
+    /** The project's pricing currency — the one `price`, `received_to_date` and `balance` are in. */
+    currency: string;
     price: string;
+    price_bdt: string;
     received_to_date: string;
+    received_to_date_bdt: string;
     /** price − received_to_date. Negative means overpaid. */
     balance: string;
+    balance_bdt: string;
 }
 
 /** The `earnings` prop on the finance dashboard and report. */
 export interface ProjectEarnings {
     /** `YYYY-MM`. */
     month: string;
+    /** Always `BDT`: the totals and every `*_bdt` figure are in it. */
+    currency: string;
     rows: ProjectEarningsRow[];
     contracts: ProjectContract[];
+    /** In BDT. */
     totals: {
         expected: string;
         received: string;
-        costs: string;
-        profit: string;
         outstanding: string;
     };
 }
@@ -385,6 +442,8 @@ export const financeRoutes = {
         store: () => '/finance/recurring-expenses',
         update: (id: number) => `/finance/recurring-expenses/${id}`,
         destroy: (id: number) => `/finance/recurring-expenses/${id}`,
+        record: (id: number) => `/finance/recurring-expenses/${id}/record`,
+        skip: (id: number) => `/finance/recurring-expenses/${id}/skip`,
     },
 
     categories: {
@@ -414,12 +473,8 @@ export function ledgerNoun(kind: FinanceCategoryKind): string {
  * The word is **delete**: this is a hard delete (decision 8-5) and nothing about it is archived
  * or hidden, so nothing here may say either.
  */
-export function ledgerDeletePrompt(
-    kind: FinanceCategoryKind,
-    record: LedgerRecord,
-    currency: string,
-): string {
+export function ledgerDeletePrompt(kind: FinanceCategoryKind, record: LedgerRecord): string {
     const category = record.category?.name ?? 'Uncategorised';
 
-    return `Delete the ${category} ${ledgerNoun(kind)} of ${formatMoney(record.amount, currency)} from ${formatLedgerDateLong(record.date)}?`;
+    return `Delete the ${category} ${ledgerNoun(kind)} of ${formatMoney(record.amount, record.currency)} from ${formatLedgerDateLong(record.date)}?`;
 }

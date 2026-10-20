@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Shared;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Finance\FinanceReportRequest;
+use App\Http\Requests\Finance\UpdateExchangeRateRequest;
+use App\Services\ExchangeRateService;
 use App\Services\FinanceService;
-use App\Services\SettingsService;
 use App\Support\PayrollStatus;
 use App\Support\Permission;
 use App\Support\ProjectEarnings;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
@@ -74,7 +76,7 @@ class FinanceReportController extends Controller
 {
     public function __construct(
         private readonly FinanceService $finance,
-        private readonly SettingsService $settings,
+        private readonly ExchangeRateService $rates,
     ) {}
 
     /**
@@ -86,17 +88,15 @@ class FinanceReportController extends Controller
     public function dashboard(FinanceReportRequest $request): Response
     {
         $month = $request->monthStart();
+        $rollup = $this->finance->monthlyRollup($request->user(), (int) $month->year, (int) $month->month);
 
         return Inertia::render('Shared/Finance/Dashboard', [
             'month' => $this->monthPayload($month),
-            'rollup' => $this->finance->monthlyRollup($request->user(), (int) $month->year, (int) $month->month),
-            // `settings.currency`, the one place it is configured — the same key the two
-            // ledgers send, so a figure wears the same symbol on every finance screen.
-            'currency' => (string) $this->settings->get('currency'),
+            ...$this->bdtProps($request, $rollup),
             'reportHref' => '/finance/report?month='.$month->format('Y-m'),
-            // Per project: expected vs received vs cost, and one-time contracts. Someone who
-            // may not see projects (the Accountant) gets the money only — no status, start
-            // date or hours.
+            // Per project: expected vs received, and one-time contracts, in BDT with each
+            // project's own currency beside it. Someone who may not see projects (the
+            // Accountant) gets the money only — no status, start date or hours.
             'earnings' => ProjectEarnings::forMonth($month, $request->user()->hasPermission(Permission::ProjectsView)),
         ]);
     }
@@ -109,12 +109,13 @@ class FinanceReportController extends Controller
     {
         $month = $request->monthStart();
         $months = $request->trendMonths();
+        $rollup = $this->finance->monthlyRollup($request->user(), (int) $month->year, (int) $month->month);
 
         return Inertia::render('Shared/Finance/Report', [
             'month' => $this->monthPayload($month),
 
-            // Cut one. The same call, and therefore the same numbers, as the dashboard.
-            'rollup' => $this->finance->monthlyRollup($request->user(), (int) $month->year, (int) $month->month),
+            // Cut one. The same call, and therefore the same numbers, as the dashboard — in BDT.
+            ...$this->bdtProps($request, $rollup),
 
             // Cut two.
             'byProject' => $this->byProject($month),
@@ -122,13 +123,55 @@ class FinanceReportController extends Controller
             // Cut three.
             'trend' => $this->trend($month, $months),
 
-            'currency' => (string) $this->settings->get('currency'),
             'dashboardHref' => '/finance?month='.$month->format('Y-m'),
-            // Per project: expected vs received vs cost, and one-time contracts. Someone who
-            // may not see projects (the Accountant) gets the money only — no status, start
-            // date or hours.
+            // Per project: expected vs received, and one-time contracts, in BDT with each
+            // project's own currency beside it. Someone who may not see projects (the
+            // Accountant) gets the money only — no status, start date or hours.
             'earnings' => ProjectEarnings::forMonth($month, $request->user()->hasPermission(Permission::ProjectsView)),
         ]);
+    }
+
+    /**
+     * `PUT /finance/exchange-rate` (D7) — the USD→BDT rate: back to the live rate, or the
+     * Admin's own figure. Audited through `SettingsService::set`.
+     */
+    public function updateRate(UpdateExchangeRateRequest $request): RedirectResponse
+    {
+        if ($request->validated('mode') === 'manual') {
+            $this->rates->setManual($request->user(), (string) $request->validated('rate'));
+        } else {
+            $this->rates->setAuto($request->user());
+        }
+
+        return back()->with('success', 'Exchange rate updated: 1 USD = '.$this->rates->rate().' BDT.');
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | In BDT — every USD figure converted at the stored rate (D7)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * The props both screens share: the month's rollup in BDT, and the rate it was converted at.
+     *
+     * @param  array{month: string, label: string, payroll: array<string, mixed>, bdt: array<string, mixed>, rate: array{usd_bdt: string, mode: string, updated_at: string|null}}  $rollup
+     * @return array<string, mixed>
+     */
+    private function bdtProps(FinanceReportRequest $request, array $rollup): array
+    {
+        return [
+            'currency' => 'BDT',
+            'rollup' => $rollup['bdt'] + [
+                'month' => $rollup['month'],
+                'label' => $rollup['label'],
+                'payroll' => $rollup['payroll'],
+            ],
+            'rate' => $rollup['rate'] + [
+                'can_edit' => $request->user()->hasPermission(Permission::FinanceManage),
+            ],
+            'showPayroll' => true,
+        ];
     }
 
     /*
@@ -163,40 +206,60 @@ class FinanceReportController extends Controller
      */
     private function byProject(Carbon $month): array
     {
-        $rows = DB::table('income as record')
+        $grouped = [];
+
+        // Grouped by project AND currency, then each bucket converted to BDT and summed in cents.
+        DB::table('income as record')
             ->leftJoin('projects as project', 'project.id', '=', 'record.project_id')
             ->whereBetween('record.date', $this->range($month))
-            ->groupBy('project.id', 'project.name', 'project.domain')
-            ->orderByRaw('SUM(record.amount) DESC')
-            ->orderBy('project.name')
+            ->groupBy('project.id', 'project.name', 'project.domain', 'record.currency')
             ->get([
                 'project.id as project_id',
                 'project.name as name',
                 'project.domain as domain',
+                'record.currency as currency',
                 DB::raw('SUM(record.amount) as total'),
             ])
-            ->map(fn (object $row): array => [
+            ->each(function (object $row) use (&$grouped): void {
+                $key = $row->project_id === null ? 'none' : (string) $row->project_id;
+
                 // Null for the unlinked bucket, and the screen labels it rather than
                 // inventing a project. Part C: name and domain, and nothing else — no client,
                 // no contact, no price, no status, no count.
-                'project_id' => $row->project_id === null ? null : (int) $row->project_id,
-                'name' => $row->name === null ? 'No project' : (string) $row->name,
-                'domain' => $row->domain === null ? null : (string) $row->domain,
-                'total' => $this->money((string) $row->total),
-            ])
-            ->all();
+                $grouped[$key] ??= [
+                    'project_id' => $row->project_id === null ? null : (int) $row->project_id,
+                    'name' => $row->name === null ? 'No project' : (string) $row->name,
+                    'domain' => $row->domain === null ? null : (string) $row->domain,
+                    'cents' => 0,
+                ];
+                $grouped[$key]['cents'] += $this->rates->toBdtCents((string) $row->total, (string) $row->currency);
+            });
 
-        // The remainder reads last.
-        usort($rows, fn (array $a, array $b): int => ($a['project_id'] === null ? 1 : 0) <=> ($b['project_id'] === null ? 1 : 0));
+        $rows = array_values($grouped);
+
+        // Largest first, then by name; the remainder reads last.
+        usort($rows, function (array $a, array $b): int {
+            $nulls = ($a['project_id'] === null ? 1 : 0) <=> ($b['project_id'] === null ? 1 : 0);
+
+            if ($nulls !== 0) {
+                return $nulls;
+            }
+
+            return [$b['cents'], $a['name']] <=> [$a['cents'], $b['name']];
+        });
+
+        $total = array_sum(array_column($rows, 'cents'));
 
         return [
-            'rows' => array_values($rows),
+            'rows' => array_map(fn (array $row): array => [
+                'project_id' => $row['project_id'],
+                'name' => $row['name'],
+                'domain' => $row['domain'],
+                'total' => ExchangeRateService::fromCents($row['cents']),
+            ], $rows),
             // Summed in cents off the rows already fetched, so this agrees with the income
             // total on the same page and costs nothing.
-            'total' => $this->money((string) array_sum(array_map(
-                fn (array $row): int => $this->cents($row['total']),
-                $rows,
-            )), true),
+            'total' => ExchangeRateService::fromCents($total),
         ];
     }
 
@@ -229,6 +292,7 @@ class FinanceReportController extends Controller
      *
      * @return array{
      *     months: int,
+     *     currency: string,
      *     from: string,
      *     to: string,
      *     points: list<array{month: string, label: string, short_label: string, income: string, expense: string, net: string}>,
@@ -241,6 +305,7 @@ class FinanceReportController extends Controller
 
         $income = $this->monthlyTotals('income', $window);
         $expenses = $this->monthlyTotals('expenses', $window);
+        // Payroll is paid in BDT.
         $payroll = $this->monthlyPayrollTotals($window);
 
         $points = [];
@@ -265,6 +330,7 @@ class FinanceReportController extends Controller
 
         return [
             'months' => $months,
+            'currency' => 'BDT',
             'from' => $first->format('Y-m'),
             'to' => $month->format('Y-m'),
             'points' => $points,
@@ -272,7 +338,8 @@ class FinanceReportController extends Controller
     }
 
     /**
-     * `SUM(amount) GROUP BY month` for one table over one window, as `YYYY-MM => cents`.
+     * `SUM(amount) GROUP BY month, currency` for one table and one window, converted to BDT, as
+     * `YYYY-MM => cents`.
      *
      * The table name is a constant from this class, never anything a caller supplied — the same
      * rule `FinanceService::totalsByCategory()` states.
@@ -286,17 +353,23 @@ class FinanceReportController extends Controller
      */
     private function monthlyTotals(string $table, array $window): array
     {
-        return DB::table($table)
+        $totals = [];
+
+        // Grouped by month AND currency; each bucket converted to BDT and summed in cents.
+        DB::table($table)
             ->whereBetween('date', $window)
-            ->groupByRaw("to_char(date, 'YYYY-MM')")
+            ->groupByRaw("to_char(date, 'YYYY-MM'), currency")
             ->get([
                 DB::raw("to_char(date, 'YYYY-MM') as bucket"),
+                'currency',
                 DB::raw('SUM(amount) as total'),
             ])
-            ->mapWithKeys(fn (object $row): array => [
-                (string) $row->bucket => $this->cents((string) $row->total),
-            ])
-            ->all();
+            ->each(function (object $row) use (&$totals): void {
+                $key = (string) $row->bucket;
+                $totals[$key] = ($totals[$key] ?? 0) + $this->rates->toBdtCents((string) $row->total, (string) $row->currency);
+            });
+
+        return $totals;
     }
 
     /**

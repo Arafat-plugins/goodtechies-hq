@@ -1,5 +1,7 @@
 <?php
 
+use App\Services\FinanceService;
+use App\Support\Currency;
 use Tests\Concerns\RefreshHqDatabase;
 use Tests\TestCase;
 
@@ -18,3 +20,19 @@ use Tests\TestCase;
 pest()->extend(TestCase::class)
     ->use(RefreshHqDatabase::class)
     ->in('Feature', 'Permissions');
+
+/*
+|--------------------------------------------------------------------------
+| One currency's rollup
+|--------------------------------------------------------------------------
+|
+| `FinanceService::monthlyRollup()` has no all-currency totals. This reads
+| one currency's entry (default: the default currency) and keeps the rest
+| of the rollup (`month`, `label`, `payroll`, `by_currency`) beside it.
+|
+*/
+
+function rollupIn(array $rollup, ?string $currency = null): array
+{
+    return app(FinanceService::class)->rollupFor($rollup, $currency ?? Currency::default()->value) + $rollup;
+}

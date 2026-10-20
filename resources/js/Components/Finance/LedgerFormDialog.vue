@@ -2,6 +2,7 @@
 import { useForm } from '@inertiajs/vue3';
 import { computed, useId, watch } from 'vue';
 import type {
+    CurrencyOption,
     FinanceCategory,
     FinanceCategoryKind,
     ExpenseRecord,
@@ -67,7 +68,10 @@ const props = defineProps<{
     categories: FinanceCategory[];
     /** The project picker's options, for either ledger (decision 8-17b). Empty while closed. */
     projects: FinanceProject[];
-    currency: string;
+    /** The currencies a record may be kept in (`Currency::options()`). */
+    currencies: CurrencyOption[];
+    /** The currency a new record starts in. */
+    defaultCurrency: string;
     /** Today in the agency's timezone, from the server — the default date on a new record. */
     today: string;
 }>();
@@ -75,6 +79,7 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>();
 
 const categoryId = useId();
+const currencyId = useId();
 const amountId = useId();
 const dateId = useId();
 const projectId = useId();
@@ -91,6 +96,7 @@ const isEdit = computed(() => props.record !== null);
 const form = useForm<{
     category_id: string;
     amount: string;
+    currency: string;
     date: string;
     notes: string;
     project_id: string;
@@ -98,6 +104,7 @@ const form = useForm<{
 }>({
     category_id: '',
     amount: '',
+    currency: '',
     date: '',
     notes: '',
     project_id: NO_PROJECT,
@@ -131,11 +138,17 @@ function projectLabel(project: FinanceProject): string {
     return project.domain ? `${project.name} · ${project.domain}` : project.name;
 }
 
+/**
+ * D7: new records are BDT only. The currency picker shows only when EDITING a record kept in
+ * another currency, so a legacy USD row can still be corrected.
+ */
+const showCurrency = computed(() => props.record !== null && props.record.currency !== 'BDT');
+
 /** The amount as it will be filed, so a typo is visible before the save rather than after. */
 const preview = computed(() => {
     const value = Number.parseFloat(form.amount);
 
-    return Number.isFinite(value) && value > 0 ? formatMoney(value, props.currency) : null;
+    return Number.isFinite(value) && value > 0 ? formatMoney(value, form.currency) : null;
 });
 
 function submit(): void {
@@ -147,6 +160,7 @@ function submit(): void {
         const payload: Record<string, unknown> = {
             category_id: data.category_id,
             amount: data.amount,
+            currency: showCurrency.value ? data.currency : 'BDT',
             date: data.date,
             notes: data.notes,
         };
@@ -189,6 +203,7 @@ watch(
 
         form.category_id = record?.category ? String(record.category.id) : '';
         form.amount = record?.amount ?? '';
+        form.currency = record?.currency ?? 'BDT';
         form.date = record?.date ?? props.today;
         form.notes = record?.notes ?? '';
 
@@ -241,6 +256,27 @@ useUnsavedGuard(() => props.open && form.isDirty);
                 </div>
 
                 <div class="flex min-w-0 flex-col gap-4 sm:flex-row">
+                    <div v-if="showCurrency" class="flex min-w-0 flex-col gap-2 sm:w-40">
+                        <Label :for="currencyId">Currency</Label>
+                        <Select v-model="form.currency">
+                            <SelectTrigger :id="currencyId" class="w-full">
+                                <SelectValue placeholder="Choose a currency" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem
+                                    v-for="option in currencies"
+                                    :key="option.value"
+                                    :value="option.value"
+                                >
+                                    {{ option.label }}
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <p v-if="form.errors.currency" class="text-xs text-destructive">
+                            {{ form.errors.currency }}
+                        </p>
+                    </div>
+
                     <div class="flex min-w-0 flex-1 flex-col gap-2">
                         <Label :for="amountId">Amount</Label>
                         <Input
@@ -263,7 +299,7 @@ useUnsavedGuard(() => props.open && form.isDirty);
                             Filed as {{ preview }}
                         </p>
                         <p v-else class="text-xs text-muted-foreground">
-                            {{ currency }}, greater than zero. Two decimal places.
+                            {{ form.currency }}, greater than zero. Two decimal places.
                         </p>
                         <p v-if="form.errors.amount" class="text-xs text-destructive">
                             {{ form.errors.amount }}
@@ -311,7 +347,7 @@ useUnsavedGuard(() => props.open && form.isDirty);
                         </SelectContent>
                     </Select>
                     <p class="text-xs text-muted-foreground">
-                        {{ isIncome ? 'Optional. Linking a payment to a project is what makes the finance-by-project report add up.' : 'Optional. A cost for one client\'s site (hosting, domain, VPS) belongs to that project, so its profit is right.' }}
+                        {{ isIncome ? 'Optional. Linking a payment to a project is what makes the finance-by-project report add up.' : 'Optional. A cost for one client\'s site (hosting, domain, VPS) can be linked to that project.' }}
                     </p>
                     <p v-if="form.errors.project_id" class="text-xs text-destructive">
                         {{ form.errors.project_id }}

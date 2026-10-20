@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Shared\AttendanceController;
 use App\Http\Controllers\Shared\AttendanceCorrectionController;
+use App\Http\Controllers\Shared\BonusController;
 use App\Http\Controllers\Shared\ExpenseController;
 use App\Http\Controllers\Shared\FileDownloadController;
 use App\Http\Controllers\Shared\FinanceCategoryController;
@@ -461,6 +462,11 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
             // something a reader can cite.
             Route::get('/report', [FinanceReportController::class, 'report'])->name('report');
 
+            // D7: the USD→BDT rate the reports convert at — the live rate, or the Admin's own.
+            Route::put('/exchange-rate', [FinanceReportController::class, 'updateRate'])
+                ->middleware('can:'.Permission::FinanceManage->value)
+                ->name('exchange-rate.update');
+
             // ── The ledgers (slice 2a) ──────────────────────────────────────────────
             //
             // A month of money in, a month of money out, and the list of names it is filed
@@ -503,8 +509,8 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
                 ->whereNumber('expense')
                 ->name('expenses.destroy');
 
-            // Repeating expenses: set up once, recorded on every due date by
-            // `hq:generate-recurring-expenses`. Managed from the expenses page.
+            // Repeating expenses: set up once, never recorded on their own. When one is due the
+            // expenses page shows it, and it becomes an expense only when somebody records it.
             Route::post('/recurring-expenses', [RecurringExpenseController::class, 'store'])
                 ->name('recurring-expenses.store');
             Route::put('/recurring-expenses/{recurringExpense}', [RecurringExpenseController::class, 'update'])
@@ -513,6 +519,12 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
             Route::delete('/recurring-expenses/{recurringExpense}', [RecurringExpenseController::class, 'destroy'])
                 ->whereNumber('recurringExpense')
                 ->name('recurring-expenses.destroy');
+            Route::post('/recurring-expenses/{recurringExpense}/record', [RecurringExpenseController::class, 'record'])
+                ->whereNumber('recurringExpense')
+                ->name('recurring-expenses.record');
+            Route::post('/recurring-expenses/{recurringExpense}/skip', [RecurringExpenseController::class, 'skip'])
+                ->whereNumber('recurringExpense')
+                ->name('recurring-expenses.skip');
 
             // The category list. It is INSIDE this group, so reading it takes `finance.view`
             // like every other finance screen — the Accountant lives in the pickers these
@@ -652,6 +664,20 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
             // `/{period}` for readability; they cannot collide, because that one is numeric
             // and this is the collection itself.
             Route::post('/', [PayrollController::class, 'store'])->name('store');
+
+            // Bonuses (Eid, annual, performance, custom). Same `payroll.draft` gate; approving
+            // is `payroll.approve`, asked by `EmployeeBonusPolicy`. Before `/{period}`.
+            Route::get('/bonuses', [BonusController::class, 'index'])->name('bonuses.index');
+            Route::post('/bonuses', [BonusController::class, 'store'])->name('bonuses.store');
+            Route::put('/bonuses/{bonus}', [BonusController::class, 'update'])
+                ->whereNumber('bonus')
+                ->name('bonuses.update');
+            Route::post('/bonuses/{bonus}/approve', [BonusController::class, 'approve'])
+                ->whereNumber('bonus')
+                ->name('bonuses.approve');
+            Route::post('/bonuses/{bonus}/cancel', [BonusController::class, 'cancel'])
+                ->whereNumber('bonus')
+                ->name('bonuses.cancel');
 
             Route::get('/{period}', [PayrollController::class, 'show'])
                 ->whereNumber('period')

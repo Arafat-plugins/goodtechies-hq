@@ -6,7 +6,8 @@ import { moneyValue } from '@/Components/Finance/financeReport';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
 
 /**
- * Each project's month: what it should bring in, what arrived, what it cost, what is still owed.
+ * Each project's month: what it should bring in, what arrived, and what is still owed — in BDT
+ * (D7), with a USD-priced project's original figure muted under the taka.
  *
  * Every figure — the rows and the totals — comes from `App\Support\ProjectEarnings::forMonth()`
  * as an exact decimal string. Nothing is added up here; `limit` only hides rows, and the totals
@@ -14,7 +15,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Com
  */
 const props = defineProps<{
     earnings: ProjectEarnings;
-    currency: string;
     /** Show only the first N rows (the dashboard); the report shows them all. */
     limit?: number;
 }>();
@@ -25,7 +25,11 @@ const visibleRows = computed(() =>
 
 const hiddenCount = computed(() => props.earnings.rows.length - visibleRows.value.length);
 
-const money = (amount: string): string => formatMoney(amount, props.currency);
+const money = (amount: string): string => formatMoney(amount, 'BDT');
+
+/** The original figure in the project's own currency, shown only when that is not BDT. */
+const original = (amount: string | null, currency: string): string | null =>
+    amount === null || currency === 'BDT' ? null : formatMoney(amount, currency);
 
 /** Zero owed is a dash, so the column reads as "nothing to chase" at a glance. */
 const outstandingText = (amount: string): string => (moneyValue(amount) === 0 ? '—' : money(amount));
@@ -40,7 +44,7 @@ const balanceText = (balance: string): string =>
         <CardHeader>
             <CardTitle>Projects — expected vs received</CardTitle>
             <CardDescription>
-                What each project should bring in this month, what arrived, what it cost, and what is still owed.
+                What each project should bring in this month, what arrived, and what is still owed.
             </CardDescription>
         </CardHeader>
         <CardContent class="flex min-w-0 flex-col gap-4">
@@ -52,8 +56,7 @@ const balanceText = (balance: string): string =>
                 <div class="min-w-0 overflow-x-auto">
                     <table class="w-full text-sm">
                         <caption class="sr-only">
-                            Projects, expected against received this month, with costs, profit and what is still
-                            owed.
+                            Projects, expected against received this month, and what is still owed.
                         </caption>
                         <thead>
                             <tr class="border-b border-border">
@@ -68,12 +71,6 @@ const balanceText = (balance: string): string =>
                                 </th>
                                 <th scope="col" class="py-2 pr-3 text-right font-medium text-muted-foreground">
                                     Received
-                                </th>
-                                <th scope="col" class="py-2 pr-3 text-right font-medium text-muted-foreground">
-                                    Costs
-                                </th>
-                                <th scope="col" class="py-2 pr-3 text-right font-medium text-muted-foreground">
-                                    Profit
                                 </th>
                                 <th scope="col" class="py-2 text-right font-medium text-muted-foreground">
                                     Outstanding
@@ -93,25 +90,25 @@ const balanceText = (balance: string): string =>
                                     <span class="block text-xs text-muted-foreground">{{ row.basis }}</span>
                                 </td>
                                 <td class="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                                    {{ row.expected === null ? '—' : money(row.expected) }}
-                                </td>
-                                <td class="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                                    {{ money(row.received) }}
-                                </td>
-                                <td class="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                                    {{ money(row.costs) }}
+                                    {{ row.expected_bdt === null ? '—' : money(row.expected_bdt) }}
                                     <span
-                                        v-if="moneyValue(row.billable_costs) > 0"
+                                        v-if="original(row.expected, row.currency)"
                                         class="block text-xs text-muted-foreground"
                                     >
-                                        incl. {{ money(row.billable_costs) }} billable
+                                        {{ original(row.expected, row.currency) }}
                                     </span>
                                 </td>
                                 <td class="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                                    {{ money(row.profit) }}
+                                    {{ money(row.received_bdt) }}
+                                    <span
+                                        v-if="moneyValue(row.received) !== 0 && original(row.received, row.currency)"
+                                        class="block text-xs text-muted-foreground"
+                                    >
+                                        {{ original(row.received, row.currency) }}
+                                    </span>
                                 </td>
                                 <td class="py-2 text-right whitespace-nowrap tabular-nums">
-                                    {{ outstandingText(row.outstanding) }}
+                                    {{ outstandingText(row.outstanding_bdt) }}
                                 </td>
                             </tr>
                         </tbody>
@@ -126,12 +123,6 @@ const balanceText = (balance: string): string =>
                                 </td>
                                 <td class="py-2 pr-3 text-right font-medium whitespace-nowrap tabular-nums">
                                     {{ money(earnings.totals.received) }}
-                                </td>
-                                <td class="py-2 pr-3 text-right font-medium whitespace-nowrap tabular-nums">
-                                    {{ money(earnings.totals.costs) }}
-                                </td>
-                                <td class="py-2 pr-3 text-right font-medium whitespace-nowrap tabular-nums">
-                                    {{ money(earnings.totals.profit) }}
                                 </td>
                                 <td class="py-2 text-right font-medium whitespace-nowrap tabular-nums">
                                     {{ outstandingText(earnings.totals.outstanding) }}
@@ -176,13 +167,19 @@ const balanceText = (balance: string): string =>
                                     </span>
                                 </th>
                                 <td class="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                                    {{ money(contract.price) }}
+                                    {{ money(contract.price_bdt) }}
+                                    <span
+                                        v-if="original(contract.price, contract.currency)"
+                                        class="block text-xs text-muted-foreground"
+                                    >
+                                        {{ original(contract.price, contract.currency) }}
+                                    </span>
                                 </td>
                                 <td class="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                                    {{ money(contract.received_to_date) }}
+                                    {{ money(contract.received_to_date_bdt) }}
                                 </td>
                                 <td class="py-2 text-right whitespace-nowrap tabular-nums">
-                                    {{ balanceText(contract.balance) }}
+                                    {{ balanceText(contract.balance_bdt) }}
                                 </td>
                             </tr>
                         </tbody>

@@ -9,6 +9,12 @@ import { conversationRoutes, emptyThread } from '@/Components/Messages/messages'
 import PageShell from '@/Components/PageShell.vue';
 import DeleteProjectDialog, { canForceDelete } from '@/Components/Projects/DeleteProjectDialog.vue';
 import FinanceCard from '@/Components/Projects/FinanceCard.vue';
+import ProjectEarningsCard, {
+    type CurrencyOption,
+    type ProjectEarningEntryRow,
+    type ProjectEarningKindOption,
+    type ProjectEarningTotals,
+} from '@/Components/Projects/ProjectEarningsCard.vue';
 import MembersCard from '@/Components/Projects/MembersCard.vue';
 import ProjectTaskList, { type ProjectTasks } from '@/Components/Projects/ProjectTaskList.vue';
 import type { EmployeeOption, Option, Project } from '@/Components/Projects/ProjectForm.vue';
@@ -54,6 +60,13 @@ const props = defineProps<{
     projectTasks: ProjectTasks;
     /** Polish 080: for the quick-add task modal. */
     taskPriorities: Option[];
+    /** Project financials (contract value, earned, received): empty without viewFinance. */
+    earningEntries?: ProjectEarningEntryRow[];
+    earningTotals?: ProjectEarningTotals[];
+    earningKinds?: ProjectEarningKindOption[];
+    currencies?: CurrencyOption[];
+    defaultCurrency?: string;
+    canEditEarnings?: boolean;
 }>();
 
 /** A `task.changed` kind `timer` frame re-reads `workingNow` alone (flow F1). */
@@ -438,6 +451,18 @@ function confirmArchiveToggle(): void {
                     :project="project"
                     :billing-frequencies="billingFrequencies"
                     :can-edit="permissions.can_update === true"
+                    :currencies="currencies ?? []"
+                    :default-currency="defaultCurrency ?? 'BDT'"
+                />
+                <ProjectEarningsCard
+                    :project-id="project.id"
+                    :entries="earningEntries ?? []"
+                    :totals="earningTotals ?? []"
+                    :kinds="earningKinds ?? []"
+                    :currencies="currencies ?? []"
+                    :default-currency="defaultCurrency ?? 'BDT'"
+                    :can-edit="canEditEarnings === true"
+                    class="mt-4"
                 />
             </TabsContent>
 

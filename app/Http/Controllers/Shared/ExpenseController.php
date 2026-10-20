@@ -13,7 +13,9 @@ use App\Models\Project;
 use App\Models\RecurringExpense;
 use App\Services\FinanceService;
 use App\Services\SettingsService;
+use App\Support\Currency;
 use App\Support\FinanceCategoryKind;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -76,7 +78,7 @@ class ExpenseController extends Controller
 
         return $this->backToMonth($expense->date, sprintf(
             'Expense of %s recorded for %s.',
-            $this->money($expense->amount),
+            $this->money($expense->amount, (string) $expense->currency),
             $expense->date->format('j F Y'),
         ));
     }
@@ -93,7 +95,7 @@ class ExpenseController extends Controller
 
         return $this->backToMonth($updated->date, sprintf(
             'Expense of %s saved for %s.',
-            $this->money($updated->amount),
+            $this->money($updated->amount, (string) $updated->currency),
             $updated->date->format('j F Y'),
         ));
     }
@@ -106,7 +108,7 @@ class ExpenseController extends Controller
     {
         Gate::authorize('delete', $expense);
 
-        $amount = $this->money($expense->amount);
+        $amount = $this->money($expense->amount, (string) $expense->currency);
         $date = $expense->date->copy();
 
         try {
@@ -131,31 +133,50 @@ class ExpenseController extends Controller
         $month = $this->month($request, $editing?->date);
         $user = $request->user();
 
-        $records = Expense::query()
+        $categories = $this->finance->categories(FinanceCategoryKind::Expense);
+        $filters = $this->filters($request, $categories->map(fn ($category): int => (int) $category->getKey())->all());
+
+        $query = Expense::query()
             ->with(['category', 'project'])
             ->inMonth($month->year, $month->month)
             ->orderByDesc('date')
-            ->orderByDesc('id')
-            ->get();
+            ->orderByDesc('id');
+
+        $this->applyFilters($query, $filters);
+
+        $records = $query->get();
 
         $rollup = $this->finance->monthlyRollup($user, $month->year, $month->month);
 
         $canCreate = $user !== null && Gate::forUser($user)->allows('create', Expense::class);
+        $recurring = $canCreate ? $this->recurring() : [];
 
         return Inertia::render('Shared/Finance/Expenses', [
             'month' => $this->monthPayload($month),
             'records' => ExpenseResource::collection($records)->resolve($request),
-            'totals' => $rollup['expenses'],
-            'categories' => FinanceCategoryResource::collection(
-                $this->finance->categories(FinanceCategoryKind::Expense)
-            )->resolve($request),
 
-            // Sent while the form is open, and to anyone who may create expenses — the
-            // repeating-expenses card's form needs the same picker.
-            'projects' => $formOpen || $canCreate ? $this->projects() : [],
+            // The month's totals, one entry per currency: never added together.
+            'totals_by_currency' => array_map(
+                fn (array $entry): array => ['currency' => $entry['currency']] + $entry['expenses'],
+                $rollup['by_currency'],
+            ),
+
+            'filters' => $filters,
+            'currencies' => Currency::options(),
+            'defaultCurrency' => Currency::default()->value,
+            'categories' => FinanceCategoryResource::collection($categories)->resolve($request),
+
+            // Always sent: the form's picker, the repeating-expenses card and the list's project
+            // filter all use it.
+            'projects' => $this->projects(),
 
             // The repeating expenses (VPS, domain, hosting), only to those who may manage them.
-            'recurring' => $canCreate ? $this->recurring() : [],
+            'recurring' => $recurring,
+
+            // How many of them are due and waiting to be recorded by hand.
+            'dueRecurring' => $canCreate
+                ? count(array_filter($recurring, fn (array $template): bool => $template['is_due']))
+                : 0,
 
             'form' => $formOpen
                 ? [
@@ -202,6 +223,8 @@ class ExpenseController extends Controller
      */
     private function recurring(): array
     {
+        $today = Carbon::today(config('app.timezone'));
+
         return RecurringExpense::query()
             ->with(['category', 'project'])
             ->orderByDesc('active')
@@ -218,6 +241,7 @@ class ExpenseController extends Controller
                     : IncomeResource::projectPayload($template->project),
                 'billable' => (bool) $template->billable,
                 'amount' => (string) $template->amount,
+                'currency' => (string) $template->currency,
                 'frequency' => $template->frequency,
                 'frequency_label' => match ($template->frequency) {
                     'quarterly' => 'Quarterly',
@@ -229,6 +253,9 @@ class ExpenseController extends Controller
                 'next_due_date' => $template->next_due_date->toDateString(),
                 'notes' => $template->notes,
                 'active' => (bool) $template->active,
+                'is_due' => (bool) $template->active
+                    && $template->next_due_date->lte($today)
+                    && ($template->ends_on === null || $template->next_due_date->lte($template->ends_on)),
             ])
             ->all();
     }
@@ -271,9 +298,58 @@ class ExpenseController extends Controller
             ->with('success', $message);
     }
 
-    private function money(string $amount): string
+    private function money(string $amount, string $currency): string
     {
-        return $this->formatMoney($amount, (string) $this->settings->get('currency'));
+        return $this->formatMoney($amount, $currency);
+    }
+
+    /**
+     * The list filters from the query string: `category` (an id on this side of the ledger),
+     * `currency` (BDT or USD), `project` (an id, or `none` for "not linked") and `q` (a search
+     * of the notes). Anything that does not parse is ignored rather than refused — they are view
+     * parameters, like the month.
+     *
+     * @param  list<int>  $categoryIds
+     * @return array{category: int|null, currency: string|null, project: int|string|null, q: string}
+     */
+    private function filters(Request $request, array $categoryIds): array
+    {
+        $category = filter_var($request->query('category'), FILTER_VALIDATE_INT);
+        $currency = strtoupper(trim((string) $request->query('currency', '')));
+        $project = trim((string) $request->query('project', ''));
+        $projectId = filter_var($project, FILTER_VALIDATE_INT);
+
+        return [
+            'category' => $category !== false && in_array($category, $categoryIds, true) ? $category : null,
+            'currency' => in_array($currency, Currency::values(), true) ? $currency : null,
+            'project' => $project === 'none' ? 'none' : ($projectId !== false && $projectId > 0 ? $projectId : null),
+            'q' => mb_substr(trim((string) $request->query('q', '')), 0, 100),
+        ];
+    }
+
+    /**
+     * @param  Builder<Expense>  $query
+     * @param  array{category: int|null, currency: string|null, project: int|string|null, q: string}  $filters
+     */
+    private function applyFilters(Builder $query, array $filters): void
+    {
+        if ($filters['category'] !== null) {
+            $query->where('category_id', $filters['category']);
+        }
+
+        if ($filters['currency'] !== null) {
+            $query->where('currency', $filters['currency']);
+        }
+
+        if ($filters['project'] === 'none') {
+            $query->whereNull('project_id');
+        } elseif ($filters['project'] !== null) {
+            $query->where('project_id', $filters['project']);
+        }
+
+        if ($filters['q'] !== '') {
+            $query->where('notes', 'ilike', '%'.addcslashes($filters['q'], '%_\\').'%');
+        }
     }
 
     /**

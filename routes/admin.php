@@ -16,6 +16,7 @@ use App\Http\Controllers\Admin\LeaveController;
 use App\Http\Controllers\Admin\MyTaskController;
 use App\Http\Controllers\Admin\NotificationDefaultsController;
 use App\Http\Controllers\Admin\ProjectController;
+use App\Http\Controllers\Admin\ProjectEarningController;
 use App\Http\Controllers\Admin\ProjectFileController;
 use App\Http\Controllers\Admin\ProjectFinanceController;
 use App\Http\Controllers\Admin\ProjectMemberController;
@@ -168,6 +169,10 @@ Route::prefix('admin')
             Route::put('/{project}', [ProjectController::class, 'update'])->name('update');
             // Money and membership are separate abilities, so they are separate endpoints.
             Route::put('/{project}/finance', [ProjectFinanceController::class, 'update'])->name('finance.update');
+            // Hand-recorded project financials (contract value, earned, received). Never income.
+            Route::post('/{project}/earnings', [ProjectEarningController::class, 'store'])->name('earnings.store');
+            Route::put('/{project}/earnings/{entry}', [ProjectEarningController::class, 'update'])->name('earnings.update');
+            Route::delete('/{project}/earnings/{entry}', [ProjectEarningController::class, 'destroy'])->name('earnings.destroy');
             Route::put('/{project}/members', [ProjectMemberController::class, 'update'])->name('members.update');
             Route::post('/{project}/status', [ProjectStatusController::class, 'update'])->name('status');
             Route::post('/{project}/archive', [ProjectStatusController::class, 'archive'])->name('archive');

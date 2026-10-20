@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { RollupSide } from '@/Components/Finance/finance';
-import { formatMoney } from '@/Components/Finance/finance';
+import { computed } from 'vue';
+import type { RollupCurrencySide, RollupSide } from '@/Components/Finance/finance';
+import { FINANCE_DEFAULT_CURRENCY, formatMoney } from '@/Components/Finance/finance';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 
 /**
@@ -25,18 +26,42 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
  *
  * Two columns fit at 360 px, so nothing about this collapses; the amounts are right-aligned and
  * `tabular-nums`, which is what makes a column of money line up on its decimal point.
+ *
+ * ## One table per currency
+ *
+ * Every record carries its own currency and amounts in different currencies are never added
+ * together (there is no exchange rate), so `sides` holds one entry per currency and each gets
+ * its own table and its own total. A currency with no rows on this side this month is not
+ * shown; when no currency has any, the empty state is shown once.
+ *
+ * `side` + `currency` is the older single-table form, still used by the finance dashboard and
+ * the monthly report until they move to per-currency totals. It renders without the currency
+ * heading, exactly as before.
  */
-defineProps<{
+const props = defineProps<{
     title: string;
     /** The whole sentence the caption reads — it names the month, so it is the caller's. */
     caption: string;
-    side: RollupSide;
-    currency: string;
+    /** One entry per currency, from the rollup's `by_currency`, default currency first. */
+    sides?: RollupCurrencySide[];
+    /** @deprecated The single-currency form; use `sides`. */
+    side?: RollupSide;
+    /** @deprecated Goes with `side`. */
+    currency?: string;
     /** What to say when the month has no rows on this side. */
     emptyText: string;
     /** The word under the grand total: "Total income" / "Total expenses". */
     totalLabel: string;
 }>();
+
+const perCurrency = computed(() => props.sides !== undefined);
+
+const shown = computed<RollupCurrencySide[]>(() => {
+    const sides = props.sides
+        ?? (props.side ? [{ ...props.side, currency: props.currency ?? FINANCE_DEFAULT_CURRENCY }] : []);
+
+    return sides.filter((side) => side.categories.length > 0);
+});
 </script>
 
 <template>
@@ -45,43 +70,48 @@ defineProps<{
             <CardTitle>{{ title }}</CardTitle>
         </CardHeader>
         <CardContent>
-            <p v-if="side.categories.length === 0" class="text-sm text-muted-foreground">
+            <p v-if="shown.length === 0" class="text-sm text-muted-foreground">
                 {{ emptyText }}
             </p>
 
-            <table v-else class="w-full text-sm">
-                <!--
-                    The accessible name of the table. `sr-only` rather than absent: a caption
-                    that says which month these figures are is exactly what a reader arriving
-                    at the table out of context needs, and printing it again above a card that
-                    already carries the month would be saying it twice.
-                -->
-                <caption class="sr-only">{{ caption }}</caption>
-                <thead>
-                    <tr class="border-b border-border">
-                        <th scope="col" class="py-2 pr-3 text-left font-medium text-muted-foreground">
-                            Category
-                        </th>
-                        <th scope="col" class="py-2 text-right font-medium text-muted-foreground">
-                            Total
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="line in side.categories" :key="line.category_id" class="border-b border-border/60">
-                        <th scope="row" class="py-2 pr-3 text-left font-normal">{{ line.name }}</th>
-                        <td class="py-2 text-right tabular-nums">{{ formatMoney(line.total, currency) }}</td>
-                    </tr>
-                </tbody>
-                <tfoot>
-                    <tr>
-                        <th scope="row" class="py-2 pr-3 text-left font-medium">{{ totalLabel }}</th>
-                        <td class="py-2 text-right font-medium tabular-nums">
-                            {{ formatMoney(side.total, currency) }}
-                        </td>
-                    </tr>
-                </tfoot>
-            </table>
+            <div v-else class="flex flex-col gap-6">
+                <section v-for="side in shown" :key="side.currency" class="flex flex-col gap-2">
+                    <h3 v-if="perCurrency" class="text-sm font-medium">Totals · {{ side.currency }}</h3>
+                    <table class="w-full text-sm">
+                        <!--
+                            The accessible name of the table. `sr-only` rather than absent: a caption
+                            that says which month these figures are is exactly what a reader arriving
+                            at the table out of context needs, and printing it again above a card that
+                            already carries the month would be saying it twice.
+                        -->
+                        <caption class="sr-only">{{ perCurrency ? `${caption} (${side.currency})` : caption }}</caption>
+                        <thead>
+                            <tr class="border-b border-border">
+                                <th scope="col" class="py-2 pr-3 text-left font-medium text-muted-foreground">
+                                    Category
+                                </th>
+                                <th scope="col" class="py-2 text-right font-medium text-muted-foreground">
+                                    Total
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="line in side.categories" :key="line.category_id" class="border-b border-border/60">
+                                <th scope="row" class="py-2 pr-3 text-left font-normal">{{ line.name }}</th>
+                                <td class="py-2 text-right tabular-nums">{{ formatMoney(line.total, side.currency) }}</td>
+                            </tr>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th scope="row" class="py-2 pr-3 text-left font-medium">{{ totalLabel }}</th>
+                                <td class="py-2 text-right font-medium tabular-nums">
+                                    {{ formatMoney(side.total, side.currency) }}
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </section>
+            </div>
         </CardContent>
     </Card>
 </template>

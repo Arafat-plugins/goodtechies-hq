@@ -5,11 +5,12 @@ import { computed } from 'vue';
 import AreaTrend, { type AreaTrendPoint } from '@/Components/Charts/AreaTrend.vue';
 import BarCompare, { type BarCompareItem } from '@/Components/Charts/BarCompare.vue';
 import EmptyState from '@/Components/EmptyState.vue';
+import ExchangeRateBar from '@/Components/Finance/ExchangeRateBar.vue';
 import FinanceMonthNav from '@/Components/Finance/FinanceMonthNav.vue';
 import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
 import PayrollNotice from '@/Components/Finance/PayrollNotice.vue';
 import ProjectEarningsTable from '@/Components/Finance/ProjectEarningsTable.vue';
-import type { FinanceMonth, MonthlyRollup, ProjectEarnings } from '@/Components/Finance/finance';
+import type { ExchangeRate, FinanceMonth, MonthlyRollup, ProjectEarnings } from '@/Components/Finance/finance';
 import { financeRoutes, formatMoney } from '@/Components/Finance/finance';
 import { financeTrendHref, moneyValue, type FinanceProjectCut, type FinanceTrend } from '@/Components/Finance/financeReport';
 import PageActionsHost from '@/Components/PageActionsHost.vue';
@@ -63,6 +64,7 @@ defineOptions({
 
 const props = defineProps<{
     month: FinanceMonth & { is_current: boolean };
+    /** The month in BDT — every USD figure converted at `rate` (D7). */
     rollup: MonthlyRollup;
     /**
      * Income grouped by the project it was billed against, plus one row for income that was
@@ -70,9 +72,13 @@ const props = defineProps<{
      */
     byProject: FinanceProjectCut;
     trend: FinanceTrend;
+    /** Always `BDT`. */
     currency: string;
+    /** The USD→BDT rate the figures were converted at, and whether the viewer may change it. */
+    rate: ExchangeRate;
+    showPayroll: boolean;
     dashboardHref: string;
-    /** Per project: expected against received this month, costs, profit, still owed; one-time contracts. */
+    /** Per project, in BDT: expected against received this month, still owed; one-time contracts. */
     earnings: ProjectEarnings;
 }>();
 
@@ -136,26 +142,28 @@ const trendRange = computed(() => {
                 <PageActionsHost inline />
             </div>
 
+            <ExchangeRateBar :rate="rate" />
+
             <div class="grid min-w-0 gap-4 sm:grid-cols-3">
                 <Card class="min-w-0 gap-1 p-4">
                     <p class="text-sm text-muted-foreground">Income</p>
                     <p class="text-2xl font-semibold tabular-nums">
-                        {{ formatMoney(rollup.income.total, currency) }}
+                        {{ formatMoney(rollup.income.total, 'BDT') }}
                     </p>
                 </Card>
                 <Card class="min-w-0 gap-1 p-4">
                     <p class="text-sm text-muted-foreground">Expenses</p>
                     <p class="text-2xl font-semibold tabular-nums">
-                        {{ formatMoney(rollup.expenses.total, currency) }}
+                        {{ formatMoney(rollup.expenses.total, 'BDT') }}
                     </p>
                 </Card>
                 <Card class="min-w-0 gap-1 p-4">
-                    <p class="text-sm text-muted-foreground">Net</p>
-                    <p class="text-2xl font-semibold tabular-nums">{{ formatMoney(rollup.net, currency) }}</p>
+                    <p class="text-sm text-muted-foreground">Operating result</p>
+                    <p class="text-2xl font-semibold tabular-nums">{{ formatMoney(rollup.net, 'BDT') }}</p>
                 </Card>
             </div>
 
-            <PayrollNotice :payroll="rollup.payroll" :month-label="month.label" :currency="currency" />
+            <PayrollNotice v-if="showPayroll" :payroll="rollup.payroll" :month-label="month.label" currency="BDT" />
         </section>
 
         <section aria-labelledby="report-earnings" class="flex min-w-0 flex-col gap-4">
@@ -165,7 +173,7 @@ const trendRange = computed(() => {
                 </h2>
             </div>
 
-            <ProjectEarningsTable :earnings="earnings" :currency="currency" />
+            <ProjectEarningsTable :earnings="earnings" />
         </section>
 
         <!-- ── Cut one: by category ─────────────────────────────────────────────────── -->
@@ -181,7 +189,7 @@ const trendRange = computed(() => {
                     title="Income"
                     :caption="`Income by category, ${month.label}`"
                     :side="rollup.income"
-                    :currency="currency"
+                    currency="BDT"
                     empty-text="No income is recorded against this month."
                     total-label="Total income"
                 />
@@ -189,7 +197,7 @@ const trendRange = computed(() => {
                     title="Expenses"
                     :caption="`Expenses by category, ${month.label}`"
                     :side="rollup.expenses"
-                    :currency="currency"
+                    currency="BDT"
                     empty-text="No expense is recorded against this month."
                     total-label="Total expenses"
                 />
@@ -203,9 +211,7 @@ const trendRange = computed(() => {
                     By project — {{ month.label }}
                 </h2>
                 <!--
-                    This cut is income only. An expense may now name a project (decision 8-17b),
-                    but per-project costs and profit live in "Projects — expected vs received"
-                    above, so this table stays the plain income grouping it always was.
+                    This cut is income only, in BDT: USD income converted at the stored rate.
                 -->
             </div>
 
@@ -287,7 +293,7 @@ const trendRange = computed(() => {
                                             {{ row.domain ?? '—' }}
                                         </td>
                                         <td class="py-2 text-right tabular-nums">
-                                            {{ formatMoney(row.total, currency) }}
+                                            {{ formatMoney(row.total, 'BDT') }}
                                         </td>
                                     </tr>
                                 </tbody>
@@ -296,7 +302,7 @@ const trendRange = computed(() => {
                                         <th scope="row" class="py-2 pr-3 text-left font-medium">Total income</th>
                                         <td class="hidden sm:table-cell" />
                                         <td class="py-2 text-right font-medium tabular-nums">
-                                            {{ formatMoney(byProject.total, currency) }}
+                                            {{ formatMoney(byProject.total, 'BDT') }}
                                         </td>
                                     </tr>
                                 </tfoot>
@@ -374,13 +380,13 @@ const trendRange = computed(() => {
                                         </Link>
                                     </th>
                                     <td class="py-2 pr-3 text-right tabular-nums">
-                                        {{ formatMoney(point.income, currency) }}
+                                        {{ formatMoney(point.income, 'BDT') }}
                                     </td>
                                     <td class="py-2 pr-3 text-right tabular-nums">
-                                        {{ formatMoney(point.expense, currency) }}
+                                        {{ formatMoney(point.expense, 'BDT') }}
                                     </td>
                                     <td class="py-2 text-right tabular-nums">
-                                        {{ formatMoney(point.net, currency) }}
+                                        {{ formatMoney(point.net, 'BDT') }}
                                     </td>
                                 </tr>
                             </tbody>

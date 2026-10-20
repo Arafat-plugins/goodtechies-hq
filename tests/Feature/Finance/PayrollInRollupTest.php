@@ -5,6 +5,7 @@ use App\Models\PayrollItem;
 use App\Models\PayrollPeriod;
 use App\Models\User;
 use App\Services\FinanceService;
+use App\Support\Currency;
 use App\Support\FinanceCategoryKind;
 use Database\Factories\ExpenseFactory;
 use Illuminate\Support\Carbon;
@@ -53,13 +54,15 @@ beforeEach(function () {
 
     Expense::factory()->recordedBy($this->accountant)->of('100.00')->on('2027-05-10')->create([
         'category_id' => ExpenseFactory::category(FinanceCategoryKind::Expense, 'Hosting'),
+        // In the payroll currency, so it sits in the same entry the salaries line goes into.
+        'currency' => Currency::default()->value,
     ]);
 });
 
 it('reports a Draft payroll month as pending and does not count it', function () {
     payrollRollupPeriod();
 
-    $rollup = $this->service->monthlyRollup($this->admin, 2027, 5);
+    $rollup = rollupIn($this->service->monthlyRollup($this->admin, 2027, 5));
 
     expect($rollup['expenses']['total'])->toBe('100.00')
         ->and($rollup['net'])->toBe('-100.00')
@@ -73,7 +76,7 @@ it('reports a Draft payroll month as pending and does not count it', function ()
 it('counts a closed payroll month as a Salaries expense line', function () {
     payrollRollupClose(payrollRollupPeriod());
 
-    $rollup = $this->service->monthlyRollup($this->admin, 2027, 5);
+    $rollup = rollupIn($this->service->monthlyRollup($this->admin, 2027, 5));
     $line = collect($rollup['expenses']['categories'])->firstWhere('name', 'Salaries (payroll)');
 
     expect($line)->not->toBeNull()
@@ -93,11 +96,12 @@ it('warns when a manual Payroll expense sits in a month whose payroll is counted
     // Recorded before the month closes, as it would have been in the ledger.
     Expense::factory()->recordedBy($this->accountant)->of('2500.00')->on('2027-05-28')->create([
         'category_id' => ExpenseFactory::category(FinanceCategoryKind::Expense, 'Payroll'),
+        'currency' => Currency::default()->value,
     ]);
 
     payrollRollupClose($period);
 
-    $rollup = $this->service->monthlyRollup($this->admin, 2027, 5);
+    $rollup = rollupIn($this->service->monthlyRollup($this->admin, 2027, 5));
 
     expect($rollup['payroll']['manual_payroll_entries'])->toBe('2500.00')
         ->and($rollup['payroll']['double_count_warning'])->toBeTrue()

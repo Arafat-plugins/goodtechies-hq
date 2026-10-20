@@ -87,7 +87,7 @@ export interface FinanceMonthSummary {
     payroll?: string | null;
     payroll_phase?: number;
     operating_result?: string;
-    /** `settings.currency`, so Row 3 wears the same symbol as every finance screen. */
+    /** Always `BDT`: every USD figure is converted at the stored rate (D7). */
     currency?: string;
     href?: string;
 }

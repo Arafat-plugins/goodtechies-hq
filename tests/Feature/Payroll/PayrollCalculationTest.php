@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\Currency;
+use App\Services\BonusService;
 use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\EmployeeSalary;
@@ -215,7 +217,15 @@ it('gives a different answer once another unpaid day is approved', function () {
 it('keeps the figures the accountant adjusted when calculate runs again', function () {
     $this->service->adjustItem($this->accountant, $this->yaseensItem, [
         'base_salary' => '850.00',
-        'bonus' => '120.00',
+    ]);
+    // The bonus comes from an approved bonus record, not from the adjustment.
+    app(BonusService::class)->create($this->admin, [(int) $this->yaseensItem->employee_id], [
+        'type' => 'custom',
+        'title' => 'Adjusted bonus',
+        'amount' => '120.00',
+        'currency' => Currency::default()->value,
+        'payment_date' => '2026-09-15',
+        'status' => 'approved',
     ]);
 
     $this->service->calculate($this->accountant, $this->period);

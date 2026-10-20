@@ -31,7 +31,7 @@ use Database\Seeders\SettingsSeeder;
  */
 const SETTINGS_NEW_VALUES = [
     'timezone' => 'Europe/London',
-    'currency' => 'BDT',
+    'currency' => 'USD', // D7: the default is BDT, so the change is to USD.
     'late_grace_minutes' => 20,
     'half_day_auto' => true,
     'timer_max_session_hours' => 9,

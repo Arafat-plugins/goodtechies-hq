@@ -10,6 +10,7 @@ use App\Models\PayrollPeriod;
 use App\Models\RecurringExpense;
 use App\Models\User;
 use App\Support\AuditEvent;
+use App\Support\Currency;
 use App\Support\FinanceCategoryKind;
 use App\Support\PayrollStatus;
 use Carbon\CarbonInterface;
@@ -100,14 +101,14 @@ class FinanceService
      *
      * @var list<string>
      */
-    private const INCOME_FIELDS = ['category_id', 'project_id', 'amount', 'date', 'notes'];
+    private const INCOME_FIELDS = ['category_id', 'project_id', 'amount', 'currency', 'date', 'notes'];
 
     /**
      * The same, plus the billable flag (decision 8-17b: an expense may name a project too).
      *
      * @var list<string>
      */
-    private const EXPENSE_FIELDS = ['category_id', 'project_id', 'billable', 'amount', 'date', 'notes'];
+    private const EXPENSE_FIELDS = ['category_id', 'project_id', 'billable', 'amount', 'currency', 'date', 'notes'];
 
     /**
      * What a repeating expense's form may set. `created_by`, `occurrences` and `next_due_date`
@@ -115,10 +116,11 @@ class FinanceService
      *
      * @var list<string>
      */
-    private const RECURRING_EXPENSE_FIELDS = ['category_id', 'project_id', 'billable', 'amount', 'frequency', 'start_date', 'ends_on', 'notes', 'active'];
+    private const RECURRING_EXPENSE_FIELDS = ['category_id', 'project_id', 'billable', 'amount', 'currency', 'frequency', 'start_date', 'ends_on', 'notes', 'active'];
 
     public function __construct(
         private readonly AuditLogger $audit,
+        private readonly ExchangeRateService $rates,
     ) {}
 
     /*
@@ -426,101 +428,164 @@ class FinanceService
     }
 
     /**
-     * Record every repeating expense that has fallen due on or before `$today`, catching up on
-     * any days the scheduler missed. Returns how many expense rows were created.
+     * The repeating expenses that are due on or before `$today`: active, `next_due_date` reached,
+     * and not past `ends_on`. Nothing records them on its own — the Expenses page lists them and
+     * an Admin records (or skips) each one.
      *
-     * **Safe to run twice.** Each row is `firstOrCreate`d on `(recurring_expense_id, date)`,
-     * which the database also holds as a unique index, and the template's `next_due_date` only
-     * moves forward — so a second run on the same day finds nothing due and records nothing.
-     *
-     * **A closed month is skipped, not retried.** If the due date falls in a payroll month that
-     * is locked or paid, no row is written (the same rule every hand-entered expense obeys) and
-     * the template moves on to its next date; the Accountant can enter that one by hand if an
-     * Admin reopens the month.
-     *
-     * **No drift.** The next date is always `dueDateFor(occurrences)`, counted from the start.
+     * @return Collection<int, RecurringExpense>
      */
-    public function generateDueRecurringExpenses(Carbon $today): int
+    public function dueRecurringExpenses(Carbon $today): Collection
     {
-        $today = $today->copy()->startOfDay();
-        $created = 0;
+        $date = $today->toDateString();
 
-        $templates = RecurringExpense::query()
-            ->with(['category', 'creator'])
+        return RecurringExpense::query()
+            ->with(['category', 'project'])
             ->where('active', true)
-            ->whereDate('next_due_date', '<=', $today->toDateString())
+            ->whereDate('next_due_date', '<=', $date)
+            ->where(function ($query): void {
+                $query->whereNull('ends_on')->orWhereColumn('next_due_date', '<=', 'ends_on');
+            })
+            ->orderBy('next_due_date')
             ->orderBy('id')
             ->get();
+    }
 
-        foreach ($templates as $template) {
-            while (
-                $template->next_due_date->lte($today)
-                && ($template->ends_on === null || $template->next_due_date->lte($template->ends_on))
-            ) {
-                $due = $template->next_due_date->copy();
+    /**
+     * Record ONE due occurrence of a repeating expense as an ordinary expense, because an Admin
+     * clicked "Record now". Nothing records a repeating expense on its own.
+     *
+     * **Never a duplicate.** The row is `firstOrCreate`d on `(recurring_expense_id, date)`, which
+     * the database also holds as a unique index; if that occurrence already exists, the template
+     * still moves on and the existing row is returned.
+     *
+     * **A closed month is refused.** If the due date falls in a payroll month that is locked or
+     * paid, this throws — the same rule every hand-entered expense obeys.
+     *
+     * **No drift.** The next date is always `dueDateFor(occurrences)`, counted from the start.
+     *
+     * @throws AuthorizationException
+     * @throws FinanceStateException
+     */
+    public function recordDueRecurringExpense(User $actor, RecurringExpense $template): Expense
+    {
+        $this->authoriseRecurringOccurrence($actor);
 
-                DB::transaction(function () use ($template, $due, &$created): void {
-                    // Lock the month's payroll row (if any) before reading its status, so a
-                    // month locked concurrently is respected rather than written into.
-                    DB::table('payroll_periods')
-                        ->whereDate('month', PayrollPeriod::monthKey($due)->toDateString())
-                        ->lockForUpdate()
-                        ->first();
+        return DB::transaction(function () use ($actor, $template): Expense {
+            $template = $this->lockDueTemplate($template);
+            $due = $template->next_due_date->copy();
 
-                    $open = true;
+            // Lock the month's payroll row (if any) before reading its status, so a month locked
+            // concurrently is respected rather than written into.
+            DB::table('payroll_periods')
+                ->whereDate('month', PayrollPeriod::monthKey($due)->toDateString())
+                ->lockForUpdate()
+                ->first();
 
-                    try {
-                        $this->assertPeriodIsOpen($due);
-                    } catch (FinanceStateException) {
-                        $open = false;
-                    }
+            $this->assertPeriodIsOpen($due);
 
-                    if ($open) {
-                        $notes = $template->notes !== null && trim($template->notes) !== ''
-                            ? $template->notes
-                            : 'Repeating: '.($template->category?->name ?? 'expense');
+            $notes = $template->notes !== null && trim($template->notes) !== ''
+                ? $template->notes
+                : 'Repeating: '.($template->category?->name ?? 'expense');
 
-                        $expense = Expense::firstOrCreate(
-                            [
-                                'recurring_expense_id' => $template->getKey(),
-                                'date' => $due->toDateString(),
-                            ],
-                            [
-                                'category_id' => $template->category_id,
-                                'project_id' => $template->project_id,
-                                'billable' => (bool) $template->billable,
-                                'amount' => (string) $template->amount,
-                                'notes' => $notes,
-                                'recorded_by' => $template->created_by,
-                            ],
-                        );
+            $expense = Expense::firstOrCreate(
+                [
+                    'recurring_expense_id' => $template->getKey(),
+                    'date' => $due->toDateString(),
+                ],
+                [
+                    'category_id' => $template->category_id,
+                    'project_id' => $template->project_id,
+                    'billable' => (bool) $template->billable,
+                    'amount' => (string) $template->amount,
+                    'currency' => (string) $template->currency,
+                    'notes' => $notes,
+                    'recorded_by' => $actor->getKey(),
+                ],
+            );
 
-                        if ($expense->wasRecentlyCreated) {
-                            $this->audit->record(
-                                AuditEvent::ExpenseCreated,
-                                $expense,
-                                null,
-                                $expense->fresh(['category', 'project'])->auditValues(),
-                                $template->creator,
-                            );
-
-                            $created++;
-                        }
-                    }
-
-                    $template->occurrences = (int) $template->occurrences + 1;
-                    $template->next_due_date = $template->dueDateFor($template->occurrences);
-                    $template->save();
-                });
+            if ($expense->wasRecentlyCreated) {
+                $this->audit->record(
+                    AuditEvent::ExpenseCreated,
+                    $expense,
+                    null,
+                    $expense->fresh(['category', 'project'])->auditValues(),
+                    $actor,
+                );
             }
 
-            if ($template->ends_on !== null && $template->next_due_date->gt($template->ends_on)) {
-                $template->active = false;
-                $template->save();
-            }
+            $this->advanceRecurringExpense($template);
+
+            return $expense->fresh(['category', 'project']) ?? $expense;
+        });
+    }
+
+    /**
+     * Skip ONE due occurrence of a repeating expense: the template moves on to its next due date
+     * and no expense is recorded. Not audited — no money moves.
+     *
+     * @throws AuthorizationException
+     * @throws FinanceStateException
+     */
+    public function skipDueRecurringExpense(User $actor, RecurringExpense $template): void
+    {
+        $this->authoriseRecurringOccurrence($actor);
+
+        DB::transaction(function () use ($template): void {
+            $this->advanceRecurringExpense($this->lockDueTemplate($template));
+        });
+    }
+
+    /**
+     * @throws AuthorizationException
+     */
+    private function authoriseRecurringOccurrence(User $actor): void
+    {
+        if (! Gate::forUser($actor)->allows('create', Expense::class)) {
+            throw new AuthorizationException('You are not allowed to record expenses.');
+        }
+    }
+
+    /**
+     * Re-read the template under a row lock and refuse it unless one occurrence is due today
+     * (agency timezone): active, `next_due_date` reached, and not past `ends_on`.
+     *
+     * @throws FinanceStateException
+     */
+    private function lockDueTemplate(RecurringExpense $template): RecurringExpense
+    {
+        /** @var RecurringExpense $locked */
+        $locked = RecurringExpense::query()
+            ->with(['category', 'project'])
+            ->lockForUpdate()
+            ->findOrFail($template->getKey());
+
+        $today = Carbon::today(config('app.timezone'));
+
+        if (! $locked->active
+            || ($locked->ends_on !== null && $locked->next_due_date->gt($locked->ends_on))) {
+            throw FinanceStateException::recurringInactive();
         }
 
-        return $created;
+        if ($locked->next_due_date->gt($today)) {
+            throw FinanceStateException::recurringNotDue($locked->next_due_date->toDateString());
+        }
+
+        return $locked;
+    }
+
+    /**
+     * Move a template on by one occurrence, and finish it once it has passed `ends_on`.
+     */
+    private function advanceRecurringExpense(RecurringExpense $template): void
+    {
+        $template->occurrences = (int) $template->occurrences + 1;
+        $template->next_due_date = $template->dueDateFor($template->occurrences);
+
+        if ($template->ends_on !== null && $template->next_due_date->gt($template->ends_on)) {
+            $template->active = false;
+        }
+
+        $template->save();
     }
 
     /*
@@ -711,13 +776,26 @@ class FinanceService
      * If an expense filed under a category named *Payroll* exists in a month whose payroll is
      * counted, `payroll.double_count_warning` is true: the same salaries may be in the month twice.
      *
+     * ## Per currency: `by_currency`
+     *
+     * Every record carries its own currency (`App\Support\Currency`), and amounts in different
+     * currencies are never added together — there is no exchange rate. `by_currency` holds one
+     * entry per currency that has at least one income or expense row in the month, plus the
+     * default currency always (payroll is paid in it), default first then alphabetical. The
+     * counted payroll line goes only into the default currency's expenses. There are **no**
+     * all-currency totals: a screen picks one currency's entry (`rollupFor()`) and shows the
+     * others beside it, never added to it.
+     *
      * @return array{
      *     month: string,
      *     label: string,
-     *     income: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
-     *     expenses: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
-     *     net: string,
-     *     payroll: array{status: string|null, total: string, counted: bool, manual_payroll_entries: string, double_count_warning: bool},
+     *     payroll: array{status: string|null, total: string, counted: bool, manual_payroll_entries: string, double_count_warning: bool, currency: string},
+     *     by_currency: list<array{
+     *         currency: string,
+     *         income: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
+     *         expenses: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
+     *         net: string,
+     *     }>,
      * }
      *
      * @throws AuthorizationException
@@ -728,38 +806,153 @@ class FinanceService
             throw new AuthorizationException('You are not allowed to see the company finances.');
         }
 
-        $income = $this->totalsByCategory('income', $year, $month);
-        $expenses = $this->totalsByCategory('expenses', $year, $month);
+        // One GROUP BY per side, split by currency: never two currencies in one sum.
+        $incomeByCurrency = $this->totalsByCategoryAndCurrency('income', $year, $month);
+        $expensesByCurrency = $this->totalsByCategoryAndCurrency('expenses', $year, $month);
 
         $payroll = $this->payrollForMonth($year, $month);
 
-        if ($payroll['counted']) {
-            $expenses[] = [
-                'category_id' => 0,
-                'name' => 'Salaries (payroll)',
-                'total' => $payroll['total'],
-                'source' => 'payroll',
+        $default = Currency::default()->value;
+
+        $currencies = array_values(array_unique(array_merge(
+            array_keys($incomeByCurrency),
+            array_keys($expensesByCurrency),
+        )));
+        $currencies = array_values(array_diff($currencies, [$default]));
+        sort($currencies, SORT_STRING);
+        array_unshift($currencies, $default);
+
+        $byCurrency = [];
+
+        foreach ($currencies as $currency) {
+            $currencyIncome = $incomeByCurrency[$currency] ?? [];
+            $currencyExpenses = $expensesByCurrency[$currency] ?? [];
+
+            if ($currency === $default && $payroll['counted']) {
+                $currencyExpenses[] = [
+                    'category_id' => 0,
+                    'name' => 'Salaries (payroll)',
+                    'total' => $payroll['total'],
+                    'source' => 'payroll',
+                ];
+            }
+
+            $currencyIncomeTotal = $this->sumCents($currencyIncome);
+            $currencyExpenseTotal = $this->sumCents($currencyExpenses);
+
+            $byCurrency[] = [
+                'currency' => $currency,
+                'income' => [
+                    'categories' => $currencyIncome,
+                    'total' => $this->fromCents($currencyIncomeTotal),
+                ],
+                'expenses' => [
+                    'categories' => $currencyExpenses,
+                    'total' => $this->fromCents($currencyExpenseTotal),
+                ],
+                'net' => $this->fromCents($currencyIncomeTotal - $currencyExpenseTotal),
             ];
         }
-
-        $incomeTotal = $this->sumCents($income);
-        $expenseTotal = $this->sumCents($expenses);
 
         return [
             'month' => sprintf('%04d-%02d', $year, $month),
             'label' => Carbon::create($year, $month, 1)->format('F Y'),
-            'income' => [
-                'categories' => $income,
-                'total' => $this->fromCents($incomeTotal),
-            ],
-            'expenses' => [
-                'categories' => $expenses,
-                'total' => $this->fromCents($expenseTotal),
-            ],
-            // Part D §13's "operating result": what came in less what went out. Negative when
-            // the month cost more than it earned, which is a real answer and not an error.
-            'net' => $this->fromCents($incomeTotal - $expenseTotal),
             'payroll' => $payroll,
+            'by_currency' => $byCurrency,
+            'bdt' => $this->combinedInBdt($byCurrency),
+            'rate' => [
+                'usd_bdt' => $this->rates->rate(),
+                'mode' => $this->rates->mode(),
+                'updated_at' => $this->rates->updatedAt(),
+            ],
+        ];
+    }
+
+    /**
+     * D7: every `by_currency` entry converted to BDT at the stored rate and merged per category
+     * (same category → summed BDT cents). The payroll line is already BDT and is kept as it is.
+     *
+     * @param  list<array{currency: string, income: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string}, expenses: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string}, net: string}>  $byCurrency
+     * @return array{
+     *     income: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
+     *     expenses: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
+     *     net: string,
+     * }
+     */
+    private function combinedInBdt(array $byCurrency): array
+    {
+        $sides = ['income' => [], 'expenses' => []];
+
+        foreach ($byCurrency as $entry) {
+            foreach (array_keys($sides) as $side) {
+                foreach ($entry[$side]['categories'] as $line) {
+                    $key = $line['source'].':'.$line['category_id'];
+                    $cents = $line['source'] === 'payroll'
+                        ? ExchangeRateService::toCents($line['total'])
+                        : $this->rates->toBdtCents($line['total'], $entry['currency']);
+
+                    if (! isset($sides[$side][$key])) {
+                        $sides[$side][$key] = $line + ['cents' => 0];
+                    }
+
+                    $sides[$side][$key]['cents'] += $cents;
+                }
+            }
+        }
+
+        $result = [];
+        $totals = [];
+
+        foreach ($sides as $side => $lines) {
+            $categories = [];
+            $total = 0;
+
+            foreach ($lines as $line) {
+                $total += $line['cents'];
+                $categories[] = [
+                    'category_id' => $line['category_id'],
+                    'name' => $line['name'],
+                    'total' => ExchangeRateService::fromCents($line['cents']),
+                    'source' => $line['source'],
+                ];
+            }
+
+            $totals[$side] = $total;
+            $result[$side] = ['categories' => $categories, 'total' => ExchangeRateService::fromCents($total)];
+        }
+
+        $result['net'] = ExchangeRateService::fromCents($totals['income'] - $totals['expenses']);
+
+        return $result;
+    }
+
+    /**
+     * One currency's entry from a `monthlyRollup()` result — what a screen showing that currency
+     * reads as `income`, `expenses` and `net` (Part D §13's "operating result": what came in less
+     * what went out, negative when the month cost more than it earned). A currency with no rows
+     * that month gets an empty entry, never another currency's figures.
+     *
+     * @param  array{by_currency: list<array{currency: string, income: array, expenses: array, net: string}>}  $rollup
+     * @return array{
+     *     currency: string,
+     *     income: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
+     *     expenses: array{categories: list<array{category_id: int, name: string, total: string, source: string}>, total: string},
+     *     net: string,
+     * }
+     */
+    public function rollupFor(array $rollup, string $currency): array
+    {
+        foreach ($rollup['by_currency'] ?? [] as $entry) {
+            if ($entry['currency'] === $currency) {
+                return $entry;
+            }
+        }
+
+        return [
+            'currency' => $currency,
+            'income' => ['categories' => [], 'total' => '0.00'],
+            'expenses' => ['categories' => [], 'total' => '0.00'],
+            'net' => '0.00',
         ];
     }
 
@@ -771,7 +964,7 @@ class FinanceService
      * paid). `manual_payroll_entries` is what was entered by hand that month under an expense
      * category named *Payroll*, and `double_count_warning` is true when both are present.
      *
-     * @return array{status: string|null, total: string, counted: bool, manual_payroll_entries: string, double_count_warning: bool}
+     * @return array{status: string|null, total: string, counted: bool, manual_payroll_entries: string, double_count_warning: bool, currency: string}
      */
     private function payrollForMonth(int $year, int $month): array
     {
@@ -805,38 +998,47 @@ class FinanceService
             'counted' => $counted,
             'manual_payroll_entries' => $this->fromCents($manualCents),
             'double_count_warning' => $counted && $manualCents > 0,
+            'currency' => Currency::default()->value,
         ];
     }
 
     /**
-     * `SUM(amount) GROUP BY category` for one table and one month, in picker order.
+     * `SUM(amount) GROUP BY currency, category` for one table and one month, in picker order:
+     * never two currencies in one sum.
      *
      * The table name is a constant from this class, never anything a caller supplied.
      *
-     * @return list<array{category_id: int, name: string, total: string, source: string}>
+     * @return array<string, list<array{category_id: int, name: string, total: string, source: string}>>
      */
-    private function totalsByCategory(string $table, int $year, int $month): array
+    private function totalsByCategoryAndCurrency(string $table, int $year, int $month): array
     {
         $start = Carbon::create($year, $month, 1)->startOfDay();
 
-        return DB::table($table.' as record')
+        $rows = DB::table($table.' as record')
             ->join('finance_categories as category', 'category.id', '=', 'record.category_id')
             ->whereBetween('record.date', [$start->toDateString(), $start->copy()->endOfMonth()->toDateString()])
-            ->groupBy('category.id', 'category.name', 'category.position')
+            ->groupBy('record.currency', 'category.id', 'category.name', 'category.position')
             ->orderBy('category.position')
             ->orderBy('category.name')
             ->get([
+                'record.currency as currency',
                 'category.id as category_id',
                 'category.name as name',
                 DB::raw('SUM(record.amount) as total'),
-            ])
-            ->map(fn (object $row): array => [
+            ]);
+
+        $byCurrency = [];
+
+        foreach ($rows as $row) {
+            $byCurrency[(string) $row->currency][] = [
                 'category_id' => (int) $row->category_id,
                 'name' => (string) $row->name,
                 'total' => $this->fromCents($this->toCents((string) $row->total)),
                 'source' => 'ledger',
-            ])
-            ->all();
+            ];
+        }
+
+        return $byCurrency;
     }
 
     /**

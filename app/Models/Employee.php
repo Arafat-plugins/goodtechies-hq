@@ -87,6 +87,14 @@ class Employee extends Model
     }
 
     /**
+     * @return HasMany<EmployeeBonus, $this>
+     */
+    public function bonuses(): HasMany
+    {
+        return $this->hasMany(EmployeeBonus::class);
+    }
+
+    /**
      * Employees whose attendance this user may read.
      *
      * The ONE statement of the rule (decision 2-37), asked of a set here and of one subject in

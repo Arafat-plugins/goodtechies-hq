@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\Currency;
+use App\Services\BonusService;
 use App\Exceptions\PayrollStateException;
 use App\Models\AuditLog;
 use App\Models\PayrollItem;
@@ -272,7 +274,7 @@ it('lets the accountant adjust figures up to approval and no further', function 
     $item = $period->items()->sole();
 
     if ($refusal === null) {
-        expect($this->service->adjustItem($this->accountant, $item, ['bonus' => '50.00'])->bonus)
+        expect($this->service->adjustItem($this->accountant, $item, ['deduction' => '50.00'])->deduction)
             ->toBe('50.00');
 
         return;
@@ -281,10 +283,10 @@ it('lets the accountant adjust figures up to approval and no further', function 
     // A sentence either way, and which sentence matters: after approval the Accountant is the
     // one refused (a permission answer), and from the lock onwards the PERIOD is (a state
     // answer, which an Admin would get too).
-    expect(fn () => $this->service->adjustItem($this->accountant, $item, ['bonus' => '50.00']))
+    expect(fn () => $this->service->adjustItem($this->accountant, $item, ['deduction' => '50.00']))
         ->toThrow($refusal);
 
-    expect($item->refresh()->bonus)->toBe('0.00');
+    expect($item->refresh()->deduction)->toBe('0.00');
 })->with([
     'draft' => ['draft', null],
     'calculated' => ['calculated', null],
@@ -299,9 +301,9 @@ it('lets an admin adjust figures up to the lock and no further', function (strin
     $item = $period->items()->sole();
 
     if ($allowed) {
-        expect($this->service->adjustItem($this->admin, $item, ['bonus' => '75.00'])->bonus)->toBe('75.00');
+        expect($this->service->adjustItem($this->admin, $item, ['deduction' => '75.00'])->deduction)->toBe('75.00');
     } else {
-        expect(fn () => $this->service->adjustItem($this->admin, $item, ['bonus' => '75.00']))
+        expect(fn () => $this->service->adjustItem($this->admin, $item, ['deduction' => '75.00']))
             ->toThrow(PayrollStateException::class, 'can no longer be changed');
     }
 })->with([
@@ -317,8 +319,17 @@ it('recomputes the net in the database on every adjustment', function () {
 
     expect($item->net_salary)->toBe('1100.00');
 
-    $adjusted = $this->service->adjustItem($this->accountant, $item, [
-        'bonus' => '200.00',
+    // The bonus is an approved bonus record; the adjustment sets what comes off.
+    app(BonusService::class)->create($this->admin, [(int) $item->employee_id], [
+        'type' => 'custom',
+        'title' => 'Adjusted bonus',
+        'amount' => '200.00',
+        'currency' => Currency::default()->value,
+        'payment_date' => $period->month->toDateString(),
+        'status' => 'approved',
+    ]);
+
+    $adjusted = $this->service->adjustItem($this->accountant, $item->refresh(), [
         'deduction' => '50.00',
         'advance' => '100.00',
     ]);

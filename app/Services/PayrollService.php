@@ -83,6 +83,7 @@ class PayrollService
     public function __construct(
         private readonly AuditLogger $audit,
         private readonly LeaveService $leave,
+        private readonly BonusService $bonuses,
     ) {}
 
     /*
@@ -317,6 +318,8 @@ class PayrollService
 
             $this->draftMissingItems($period);
 
+            $this->bonuses->syncPeriodFor($period->month);
+
             return $period->refresh();
         });
     }
@@ -381,6 +384,8 @@ class PayrollService
 
             $created++;
         }
+
+        DB::transaction(fn () => $this->bonuses->syncPeriodFor($period->month));
 
         return ['created' => $created, 'skipped' => $skipped];
     }
@@ -547,6 +552,8 @@ class PayrollService
                 );
                 $item->save();
             }
+
+            $this->bonuses->syncPeriodFor($period->month);
 
             if ($period->status !== PayrollStatus::Calculated) {
                 $period->applyTransition(PayrollStatus::Calculated)->save();
@@ -844,11 +851,21 @@ class PayrollService
                 $period->applyTransition(PayrollStatus::Locked)->save();
                 $period->applyTransition(PayrollStatus::Paid)->save();
 
+                $this->bonuses->markPaidForPeriod($period);
+
                 return $period->refresh();
             });
         }
 
-        return $this->move($actor, $period, 'markPaid', PayrollStatus::Paid);
+        return DB::transaction(function () use ($actor, $period): PayrollPeriod {
+            $paid = $this->move($actor, $period, 'markPaid', PayrollStatus::Paid);
+
+            if ($paid->status === PayrollStatus::Paid) {
+                $this->bonuses->markPaidForPeriod($paid);
+            }
+
+            return $paid;
+        });
     }
 
     /**

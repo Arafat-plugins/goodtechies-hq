@@ -122,7 +122,7 @@ const monthCards = computed(() => [
     {
         key: 'income',
         label: 'Income',
-        value: formatMoney(props.finance.income ?? '0', props.finance.currency),
+        value: formatMoney(props.finance.income ?? '0', 'BDT'),
         sub: 'Recorded this month',
         icon: TrendingUp,
         href: '/finance/income',
@@ -130,7 +130,7 @@ const monthCards = computed(() => [
     {
         key: 'expense',
         label: 'Expenses',
-        value: formatMoney(props.finance.expense ?? '0', props.finance.currency),
+        value: formatMoney(props.finance.expense ?? '0', 'BDT'),
         sub: 'Recorded this month',
         icon: Receipt,
         href: '/finance/expenses',
@@ -143,7 +143,7 @@ const monthCards = computed(() => [
         value:
             props.finance.payroll === null || props.finance.payroll === undefined
                 ? undefined
-                : formatMoney(props.finance.payroll, props.finance.currency),
+                : formatMoney(props.finance.payroll, 'BDT'),
         sub: props.finance.payroll_note,
         icon: HandCoins,
         href: props.finance.payroll_href ?? undefined,
@@ -151,7 +151,7 @@ const monthCards = computed(() => [
     {
         key: 'operating_result',
         label: 'Operating result',
-        value: formatMoney(props.finance.operating_result ?? '0', props.finance.currency),
+        value: formatMoney(props.finance.operating_result ?? '0', 'BDT'),
         sub: 'Income less expenses. Includes net salaries once the payroll month is locked or paid.',
         icon: Scale,
         href: props.finance.href,

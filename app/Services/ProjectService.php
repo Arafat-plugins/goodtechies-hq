@@ -69,7 +69,6 @@ class ProjectService
         private readonly AuditLogger $audit,
         private readonly ActivityLogger $activity,
         private readonly ConversationService $conversations,
-        private readonly ProjectIncomeService $income,
     ) {}
 
     /**
@@ -230,17 +229,6 @@ class ProjectService
         return DB::transaction(function () use ($actor, $project, $from, $to, $reason): Project {
             $project->status = $to;
             $project->save();
-
-            // A one-time price is income the day the project is completed (recorded once).
-            if ($to === ProjectStatus::Completed) {
-                // Billing must never block a status change: a failure is reported, the project
-                // still completes, and the price can be added by hand from Finance → Income.
-                try {
-                    $this->income->recordOnCompletion($project);
-                } catch (\Throwable $exception) {
-                    report($exception);
-                }
-            }
 
             $line = sprintf('Status changed from %s to %s', $from->label(), $to->label());
 

@@ -52,6 +52,8 @@ const PAYROLL_PRIVACY_ITEM_KEYS = [
     'advance',
     'leave_impact',
     'net_salary',
+    // The line's approved/paid bonus records (name, type, amount, status, date) — its own.
+    'bonuses',
     'permissions',
 ];
 
@@ -289,7 +291,7 @@ it('leaves admin_notes absent for the employee the note is about', function () {
     expect(array_key_exists('admin_notes', $payload))->toBeFalse();
 })->group('phase9');
 
-it('sends exactly eleven keys to a non-admin and not one more', function (string $who) {
+it('sends exactly twelve keys to a non-admin and not one more', function (string $who) {
     $viewer = $who === 'accountant' ? $this->accountant : $this->yaseen;
 
     $payload = payrollPrivacyPayload($this->yaseensItem, $viewer);

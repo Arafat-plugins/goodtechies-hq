@@ -135,8 +135,7 @@ class ProjectResource extends JsonResource
             'contract_value' => $finance->contract_value,
             'contract_terms' => $finance->contract_terms,
             'profitability_snapshot' => $finance->profitability_snapshot,
-            'auto_income' => (bool) $finance->auto_income,
-            'auto_income_from' => $finance->auto_income_from?->format('Y-m-d'),
+            'currency' => (string) $finance->currency,
         ];
     }
 

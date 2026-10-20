@@ -10,6 +10,7 @@ import {
     formatMoney,
     leaveImpactSummary,
     receivesAdminNotes,
+    sumAmounts,
 } from '@/Components/Payroll/payroll';
 import { Button } from '@/Components/ui/button';
 
@@ -94,6 +95,18 @@ const anyEditable = () => props.items.some((item) => item.permissions.can_update
 
 // Polish 002: allowance is a column only while a line in this month still carries one.
 const moneyFields = computed(() => payrollMoneyFieldsFor(props.items));
+
+/** The net column is what each person is paid: base and bonuses, less what comes off. */
+function columnLabel(field: PayrollMoneyField): string {
+    return field === 'net_salary' ? 'Total payable' : PAYROLL_FIELD_LABELS[field];
+}
+
+/** The month's totals, base and bonuses shown apart, added in whole cents. */
+const totals = computed(() => ({
+    base: sumAmounts(props.items.map((item) => item.base_salary)),
+    bonus: sumAmounts(props.items.map((item) => item.bonus)),
+    payable: sumAmounts(props.items.map((item) => item.net_salary)),
+}));
 </script>
 
 <template>
@@ -165,7 +178,7 @@ const moneyFields = computed(() => payrollMoneyFieldsFor(props.items));
                     <tfoot>
                         <tr>
                             <th scope="row" class="py-2 pr-3 text-left font-medium">
-                                {{ PAYROLL_FIELD_LONG_LABELS.net_salary }}
+                                Total payable
                             </th>
                             <td class="py-2 text-right font-medium tabular-nums">
                                 {{ formatMoney(item.net_salary, currency) }}
@@ -202,7 +215,7 @@ const moneyFields = computed(() => payrollMoneyFieldsFor(props.items));
                             scope="col"
                             class="px-3 py-3 text-right font-medium text-muted-foreground"
                         >
-                            {{ PAYROLL_FIELD_LABELS[field] }}
+                            {{ columnLabel(field) }}
                         </th>
                         <th v-if="anyEditable()" scope="col" class="px-4 py-3 text-right font-medium text-muted-foreground">
                             <span class="sr-only">Row actions</span>
@@ -260,5 +273,24 @@ const moneyFields = computed(() => payrollMoneyFieldsFor(props.items));
                 </tbody>
             </table>
         </div>
+
+        <dl
+            v-if="items.length"
+            class="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border bg-card p-4 text-sm shadow-raised sm:grid-cols-3"
+            :aria-label="`Totals for ${monthLabel}`"
+        >
+            <div class="flex items-baseline justify-between gap-3 sm:flex-col sm:items-start">
+                <dt class="text-muted-foreground">Total base</dt>
+                <dd class="tabular-nums">{{ formatMoney(totals.base, currency) }}</dd>
+            </div>
+            <div class="flex items-baseline justify-between gap-3 sm:flex-col sm:items-start">
+                <dt class="text-muted-foreground">Total bonuses</dt>
+                <dd class="tabular-nums">{{ formatMoney(totals.bonus, currency) }}</dd>
+            </div>
+            <div class="flex items-baseline justify-between gap-3 sm:flex-col sm:items-start">
+                <dt class="font-medium">Total payable for the month</dt>
+                <dd class="font-medium tabular-nums">{{ formatMoney(totals.payable, currency) }}</dd>
+            </div>
+        </dl>
     </div>
 </template>

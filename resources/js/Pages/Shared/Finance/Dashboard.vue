@@ -2,12 +2,13 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { FileChartColumn, HandCoins, Hourglass, Receipt, Scale, Target, TrendingUp } from '@lucide/vue';
 import { computed } from 'vue';
+import ExchangeRateBar from '@/Components/Finance/ExchangeRateBar.vue';
 import FinanceCategoryChart from '@/Components/Finance/FinanceCategoryChart.vue';
 import FinanceMonthNav from '@/Components/Finance/FinanceMonthNav.vue';
 import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
 import PayrollNotice from '@/Components/Finance/PayrollNotice.vue';
 import ProjectEarningsTable from '@/Components/Finance/ProjectEarningsTable.vue';
-import type { FinanceMonth, MonthlyRollup, ProjectEarnings } from '@/Components/Finance/finance';
+import type { ExchangeRate, FinanceMonth, MonthlyRollup, ProjectEarnings } from '@/Components/Finance/finance';
 import { financeRoutes, formatMoney } from '@/Components/Finance/finance';
 import { moneyValue } from '@/Components/Finance/financeReport';
 import PageActionsHost from '@/Components/PageActionsHost.vue';
@@ -64,13 +65,19 @@ defineOptions({
 const props = defineProps<{
     /** The month in the URL, and the two either side of it, as the server built them. */
     month: FinanceMonth & { is_current: boolean };
+    /** The month in BDT — every USD figure converted at `rate` (D7). */
     rollup: MonthlyRollup;
-    /** `settings.currency`. */
+    /** Always `BDT`. */
     currency: string;
+    /** The USD→BDT rate the figures were converted at, and whether the viewer may change it. */
+    rate: ExchangeRate;
+    showPayroll: boolean;
     reportHref: string;
-    /** Per project: expected against received this month, costs, profit, still owed. */
+    /** Per project, in BDT: expected against received this month, still owed. */
     earnings: ProjectEarnings;
 }>();
+
+const monthHref = (month: string): string => financeRoutes.dashboard(month);
 
 /**
  * The net's sub-line. **Words, never colour**: a month that cost more than it earned is told
@@ -119,34 +126,36 @@ const isEmptyMonth = computed(
 
                 <!-- Polish 013: the month stepper and the page actions share the heading row. -->
 
-                <div class="ml-auto"><FinanceMonthNav :month="month" :href="financeRoutes.dashboard" /></div>
+                <div class="ml-auto"><FinanceMonthNav :month="month" :href="monthHref" /></div>
 
                 <PageActionsHost inline />
             </div>
+
+            <ExchangeRateBar :rate="rate" />
 
             <!-- The three figures Part D §13 names, in the order it names them. -->
             <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <StatCard
                     label="Income"
-                    :value="formatMoney(rollup.income.total, currency)"
+                    :value="formatMoney(rollup.income.total, 'BDT')"
                     sub="Recorded this month"
                     :icon="TrendingUp"
                 />
                 <StatCard
                     label="Expenses"
-                    :value="formatMoney(rollup.expenses.total, currency)"
+                    :value="formatMoney(rollup.expenses.total, 'BDT')"
                     sub="Recorded this month"
                     :icon="Receipt"
                 />
                 <StatCard
-                    label="Net"
-                    :value="formatMoney(rollup.net, currency)"
+                    label="Operating result"
+                    :value="formatMoney(rollup.net, 'BDT')"
                     :sub="netSub"
                     :icon="Scale"
                 />
             </div>
 
-            <PayrollNotice :payroll="rollup.payroll" :month-label="month.label" :currency="currency" />
+            <PayrollNotice v-if="showPayroll" :payroll="rollup.payroll" :month-label="month.label" currency="BDT" />
         </section>
 
         <section aria-labelledby="finance-projects" class="flex min-w-0 flex-col gap-4">
@@ -157,25 +166,25 @@ const isEmptyMonth = computed(
             <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <StatCard
                     label="Expected from projects"
-                    :value="formatMoney(earnings.totals.expected, currency)"
+                    :value="formatMoney(earnings.totals.expected, 'BDT')"
                     sub="What billing says is due this month"
                     :icon="Target"
                 />
                 <StatCard
                     label="Received from projects"
-                    :value="formatMoney(earnings.totals.received, currency)"
+                    :value="formatMoney(earnings.totals.received, 'BDT')"
                     sub="Income linked to a project"
                     :icon="HandCoins"
                 />
                 <StatCard
                     label="Still to collect"
-                    :value="formatMoney(earnings.totals.outstanding, currency)"
+                    :value="formatMoney(earnings.totals.outstanding, 'BDT')"
                     sub="Expected, not yet received"
                     :icon="Hourglass"
                 />
             </div>
 
-            <ProjectEarningsTable :earnings="earnings" :currency="currency" :limit="8" />
+            <ProjectEarningsTable :earnings="earnings" :limit="8" />
 
             <p class="text-sm">
                 <Link :href="reportHref" class="underline underline-offset-4">Open the full report</Link>
@@ -199,7 +208,7 @@ const isEmptyMonth = computed(
                         title="Income"
                         :caption="`Income by category, ${month.label}`"
                         :side="rollup.income"
-                        :currency="currency"
+                        currency="BDT"
                         empty-text="No income is recorded against this month yet."
                         total-label="Total income"
                     />
@@ -211,7 +220,7 @@ const isEmptyMonth = computed(
                         title="Expenses"
                         :caption="`Expenses by category, ${month.label}`"
                         :side="rollup.expenses"
-                        :currency="currency"
+                        currency="BDT"
                         empty-text="No expense is recorded against this month yet."
                         total-label="Total expenses"
                     />

@@ -15,7 +15,7 @@ class SettingsSeeder extends Seeder
      */
     public const DEFAULTS = [
         'timezone' => 'Asia/Dhaka',
-        'currency' => 'USD',
+        'currency' => 'BDT',
         'late_grace_minutes' => 15,
         'half_day_auto' => false,
         'timer_max_session_hours' => 10,
@@ -35,6 +35,12 @@ class SettingsSeeder extends Seeder
         // (`[{"name": "Development", "types": ["website_development", …]}, …]`). Edited from the
         // client page, not on Admin → Settings.
         'project_service_boxes' => ProjectServiceBoxes::DEFAULT,
+        // D7: the USD→BDT rate every USD figure in the finance reports is converted at. `auto`
+        // refreshes it from the live market rate (hq:refresh-exchange-rate); `manual` keeps the
+        // Admin's own figure. Edited on the finance report screen, not on Admin → Settings.
+        'usd_bdt_rate' => '122.00',
+        'usd_bdt_rate_mode' => 'auto',
+        'usd_bdt_rate_updated_at' => null,
     ];
 
     /**

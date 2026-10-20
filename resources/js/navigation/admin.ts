@@ -15,6 +15,7 @@ import {
     Clock,
     FolderKanban,
     Gauge,
+    Gift,
     HandCoins,
     LayoutDashboard,
     ListChecks,
@@ -193,6 +194,7 @@ export const adminNav: NavGroup[] = [
             // `activePrefix` keeps the row lit on `/payroll/{period}`, which is where the
             // month's own screen lives and where every transition posts back to.
             { label: 'Payroll', href: '/payroll', activePrefix: '/payroll', icon: HandCoins },
+            { label: 'Bonuses', href: '/payroll/bonuses', activePrefix: '/payroll/bonuses', icon: Gift },
             // Part D §14's *"salary settings per employee (base salary, allowances —
             // audit-logged)"*, which Part E puts on the Admin surface and nowhere else: the
             // Accountant fills a month's figures but does not decide what anybody earns. It

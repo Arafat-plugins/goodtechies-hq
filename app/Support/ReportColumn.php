@@ -37,6 +37,7 @@ final readonly class ReportColumn implements JsonSerializable
         private ?string $align = null,
         public array $labels = [],
         public ?string $linkKey = null,
+        public ?string $currencyKey = null,
     ) {}
 
     /**
@@ -56,7 +57,16 @@ final readonly class ReportColumn implements JsonSerializable
      */
     public function linkedBy(string $key): self
     {
-        return new self($this->key, $this->label, $this->format, $this->align, $this->labels, $key);
+        return new self($this->key, $this->label, $this->format, $this->align, $this->labels, $key, $this->currencyKey);
+    }
+
+    /**
+     * A money column whose currency is the row's own `$key` value rather than the report's —
+     * for a report with one row per currency, so no amount is ever shown in the wrong one.
+     */
+    public function withCurrencyFrom(string $key): self
+    {
+        return new self($this->key, $this->label, $this->format, $this->align, $this->labels, $this->linkKey, $key);
     }
 
     /** @return 'start'|'end' */
@@ -131,6 +141,7 @@ final readonly class ReportColumn implements JsonSerializable
             'format' => $this->format->value,
             'align' => $this->align(),
             ...($this->linkKey === null ? [] : ['link_key' => $this->linkKey]),
+            ...($this->currencyKey === null ? [] : ['currency_key' => $this->currencyKey]),
             // Absent when there are none, rather than an empty object on all fifteen of the
             // columns that are not statuses.
             ...($this->labels === [] ? [] : ['labels' => $this->labels]),

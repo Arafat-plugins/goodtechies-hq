@@ -827,39 +827,62 @@ class ReportService
      * failure the contract's rule 2 exists to prevent, and the suite asserts that a window of
      * exactly one calendar month equals the rollup for that month, string for string.
      *
-     * The footer adds the months up in **integer cents**, the same arithmetic the rollup uses
-     * internally. For a single-month window the sum is one term, so the round trip is the
-     * identity and the footer is literally the rollup's own strings.
+     * **One row per month, in BDT** (D7: the rollup's `bdt` entry, every USD figure converted
+     * at the stored rate, which a note names). The footer adds the months up in **integer
+     * cents**; for a single-month window the sum is one term, so the footer is literally the
+     * rollup's own strings. The two donuts are the BDT categories.
      */
     private function financeReport(User $viewer, ReportFilters $filters): ReportResult
     {
         $rows = [];
-        $income = 0;
-        $expenses = 0;
+        // Footer sums in BDT cents (D7: every USD figure is converted at the stored rate).
+        $sums = ['income' => 0, 'expenses' => 0];
         $incomeCategories = [];
         $expenseCategories = [];
+        $rate = null;
 
         foreach ($filters->months() as $month) {
             $rollup = $this->finance->monthlyRollup($viewer, (int) $month->year, (int) $month->month);
+            $entry = $rollup['bdt'];
+            $rate = $rollup['rate'];
 
             $rows[] = [
                 'month' => (string) $rollup['label'],
-                'income' => (string) $rollup['income']['total'],
-                'expenses' => (string) $rollup['expenses']['total'],
-                'net' => (string) $rollup['net'],
+                'income' => (string) $entry['income']['total'],
+                'expenses' => (string) $entry['expenses']['total'],
+                'net' => (string) $entry['net'],
             ];
 
-            $income += self::toCents((string) $rollup['income']['total']);
-            $expenses += self::toCents((string) $rollup['expenses']['total']);
+            $sums['income'] += self::toCents((string) $entry['income']['total']);
+            $sums['expenses'] += self::toCents((string) $entry['expenses']['total']);
 
-            foreach ($rollup['income']['categories'] as $line) {
+            foreach ($entry['income']['categories'] as $line) {
                 $incomeCategories[$line['name']] = ($incomeCategories[$line['name']] ?? 0) + self::toCents($line['total']);
             }
 
-            foreach ($rollup['expenses']['categories'] as $line) {
+            foreach ($entry['expenses']['categories'] as $line) {
                 $expenseCategories[$line['name']] = ($expenseCategories[$line['name']] ?? 0) + self::toCents($line['total']);
             }
         }
+
+        $notes = [
+            'Every figure here is the same monthly rollup the Finance screens show — this '
+            .'is a different cut of it, never a second calculation.',
+            'A category with nothing in it this month is absent rather than shown as zero.',
+        ];
+
+        if ($rate !== null) {
+            $notes[] = 'USD amounts are converted at 1 USD = '.$rate['usd_bdt'].' BDT ('
+                .($rate['mode'] === 'manual' ? 'set by admin' : 'auto').').';
+        }
+
+        $months = count($rows);
+        $totals = $months === 0 ? null : [
+            'month' => $months === 1 ? 'Month total' : 'Range total',
+            'income' => self::fromCents($sums['income']),
+            'expenses' => self::fromCents($sums['expenses']),
+            'net' => self::fromCents($sums['income'] - $sums['expenses']),
+        ];
 
         return new ReportResult(
             columns: [
@@ -869,21 +892,12 @@ class ReportService
                 ReportColumn::money('net', 'Operating result'),
             ],
             rows: $rows,
-            totals: [
-                'month' => count($rows) === 1 ? 'Month total' : 'Range total',
-                'income' => self::fromCents($income),
-                'expenses' => self::fromCents($expenses),
-                'net' => self::fromCents($income - $expenses),
-            ],
+            totals: $totals,
             charts: [
                 ReportChart::donut('Income by category', self::moneySeries($incomeCategories)),
                 ReportChart::donut('Expenses by category', self::moneySeries($expenseCategories)),
             ],
-            notes: [
-                'Every figure here is the same monthly rollup the Finance screens show — this '
-                .'is a different cut of it, never a second calculation.',
-                'A category with nothing in it this month is absent rather than shown as zero.',
-            ],
+            notes: $notes,
             empty: 'Nothing was recorded in this window.',
         );
     }

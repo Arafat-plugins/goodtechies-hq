@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\BonusStatus;
 use App\Support\Permission;
 use Database\Factories\PayrollItemFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -74,7 +75,7 @@ class PayrollItem extends Model
      *
      * @var list<string>
      */
-    public const ADJUSTABLE = ['base_salary', 'allowance', 'bonus', 'deduction', 'advance'];
+    public const ADJUSTABLE = ['base_salary', 'allowance', 'deduction', 'advance'];
 
     /**
      * @return array<string, string>
@@ -107,6 +108,21 @@ class PayrollItem extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    /**
+     * The approved and paid bonuses that make up this item's `bonus`, oldest payment first.
+     *
+     * @return Builder<EmployeeBonus>
+     */
+    public function linkedBonuses(): Builder
+    {
+        return EmployeeBonus::query()
+            ->where('employee_id', $this->employee_id)
+            ->where('payroll_period_id', $this->payroll_period_id)
+            ->whereIn('status', [BonusStatus::Approved->value, BonusStatus::Paid->value])
+            ->orderBy('payment_date')
+            ->orderBy('id');
     }
 
     /**

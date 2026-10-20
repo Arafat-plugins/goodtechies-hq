@@ -3,10 +3,15 @@
 namespace Database\Seeders;
 
 use App\Models\Employee;
+use App\Models\EmployeeBonus;
 use App\Models\EmployeeSalary;
 use App\Models\PayrollItem;
 use App\Models\PayrollPeriod;
 use App\Models\User;
+use App\Services\BonusService;
+use App\Support\BonusStatus;
+use App\Support\BonusType;
+use App\Support\Currency;
 use App\Support\PayrollStatus;
 use App\Support\RoleName;
 use App\Support\UserStatus;
@@ -101,6 +106,63 @@ class PayrollSeeder extends Seeder
 
         $this->seedSalaries($admin);
         $this->seedDraft();
+        $this->seedBonuses($admin);
+    }
+
+    /**
+     * Two demo bonuses in the draft month: an approved Eid bonus for the first line and a
+     * pending Performance bonus for the second. Written directly (no audit rows, for the reason
+     * in the class note) and then synced, so the first line's `bonus` is the Eid bonus and the
+     * pending one counts for nothing until somebody approves it.
+     */
+    private function seedBonuses(User $admin): void
+    {
+        $month = PayrollPeriod::monthKey(self::MONTH);
+        $period = PayrollPeriod::query()->forMonth($month)->first();
+
+        if ($period === null) {
+            return;
+        }
+
+        $employeeIds = PayrollItem::query()
+            ->where('payroll_period_id', $period->getKey())
+            ->orderBy('employee_id')
+            ->limit(2)
+            ->pluck('employee_id')
+            ->all();
+
+        $currency = Currency::default()->value;
+        $paymentDate = $month->copy()->addDays(14)->toDateString();
+
+        if (isset($employeeIds[0])) {
+            EmployeeBonus::query()->firstOrCreate(
+                ['employee_id' => $employeeIds[0], 'type' => BonusType::Eid->value, 'payment_date' => $paymentDate],
+                [
+                    'amount' => '500.00',
+                    'currency' => $currency,
+                    'reason' => 'Eid-ul-Adha bonus',
+                    'status' => BonusStatus::Approved,
+                    'created_by' => $admin->getKey(),
+                    'approved_by' => $admin->getKey(),
+                    'approved_at' => now(),
+                ],
+            );
+        }
+
+        if (isset($employeeIds[1])) {
+            EmployeeBonus::query()->firstOrCreate(
+                ['employee_id' => $employeeIds[1], 'type' => BonusType::Performance->value, 'payment_date' => $paymentDate],
+                [
+                    'amount' => '300.00',
+                    'currency' => $currency,
+                    'reason' => 'Shipped the client portal ahead of schedule',
+                    'status' => BonusStatus::Pending,
+                    'created_by' => $admin->getKey(),
+                ],
+            );
+        }
+
+        app(BonusService::class)->syncPeriodFor($month);
     }
 
     private function seedSalaries(User $admin): void

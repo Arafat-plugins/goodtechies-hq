@@ -2,6 +2,7 @@
 
 namespace App\Exceptions;
 
+use App\Models\PayrollPeriod;
 use App\Support\PayrollStatus;
 use RuntimeException;
 
@@ -131,5 +132,41 @@ class PayrollStateException extends RuntimeException
             $employee,
             $month,
         ));
+    }
+    /** A bonus was asked for somebody who is not an active employee. */
+    public static function bonusEmployeeNotActive(string $employee): self
+    {
+        return new self(sprintf('%s is not an active employee, so a bonus cannot be added for them.', $employee));
+    }
+
+    /** A bonus whose payroll month is already locked or paid. */
+    public static function bonusMonthClosed(PayrollPeriod $period): self
+    {
+        return new self(sprintf(
+            'The payroll for %s is %s. Choose a later payment date, or reverse the lock first.',
+            $period->month->format('F Y'),
+            strtolower($period->status->label()),
+        ));
+    }
+
+    /** A bonus change by a non-Admin in a month whose payroll the Admin already approved. */
+    public static function bonusMonthApproved(PayrollPeriod $period): self
+    {
+        return new self(sprintf(
+            'The payroll for %s is already approved. Only an Admin can change its bonuses now.',
+            $period->month->format('F Y'),
+        ));
+    }
+
+    /** Only a pending bonus can be approved. */
+    public static function bonusNotPending(string $status): self
+    {
+        return new self(sprintf('This bonus is %s. Only a pending bonus can be approved.', strtolower($status)));
+    }
+
+    /** Cancelling a bonus needs a reason. */
+    public static function bonusCancellationNeedsReason(): self
+    {
+        return new self('Give a reason for cancelling this bonus. It is kept in the audit log.');
     }
 }

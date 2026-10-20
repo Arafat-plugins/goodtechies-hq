@@ -11,7 +11,9 @@ use App\Models\Income;
 use App\Models\Project;
 use App\Services\FinanceService;
 use App\Services\SettingsService;
+use App\Support\Currency;
 use App\Support\FinanceCategoryKind;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -49,7 +51,7 @@ use Inertia\Response;
  * the ledger, and which state it is in is in the **URL** rather than in component state. So a
  * half-written income survives a refresh, the back button closes the form, and a validation
  * failure redirects back to a real address that renders the form again with the errors on it.
- * `create` and `edit` are the only two routes that carry the project list.
+ * All three carry the project list: the form's picker and the list's project filter use it.
  *
  * ## The month is in the URL, and the totals are the service's
  *
@@ -111,7 +113,7 @@ class IncomeController extends Controller
 
         return $this->backToMonth($income->date, sprintf(
             'Income of %s recorded for %s.',
-            $this->money($income->amount),
+            $this->money($income->amount, (string) $income->currency),
             $income->date->format('j F Y'),
         ));
     }
@@ -128,7 +130,7 @@ class IncomeController extends Controller
 
         return $this->backToMonth($updated->date, sprintf(
             'Income of %s saved for %s.',
-            $this->money($updated->amount),
+            $this->money($updated->amount, (string) $updated->currency),
             $updated->date->format('j F Y'),
         ));
     }
@@ -144,7 +146,7 @@ class IncomeController extends Controller
     {
         Gate::authorize('delete', $income);
 
-        $amount = $this->money($income->amount);
+        $amount = $this->money($income->amount, (string) $income->currency);
         $date = $income->date->copy();
 
         try {
@@ -171,7 +173,10 @@ class IncomeController extends Controller
         $month = $this->month($request, $editing?->date);
         $user = $request->user();
 
-        $records = Income::query()
+        $categories = $this->finance->categories(FinanceCategoryKind::Income);
+        $filters = $this->filters($request, $categories->map(fn ($category): int => (int) $category->getKey())->all());
+
+        $query = Income::query()
             // Two queries instead of one per row — every row prints its category, and most
             // print their project.
             ->with(['category', 'project'])
@@ -180,8 +185,11 @@ class IncomeController extends Controller
             // renders. There is no `sort` parameter: a header that pushed one the controller
             // ignored would be a lie in the UI (decisions 0.5-16, 0.5-19).
             ->orderByDesc('date')
-            ->orderByDesc('id')
-            ->get();
+            ->orderByDesc('id');
+
+        $this->applyFilters($query, $filters);
+
+        $records = $query->get();
 
         $rollup = $this->finance->monthlyRollup($user, $month->year, $month->month);
 
@@ -190,20 +198,23 @@ class IncomeController extends Controller
 
             'records' => IncomeResource::collection($records)->resolve($request),
 
-            // The month's figure per category and the grand total, straight from the service.
-            // Never recomputed here and never in Vue — see the class note.
-            'totals' => $rollup['income'],
+            // The month's figure per category and the total, straight from the service, one
+            // entry per currency — never added together, never recomputed here or in Vue.
+            'totals_by_currency' => array_map(
+                fn (array $entry): array => ['currency' => $entry['currency']] + $entry['income'],
+                $rollup['by_currency'],
+            ),
+
+            'filters' => $filters,
+            'currencies' => Currency::options(),
+            'defaultCurrency' => Currency::default()->value,
 
             // Only this side of the ledger. The composite foreign key makes the wrong one a
             // constraint violation, so the picker must not be able to offer it (decision 8-2).
-            'categories' => FinanceCategoryResource::collection(
-                $this->finance->categories(FinanceCategoryKind::Income)
-            )->resolve($request),
+            'categories' => FinanceCategoryResource::collection($categories)->resolve($request),
 
-            // Sent only while the form is open: a ledger that is not being written to has no
-            // use for a list of projects, and a payload that carries what the screen cannot act
-            // on is a payload that invites a control the server would refuse.
-            'projects' => $formOpen ? $this->projects() : [],
+            // Always sent: the list's project filter needs it as much as the form's picker.
+            'projects' => $this->projects(),
 
             'form' => $formOpen
                 ? [
@@ -321,9 +332,58 @@ class IncomeController extends Controller
      * agency's currency, because a ledger where two screens round differently is a ledger
      * nobody trusts (decision 8-4).
      */
-    private function money(string $amount): string
+    private function money(string $amount, string $currency): string
     {
-        return $this->formatMoney($amount, (string) $this->settings->get('currency'));
+        return $this->formatMoney($amount, $currency);
+    }
+
+    /**
+     * The list filters from the query string: `category` (an id on this side of the ledger),
+     * `currency` (BDT or USD), `project` (an id, or `none` for "not linked") and `q` (a search
+     * of the notes). Anything that does not parse is ignored rather than refused — they are view
+     * parameters, like the month.
+     *
+     * @param  list<int>  $categoryIds
+     * @return array{category: int|null, currency: string|null, project: int|string|null, q: string}
+     */
+    private function filters(Request $request, array $categoryIds): array
+    {
+        $category = filter_var($request->query('category'), FILTER_VALIDATE_INT);
+        $currency = strtoupper(trim((string) $request->query('currency', '')));
+        $project = trim((string) $request->query('project', ''));
+        $projectId = filter_var($project, FILTER_VALIDATE_INT);
+
+        return [
+            'category' => $category !== false && in_array($category, $categoryIds, true) ? $category : null,
+            'currency' => in_array($currency, Currency::values(), true) ? $currency : null,
+            'project' => $project === 'none' ? 'none' : ($projectId !== false && $projectId > 0 ? $projectId : null),
+            'q' => mb_substr(trim((string) $request->query('q', '')), 0, 100),
+        ];
+    }
+
+    /**
+     * @param  Builder<Income>  $query
+     * @param  array{category: int|null, currency: string|null, project: int|string|null, q: string}  $filters
+     */
+    private function applyFilters(Builder $query, array $filters): void
+    {
+        if ($filters['category'] !== null) {
+            $query->where('category_id', $filters['category']);
+        }
+
+        if ($filters['currency'] !== null) {
+            $query->where('currency', $filters['currency']);
+        }
+
+        if ($filters['project'] === 'none') {
+            $query->whereNull('project_id');
+        } elseif ($filters['project'] !== null) {
+            $query->where('project_id', $filters['project']);
+        }
+
+        if ($filters['q'] !== '') {
+            $query->where('notes', 'ilike', '%'.addcslashes($filters['q'], '%_\\').'%');
+        }
     }
 
     /**

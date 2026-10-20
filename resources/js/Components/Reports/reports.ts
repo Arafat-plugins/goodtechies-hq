@@ -111,6 +111,11 @@ export interface ReportColumn {
      */
     link_key?: string;
     /**
+     * `money` columns only: the name of **another key on the row** holding that row's currency,
+     * when a report has one row per currency. Absent, the page's currency is used.
+     */
+    currency_key?: string | null;
+    /**
      * `status` columns only: the tone → **the word the server prints for it**.
      *
      * `StatusBadge` carries a default word per tone and those defaults are not always the

@@ -36,6 +36,7 @@ class ExpenseResource extends JsonResource
             'id' => (int) $this->resource->getKey(),
             'date' => $this->resource->date?->toDateString(),
             'amount' => (string) $this->resource->amount,
+            'currency' => (string) $this->resource->currency,
             'category' => $this->category(),
             'project' => IncomeResource::projectPayload($this->resource->project),
             'billable' => (bool) $this->resource->billable,

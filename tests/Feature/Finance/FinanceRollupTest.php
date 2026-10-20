@@ -4,6 +4,7 @@ use App\Models\Expense;
 use App\Models\Income;
 use App\Models\User;
 use App\Services\FinanceService;
+use App\Support\Currency;
 use App\Support\FinanceCategoryKind;
 use Database\Factories\ExpenseFactory;
 use Database\Factories\IncomeFactory;
@@ -30,14 +31,19 @@ use Illuminate\Support\Facades\Schema;
 |
 */
 
-/** Part D §13's example, as a list. */
+/*
+ * Per currency since amounts in different currencies stopped being added together: the seeded
+ * September is USD (the seeded default currency) except two Maintenance receipts of 260.00 and
+ * 250.00 in BDT, which are reported in the BDT entry and never added to these.
+ */
+/** Part D §13's example, as a list — in the default currency. */
 const FINANCE_ROLLUP_SEPTEMBER = [
-    'Maintenance' => '860.00',
+    'Maintenance' => '350.00',
     'SEO' => '800.00',
     'Website' => '1250.00',
 ];
 
-const FINANCE_ROLLUP_SEPTEMBER_TOTAL = '2910.00';
+const FINANCE_ROLLUP_SEPTEMBER_TOTAL = '2400.00';
 
 beforeEach(function () {
     $this->seed();
@@ -54,12 +60,13 @@ beforeEach(function () {
 */
 
 it('rolls September 2026 up to Maintenance $860, SEO $800, Website $1,250 → $2,910', function () {
-    $rollup = $this->service->monthlyRollup($this->admin, 2026, 9);
+    $rollup = rollupIn($this->service->monthlyRollup($this->admin, 2026, 9), 'USD');
 
     $lines = collect($rollup['income']['categories'])->pluck('total', 'name')->all();
 
     expect($lines)->toBe(FINANCE_ROLLUP_SEPTEMBER)
         ->and($rollup['income']['total'])->toBe(FINANCE_ROLLUP_SEPTEMBER_TOTAL)
+        ->and(rollupIn($rollup, 'BDT')['income']['total'])->toBe('510.00')
         ->and($rollup['month'])->toBe('2026-09')
         ->and($rollup['label'])->toBe('September 2026');
 })->group('phase8', 'finance');
@@ -82,11 +89,11 @@ it('gets that number from the seeded rows, so it is true in the running applicat
 })->group('phase8', 'finance');
 
 it('reports September expenses and the operating result', function () {
-    $rollup = $this->service->monthlyRollup($this->accountant, 2026, 9);
+    $rollup = rollupIn($this->service->monthlyRollup($this->accountant, 2026, 9), 'USD');
 
     expect($rollup['expenses']['total'])->toBe('2110.00')
         // Part D §13's "operating result": what came in less what went out.
-        ->and($rollup['net'])->toBe('800.00');
+        ->and($rollup['net'])->toBe('290.00');
 })->group('phase8', 'finance');
 
 /*
@@ -111,10 +118,10 @@ it('follows an edit immediately, because it is a query and not a cache', functio
 
     $this->service->updateIncome($this->accountant, $income, ['amount' => '1000.00']);
 
-    $rollup = $this->service->monthlyRollup($this->admin, 2026, 9);
+    $rollup = rollupIn($this->service->monthlyRollup($this->admin, 2026, 9), 'USD');
 
     expect(collect($rollup['income']['categories'])->firstWhere('name', 'Website')['total'])->toBe('1000.00')
-        ->and($rollup['income']['total'])->toBe('2660.00');
+        ->and($rollup['income']['total'])->toBe('2150.00');
 })->group('phase8', 'finance');
 
 it('drops a deleted record out of the month at once', function () {
@@ -125,17 +132,17 @@ it('drops a deleted record out of the month at once', function () {
 
     $this->service->deleteIncome($this->accountant, $income);
 
-    $rollup = $this->service->monthlyRollup($this->admin, 2026, 9);
+    $rollup = rollupIn($this->service->monthlyRollup($this->admin, 2026, 9), 'USD');
 
     expect(collect($rollup['income']['categories'])->pluck('name')->all())->toBe(['Maintenance', 'SEO'])
-        ->and($rollup['income']['total'])->toBe('1660.00');
+        ->and($rollup['income']['total'])->toBe('1150.00');
 })->group('phase8', 'finance');
 
 it('leaves a category with no rows this month out of the list rather than showing a zero', function () {
     // "Other" is seeded and empty. The rollup is a report of what happened; inventing zero rows
     // to make a layout easier is how a report starts lying. A screen that wants every category
     // asks for the categories.
-    $names = collect($this->service->monthlyRollup($this->admin, 2026, 9)['income']['categories'])->pluck('name');
+    $names = collect(rollupIn($this->service->monthlyRollup($this->admin, 2026, 9))['income']['categories'])->pluck('name');
 
     expect($names)->not->toContain('Other')
         ->and($this->service->categories(FinanceCategoryKind::Income)->pluck('name'))->toContain('Other');
@@ -146,14 +153,14 @@ it('counts a row dated on the first and on the last day of the month, and nothin
     $category = IncomeFactory::category(FinanceCategoryKind::Income, 'Website');
 
     foreach (['2026-10-01', '2026-10-31'] as $date) {
-        Income::factory()->recordedBy($this->accountant)->of('100.00')->on($date)->create(['category_id' => $category]);
+        Income::factory()->recordedBy($this->accountant)->of('100.00')->on($date)->create(['category_id' => $category, 'currency' => Currency::default()->value]);
     }
 
     foreach (['2026-09-30', '2026-11-01'] as $date) {
-        Income::factory()->recordedBy($this->accountant)->of('999.00')->on($date)->create(['category_id' => $category]);
+        Income::factory()->recordedBy($this->accountant)->of('999.00')->on($date)->create(['category_id' => $category, 'currency' => Currency::default()->value]);
     }
 
-    expect($this->service->monthlyRollup($this->admin, 2026, 10)['income']['total'])->toBe('200.00');
+    expect(rollupIn($this->service->monthlyRollup($this->admin, 2026, 10))['income']['total'])->toBe('200.00');
 })->group('phase8', 'finance');
 
 it('adds cents exactly, where a float would drift', function () {
@@ -165,17 +172,18 @@ it('adds cents exactly, where a float would drift', function () {
     for ($i = 0; $i < 10; $i++) {
         Expense::factory()->recordedBy($this->accountant)->of('0.10')->on('2026-11-0'.($i % 9 + 1))->create([
             'category_id' => $category,
+            'currency' => Currency::default()->value,
         ]);
     }
 
-    $rollup = $this->service->monthlyRollup($this->admin, 2026, 11);
+    $rollup = rollupIn($this->service->monthlyRollup($this->admin, 2026, 11));
 
     expect($rollup['expenses']['total'])->toBe('1.00')
         ->and($rollup['net'])->toBe('-1.00');
 })->group('phase8', 'finance');
 
 it('reports an empty month as zeroes rather than failing', function () {
-    $rollup = $this->service->monthlyRollup($this->admin, 2027, 4);
+    $rollup = rollupIn($this->service->monthlyRollup($this->admin, 2027, 4));
 
     expect($rollup['income']['categories'])->toBe([])
         ->and($rollup['income']['total'])->toBe('0.00')

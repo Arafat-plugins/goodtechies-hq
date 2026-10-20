@@ -126,6 +126,16 @@ class Project extends Model
     }
 
     /**
+     * Hand-recorded project financials (contract value, earned, received), newest first.
+     *
+     * @return HasMany<ProjectEarningEntry, $this>
+     */
+    public function earningEntries(): HasMany
+    {
+        return $this->hasMany(ProjectEarningEntry::class)->orderByDesc('date')->orderByDesc('id');
+    }
+
+    /**
      * @param  Builder<Project>  $query
      * @return Builder<Project>
      */

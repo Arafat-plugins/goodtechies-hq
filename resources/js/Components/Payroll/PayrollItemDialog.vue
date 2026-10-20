@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useForm } from '@inertiajs/vue3';
+import { Link, useForm } from '@inertiajs/vue3';
 import { computed, useId, watch } from 'vue';
 import type { PayrollItem, PayrollLeaveBreakdown } from '@/Components/Payroll/payroll';
 import {
@@ -87,6 +87,23 @@ const form = useForm<Record<string, string>>({
 const adjustable = computed(() => payrollAdjustableFor(props.item ? [props.item] : []));
 
 const employeeName = computed(() => props.item?.employee?.name ?? 'this line');
+
+/** Bonuses page, filtered to this employee and this line's month. */
+const manageBonusesHref = computed(() => {
+    const item = props.item;
+    if (!item) {
+        return payrollRoutes.bonuses.index();
+    }
+    const params = new URLSearchParams();
+    if (item.employee) {
+        params.set('employee', String(item.employee.id));
+    }
+    if (item.period?.month) {
+        params.set('month', item.period.month.slice(0, 7));
+    }
+
+    return `${payrollRoutes.bonuses.index()}?${params.toString()}`;
+});
 
 /** May the Admin write the personal note? The server answered; this only renders it. */
 const canAnnotate = computed(() => props.item !== null && props.item.permissions.can_annotate);
@@ -192,7 +209,8 @@ watch(
                 <DialogTitle>{{ employeeName }} — {{ monthLabel }}</DialogTitle>
                 <DialogDescription>
                     <template v-if="figuresEditable && item?.permissions.can_update">
-                        Base, bonus, deduction and advance are yours to set. Leave impact and the net
+                        Base, deduction and advance are yours to set. Bonuses come from approved bonus records.
+                        Leave impact and the net
                         are not: one comes from approved unpaid leave when Calculate runs, the other is worked
                         out by the database from the figures above it.
                     </template>
@@ -247,6 +265,31 @@ watch(
                         </tr>
                     </tbody>
                 </table>
+
+                <!--
+                    Bonus is read-only here: the sum of this line's approved bonus records,
+                    each listed underneath. They are managed on the Bonuses page.
+                -->
+                <div class="flex min-w-0 flex-col gap-2 rounded-md border border-border p-4">
+                    <div class="flex items-baseline justify-between gap-3">
+                        <span class="text-sm text-muted-foreground">Bonus</span>
+                        <span class="text-sm tabular-nums">{{ formatMoney(item.bonus, currency) }}</span>
+                    </div>
+                    <ul v-if="item.bonuses?.length" class="flex flex-col gap-1">
+                        <li
+                            v-for="bonus in item.bonuses"
+                            :key="bonus.id"
+                            class="flex items-baseline justify-between gap-3 text-xs text-muted-foreground"
+                        >
+                            <span class="min-w-0 truncate">{{ bonus.display_name }}</span>
+                            <span class="tabular-nums">{{ formatMoney(bonus.amount, currency) }}</span>
+                        </li>
+                    </ul>
+                    <p v-else class="text-xs text-muted-foreground">No bonus records on this line.</p>
+                    <Link :href="manageBonusesHref" class="text-xs font-medium text-primary underline-offset-4 hover:underline">
+                        Manage bonuses
+                    </Link>
+                </div>
 
                 <!--
                     The two read-only figures, and the explanation of the first one. A deduction

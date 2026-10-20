@@ -133,6 +133,7 @@ function financeLedgerIncomeBody(array $overrides = []): array
     return array_merge([
         'category_id' => financeLedgerIncomeCategory('SEO'),
         'amount' => '400.00',
+        'currency' => 'USD',
         'date' => '2026-09-21',
         'notes' => 'A test payment',
         'project_id' => null,
@@ -199,7 +200,7 @@ it('renders the ledger for the admin and for the accountant, from the one shared
             ->where('permissions.can_create', true)
             // The form is a route, not a flag: it is shut on the index.
             ->where('form', null)
-            ->has('totals.categories')
+            ->has('totals_by_currency.0.categories')
             ->has('categories'));
 })->with(['admin', 'accountant'])->group('phase8', 'finance');
 
@@ -381,7 +382,8 @@ it('falls back to this month rather than throwing on an unparseable one', functi
 })->group('phase8', 'finance');
 
 it('prints the totals FinanceService::monthlyRollup computes, and does not add up its own', function () {
-    $rollup = $this->service->monthlyRollup($this->accountant, 2026, 9);
+    // The seeded September is kept in USD (FinanceSeeder); BDT is the default currency (D7).
+    $rollup = rollupIn($this->service->monthlyRollup($this->accountant, 2026, 9), 'USD');
 
     $props = $this->actingAs($this->accountant)
         ->get('/finance/income?month='.FINANCE_LEDGER_MONTH)
@@ -391,20 +393,25 @@ it('prints the totals FinanceService::monthlyRollup computes, and does not add u
     // Asserted against the SERVICE, not against a literal: the point is that there is one sum
     // in this application and the ledger reads it, not that the ledger happens to agree with a
     // number somebody typed into a test (decision 8-10).
-    expect($props['totals'])->toBe($rollup['income'])
-        ->and($props['totals']['total'])->toBe('2910.00');
+    // The default currency's entry comes first; currencies are never added together.
+    $usd = collect($props['totals_by_currency'])->firstWhere('currency', 'USD');
+
+    expect($props['totals_by_currency'][0]['currency'])->toBe('BDT')
+        ->and($usd)->toBe(['currency' => $rollup['currency']] + $rollup['income'])
+        ->and($usd['total'])->toBe('2400.00')
+        ->and($props)->not->toHaveKey('totals');
 })->group('phase8', 'finance');
 
 it('gives the admin and the accountant the same totals, because it is the same ledger', function () {
     $asAdmin = $this->actingAs($this->admin)
         ->get('/finance/income?month='.FINANCE_LEDGER_MONTH)
         ->assertOk()
-        ->viewData('page')['props']['totals'];
+        ->viewData('page')['props']['totals_by_currency'];
 
     $asAccountant = $this->actingAs($this->accountant)
         ->get('/finance/income?month='.FINANCE_LEDGER_MONTH)
         ->assertOk()
-        ->viewData('page')['props']['totals'];
+        ->viewData('page')['props']['totals_by_currency'];
 
     expect($asAdmin)->toBe($asAccountant);
 })->group('phase8', 'finance');

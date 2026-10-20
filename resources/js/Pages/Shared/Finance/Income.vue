@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus, Tags } from '@lucide/vue';
-import { computed, ref, watch } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import type {
+    CurrencyOption,
     FinanceCategory,
     FinanceMonth,
     FinanceProject,
     IncomeRecord,
+    LedgerFilters,
     LedgerRecord,
-    RollupSide,
+    RollupCurrencySide,
 } from '@/Components/Finance/finance';
 import { financeRoutes } from '@/Components/Finance/finance';
 import FinanceMonthNav from '@/Components/Finance/FinanceMonthNav.vue';
@@ -19,6 +21,9 @@ import LedgerTotals from '@/Components/Finance/LedgerTotals.vue';
 import PageActionsHost from '@/Components/PageActionsHost.vue';
 import PageShell from '@/Components/PageShell.vue';
 import { Button } from '@/Components/ui/button';
+import { Input } from '@/Components/ui/input';
+import { Label } from '@/Components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { useMenuDialog } from '@/lib/menuFocus';
@@ -39,8 +44,8 @@ import type { SharedProps } from '@/types';
  * back button steps between months and a bookmark opens the month it was made in. Same shape as
  * the attendance month and the meetings calendar.
  *
- * **Every total on this page is the server's.** `totals` is one half of
- * `FinanceService::monthlyRollup()` — two SQL sums, computed and never stored (decision 8-10) —
+ * **Every total on this page is the server's.** `totals_by_currency` is one half
+ * of `FinanceService::monthlyRollup()` — two SQL sums, computed and never stored (decision 8-10) —
  * and nothing in this file adds a column up. A second sum would be a second statement of a fact
  * about money, and the day it disagreed with the dashboard's neither would be provably right.
  *
@@ -64,14 +69,21 @@ defineOptions({
 const props = defineProps<{
     month: FinanceMonth;
     records: IncomeRecord[];
-    totals: RollupSide;
     categories: FinanceCategory[];
-    /** Sent only while the form is open — the ledger itself has no use for a project list. */
+    /** The form's picker and the list's project filter. */
     projects: FinanceProject[];
     form: { mode: 'create' | 'edit'; record: IncomeRecord | null } | null;
     currency: string;
     today: string;
     permissions: { can_create: boolean };
+    /** The list filters as the server applied them (`category`, `currency`, `project`, `q`). */
+    filters: LedgerFilters;
+    /** The currencies a record may be kept in. */
+    currencies: CurrencyOption[];
+    /** The currency a new record starts in. */
+    defaultCurrency: string;
+    /** This side's totals, one entry per currency. Never added together. */
+    totals_by_currency: RollupCurrencySide[];
 }>();
 
 /** The id the Record control carries, so `returnFocus` can find it without a template ref. */
@@ -160,6 +172,100 @@ function confirmRemove(): void {
     });
 }
 
+/* --------------------------------------------------------------------- filters */
+
+/** reka's Select has no empty value, so "no filter" is a sentinel rather than `''`. */
+const ALL = 'all';
+
+const searchId = useId();
+const categoryFilterId = useId();
+const projectFilterId = useId();
+
+/** The active filters as query parameters, empty ones left out. */
+function filterQuery(overrides: Partial<LedgerFilters> = {}): Record<string, string> {
+    const filters = { ...props.filters, ...overrides };
+    const query: Record<string, string> = {};
+
+    if (filters.category !== null) {
+        query.category = String(filters.category);
+    }
+
+    if (filters.currency) {
+        query.currency = filters.currency;
+    }
+
+    if (filters.project !== null) {
+        query.project = String(filters.project);
+    }
+
+    if (filters.q.trim() !== '') {
+        query.q = filters.q.trim();
+    }
+
+    return query;
+}
+
+const hasFilters = computed(() => Object.keys(filterQuery()).length > 0);
+
+function applyFilters(overrides: Partial<LedgerFilters>): void {
+    router.get(
+        window.location.pathname,
+        { month: props.month.value, ...filterQuery(overrides) },
+        { preserveState: true, preserveScroll: true, replace: true },
+    );
+}
+
+/** A month link that keeps the active filters. */
+function monthHref(value: string): string {
+    const url = financeRoutes.income.index(value);
+    const query = new URLSearchParams(filterQuery()).toString();
+
+    return query === '' ? url : `${url}${url.includes('?') ? '&' : '?'}${query}`;
+}
+
+const search = ref(props.filters.q);
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+function onSearch(value: string | number): void {
+    search.value = String(value);
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => applyFilters({ q: search.value }), 300);
+}
+
+watch(
+    () => props.filters.q,
+    (value) => {
+        if (value !== search.value.trim()) {
+            search.value = value;
+        }
+    },
+);
+
+const categoryFilter = computed({
+    get: () => (props.filters.category === null ? ALL : String(props.filters.category)),
+    set: (value: string) => applyFilters({ category: value === ALL ? null : Number(value) }),
+});
+
+const projectFilter = computed({
+    get: () => (props.filters.project === null ? ALL : String(props.filters.project)),
+    set: (value: string) =>
+        applyFilters({ project: value === ALL ? null : value === 'none' ? 'none' : Number(value) }),
+});
+
+function clearFilters(): void {
+    clearTimeout(searchTimer);
+    search.value = '';
+    router.get(
+        window.location.pathname,
+        { month: props.month.value },
+        { preserveState: true, preserveScroll: true, replace: true },
+    );
+}
+
+/** "Buffalo Modular — SEO · buffalomodular.com". */
+function projectLabel(project: FinanceProject): string {
+    return project.domain ? `${project.name} · ${project.domain}` : project.name;
+}
 </script>
 
 <template>
@@ -188,7 +294,7 @@ function confirmRemove(): void {
         <div class="flex min-w-0 flex-col gap-4">
             <!-- Polish 013: month, the table's controls and the page's actions on one row. -->
             <div class="flex min-w-0 flex-wrap items-center gap-3">
-                <FinanceMonthNav :month="month" :href="(value) => financeRoutes.income.index(value)" />
+                <FinanceMonthNav :month="month" :href="monthHref" />
                 <PageActionsHost />
             </div>
 
@@ -200,11 +306,59 @@ function confirmRemove(): void {
                 columns squeezed into two thirds of 1280 px did exactly that. Totals under the
                 rows is also how a ledger has always been laid out.
             -->
+            <div class="flex flex-wrap items-end gap-2">
+                <div class="flex min-w-0 flex-col gap-1">
+                    <Label :for="searchId" class="text-xs text-muted-foreground">Search</Label>
+                    <Input
+                        :id="searchId"
+                        :model-value="search"
+                        type="search"
+                        placeholder="Search notes"
+                        aria-label="Search notes"
+                        class="w-full sm:w-56"
+                        @update:model-value="onSearch"
+                    />
+                </div>
+
+                <div class="flex min-w-0 flex-col gap-1">
+                    <Label :for="categoryFilterId" class="text-xs text-muted-foreground">Category</Label>
+                    <Select v-model="categoryFilter">
+                        <SelectTrigger :id="categoryFilterId" class="w-full sm:w-44">
+                            <SelectValue placeholder="All categories" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem :value="ALL">All categories</SelectItem>
+                            <SelectItem v-for="category in categories" :key="category.id" :value="String(category.id)">
+                                {{ category.name }}
+                            </SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+
+                <div class="flex min-w-0 flex-col gap-1">
+                    <Label :for="projectFilterId" class="text-xs text-muted-foreground">Project</Label>
+                    <Select v-model="projectFilter">
+                        <SelectTrigger :id="projectFilterId" class="w-full sm:w-56">
+                            <SelectValue placeholder="All projects" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem :value="ALL">All projects</SelectItem>
+                            <SelectItem value="none">Not linked to a project</SelectItem>
+                            <SelectItem v-for="project in projects" :key="project.id" :value="String(project.id)">
+                                {{ projectLabel(project) }}
+                            </SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+
+                <Button v-if="hasFilters" variant="ghost" size="sm" @click="clearFilters">Clear filters</Button>
+            </div>
+
             <div class="min-w-0">
                 <LedgerTable
                     kind="income"
                     :records="records"
-                    :currency="currency"
+                    :filtered="hasFilters"
                     :month-label="month.label"
                     @edit="edit"
                     @remove="askRemove"
@@ -224,8 +378,7 @@ function confirmRemove(): void {
                 <LedgerTotals
                     title="This month, by category"
                     :caption="`Income by category for ${month.label}`"
-                    :side="totals"
-                    :currency="currency"
+                    :sides="totals_by_currency"
                     :total-label="'Total income'"
                     :empty-text="`No income is recorded in ${month.label}, so there is nothing to total.`"
                 />
@@ -238,7 +391,8 @@ function confirmRemove(): void {
             :record="form?.record ?? null"
             :categories="categories"
             :projects="projects"
-            :currency="currency"
+            :currencies="currencies"
+            :default-currency="defaultCurrency"
             :today="today"
             @close="closeForm"
         />
@@ -246,7 +400,6 @@ function confirmRemove(): void {
         <LedgerDeleteDialog
             kind="income"
             :record="pending"
-            :currency="currency"
             :deleting="deleting"
             @cancel="cancelRemove"
             @confirm="confirmRemove"

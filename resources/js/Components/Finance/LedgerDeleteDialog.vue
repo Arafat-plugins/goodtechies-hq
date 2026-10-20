@@ -40,7 +40,6 @@ const props = defineProps<{
     kind: FinanceCategoryKind;
     /** The row being deleted, or null when the dialog is closed. */
     record: LedgerRecord | null;
-    currency: string;
     /** True while the DELETE is in flight, so the buttons cannot be pressed twice. */
     deleting: boolean;
 }>();
@@ -50,7 +49,7 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
 const noun = computed(() => ledgerNoun(props.kind));
 
 const title = computed(() =>
-    props.record ? ledgerDeletePrompt(props.kind, props.record, props.currency) : `Delete this ${noun.value}?`,
+    props.record ? ledgerDeletePrompt(props.kind, props.record) : `Delete this ${noun.value}?`,
 );
 
 /** The month this row counts towards, from its own date. */

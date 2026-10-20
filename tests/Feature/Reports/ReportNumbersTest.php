@@ -336,17 +336,18 @@ it('adds up September\'s seeded payroll draft as decimal strings', function () {
 
     expect($result->rows)->toHaveCount(1);
 
-    // PayrollSeeder: 2200 + 2000 + 1200 + 900 + 1100 = 7400, one line per active employee.
+    // PayrollSeeder: 2200 + 2000 + 1200 + 900 + 1100 = 7400, one line per active employee,
+    // plus the seeded 500 approved Eid bonus = 7900.
     expect($result->rows[0])->toBe([
         'month' => 'September 2026',
         'status' => 'Draft',
         'employees' => 5,
-        'gross' => '7400.00',
+        'gross' => '7900.00',
         'deductions' => '0.00',
-        'net' => '7400.00',
+        'net' => '7900.00',
     ]);
 
-    expect($result->totals['net'])->toBe('7400.00');
+    expect($result->totals['net'])->toBe('7900.00');
 
     // Money is a STRING all the way out — never a float, never rounded in PHP.
     expect($result->rows[0]['net'])->toBeString();

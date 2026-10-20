@@ -101,6 +101,8 @@ const cellSpecs = computed(() =>
         // Not a column itself: the href rides on the row under its own key and is never
         // printed as a cell. See `ReportColumn::linkedBy()`.
         linkKey: column.link_key,
+        // A money column on a report with one row per currency: the row says its currency.
+        currencyKey: column.currency_key ?? null,
         slot: `cell-${column.key}` as const,
     })),
 );
@@ -117,6 +119,20 @@ const cellSpecs = computed(() =>
  * Every figure here is the server's `SUM()` over the same query that produced the rows.
  * Nothing on this page adds two values together.
  */
+/**
+ * The currency a money cell is shown in: the row's own value under the column's `currency_key`
+ * when it has one, else the page's. A report with one row per currency never wears one symbol.
+ */
+function currencyOf(currencyKey: string | null, cells: unknown): string {
+    if (currencyKey === null || cells === null || typeof cells !== 'object') {
+        return props.currency;
+    }
+
+    const value = (cells as Record<string, unknown>)[currencyKey];
+
+    return typeof value === 'string' && value !== '' ? value : props.currency;
+}
+
 /**
  * A linked cell's href, read off the row under the column's `link_key`.
  *
@@ -160,6 +176,7 @@ const totals = computed(() => {
             format: column.format,
             labels: column.labels,
             value: footer[column.key] ?? null,
+            currency: currencyOf(column.currency_key ?? null, footer),
         }));
 });
 </script>
@@ -186,7 +203,7 @@ const totals = computed(() => {
                 <ReportCell
                     :value="(value as ReportCellValue)"
                     :format="spec.format"
-                    :currency="currency"
+                    :currency="currencyOf(spec.currencyKey, row.cells)"
                     :labels="spec.labels"
                     :href="hrefFor(spec.linkKey, row)"
                 />
@@ -205,7 +222,7 @@ const totals = computed(() => {
                         <ReportCell
                             :value="total.value"
                             :format="total.format"
-                            :currency="currency"
+                            :currency="total.currency"
                             :labels="total.labels"
                         />
                     </dd>

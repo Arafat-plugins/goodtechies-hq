@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Finance;
 
+use App\Support\Currency;
 use App\Support\FinanceCategoryKind;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -60,6 +61,8 @@ class StoreIncomeRequest extends FormRequest
 
             'amount' => ['required', 'numeric', 'decimal:0,2', 'gt:0', 'max:'.self::MAX_AMOUNT],
 
+            'currency' => ['required', 'string', Rule::in(Currency::values())],
+
             'date' => ['required', 'date_format:Y-m-d'],
 
             'notes' => ['nullable', 'string', 'max:'.self::MAX_NOTES],
@@ -84,6 +87,7 @@ class StoreIncomeRequest extends FormRequest
             'category_id.exists' => 'Choose an income category. An expense category cannot be used on an income record.',
             'amount.gt' => 'An income needs an amount greater than zero.',
             'amount.decimal' => 'An amount has at most two decimal places.',
+            'currency.in' => 'Choose BDT or USD.',
         ];
     }
 
@@ -94,7 +98,7 @@ class StoreIncomeRequest extends FormRequest
      * edit form cannot reassign who entered a figure. Neither is `category_kind` — no PHP in
      * this application writes that column.
      *
-     * @return array{category_id: int, project_id: int|null, amount: string, date: string, notes: string|null}
+     * @return array{category_id: int, project_id: int|null, amount: string, currency: string, date: string, notes: string|null}
      */
     public function incomeAttributes(): array
     {
@@ -108,6 +112,7 @@ class StoreIncomeRequest extends FormRequest
             // A string, never a float — the column is `decimal(12, 2)` and binary float cannot
             // hold 0.10 (decision 8-4).
             'amount' => (string) $validated['amount'],
+            'currency' => (string) $validated['currency'],
             'date' => (string) $validated['date'],
             'notes' => $notes === '' ? null : $notes,
         ];

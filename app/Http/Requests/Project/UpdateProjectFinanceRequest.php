@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Project;
 
 use App\Support\BillingFrequency;
+use App\Support\Currency;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -58,7 +59,7 @@ class UpdateProjectFinanceRequest extends FormRequest
             ],
             $prefix.'contract_terms' => ['nullable', 'string', 'max:5000'],
             $prefix.'profitability_snapshot' => ['nullable', 'numeric'],
-            $prefix.'auto_income' => ['sometimes', 'boolean'],
+            $prefix.'currency' => ['sometimes', 'required', 'string', Rule::in(Currency::values())],
         ];
     }
 
@@ -71,6 +72,7 @@ class UpdateProjectFinanceRequest extends FormRequest
     {
         return [
             $prefix.'hourly_rate.required_if' => 'Enter the hourly rate.',
+            $prefix.'currency.in' => 'Choose BDT or USD.',
         ];
     }
 }

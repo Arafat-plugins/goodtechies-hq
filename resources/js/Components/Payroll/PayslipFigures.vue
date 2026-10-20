@@ -42,10 +42,28 @@ interface FigureLine {
 
 // Polish 002: allowance is hidden unless an older line still carries one, so a payslip's
 // figures always add up to its net.
+// One line per bonus record when the item carries them; the single Bonus line otherwise
+// (an older payload, or a figure with no records behind it).
+const bonusLines = computed<FigureLine[]>(() => {
+    const records = props.payslip.bonuses ?? [];
+
+    if (records.length > 0) {
+        return records.map((bonus) => ({
+            key: `bonus-${bonus.id}`,
+            label: bonus.display_name,
+            amount: bonus.amount,
+            sign: '+' as const,
+            direction: 'Added' as const,
+        }));
+    }
+
+    return [{ key: 'bonus', label: 'Bonus', amount: props.payslip.bonus, sign: '+', direction: 'Added' }];
+});
+
 const lines = computed<FigureLine[]>(() => ([
     { key: 'base_salary', label: 'Base salary', amount: props.payslip.base_salary, sign: '+', direction: 'Added' },
     { key: 'allowance', label: 'Allowance', amount: props.payslip.allowance, sign: '+', direction: 'Added' },
-    { key: 'bonus', label: 'Bonus', amount: props.payslip.bonus, sign: '+', direction: 'Added' },
+    ...bonusLines.value,
     { key: 'deduction', label: 'Deduction', amount: props.payslip.deduction, sign: '−', direction: 'Deducted' },
     { key: 'advance', label: 'Advance', amount: props.payslip.advance, sign: '−', direction: 'Deducted' },
     { key: 'leave_impact', label: 'Leave impact', amount: props.payslip.leave_impact, sign: '−', direction: 'Deducted' },

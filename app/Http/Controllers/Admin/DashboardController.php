@@ -203,18 +203,21 @@ class DashboardController extends Controller
         $rollup = $this->finance->monthlyRollup($user, (int) $asOf->year, (int) $asOf->month);
         $payroll = $this->payrollThisMonth($user, $asOf);
 
+        // The card is in BDT: every USD figure converted at the stored rate (D7).
+        $main = $rollup['bdt'];
+
         return [
             'month' => $rollup['month'],
             'label' => $rollup['label'],
-            'income' => $rollup['income']['total'],
-            'expense' => $rollup['expenses']['total'],
+            'income' => $main['income']['total'],
+            'expense' => $main['expenses']['total'],
             // Phase 9. See the docblock: a real total, or null when the month has no period
             // yet — never a zero, which would read as "we paid nobody".
             'payroll' => $payroll['total'],
             'payroll_note' => $payroll['note'],
             'payroll_href' => $payroll['href'],
-            'operating_result' => $rollup['net'],
-            'currency' => (string) $this->settings->get('currency'),
+            'operating_result' => $main['net'],
+            'currency' => 'BDT',
             'href' => '/finance?month='.$rollup['month'],
         ];
     }

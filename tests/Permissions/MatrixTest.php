@@ -5,6 +5,7 @@ use App\Models\Client;
 use App\Models\Conversation;
 use App\Models\Device;
 use App\Models\Employee;
+use App\Models\EmployeeBonus;
 use App\Models\EmployeeSalary;
 use App\Models\Expense;
 use App\Models\File;
@@ -20,6 +21,7 @@ use App\Models\PayrollItem;
 use App\Models\PayrollPeriod;
 use App\Models\Permission;
 use App\Models\Project;
+use App\Models\ProjectEarningEntry;
 use App\Models\RecurringExpense;
 use App\Models\RecurringTask;
 use App\Models\Tag;
@@ -214,6 +216,8 @@ function matrixParameters(): array
         // A repeating expense made here, because nothing seeds one — and the DELETE row
         // consumes it, so it must not be anything another row or test relies on.
         '{recurringExpense}' => matrixRecurringExpenseId(),
+        // A project earning entry on the matrix's project, made here; the DELETE row consumes it.
+        '{entry}' => matrixProjectEarningEntryId(),
         // An IN-USE category, deliberately: the delete row against it asserts the refusal
         // rather than consuming the list out from under the two rows above.
         '{category}' => (string) FinanceCategory::query()
@@ -233,6 +237,10 @@ function matrixParameters(): array
             ->whereHas('employee.user', fn ($query) => $query->where('email', 'yaseen@goodtechies.test'))
             ->orderBy('id')
             ->firstOrFail()->id,
+
+        // The seeded PENDING Performance bonus (PayrollSeeder), so the approve row has
+        // something to approve.
+        '{bonus}' => (string) EmployeeBonus::query()->where('status', 'pending')->orderBy('id')->firstOrFail()->id,
 
         // Polish 002: one of Tapu's salary rows, consumed by the ADMIN cell of the delete row.
         '{salary}' => (string) EmployeeSalary::query()
@@ -478,6 +486,24 @@ function matrixRecurringExpenseId(): string
             'occurrences' => 0,
             'active' => true,
             'created_by' => User::where('email', 'shahadat@goodtechies.test')->firstOrFail()->id,
+        ])->id;
+    }
+
+    return $id;
+}
+
+function matrixProjectEarningEntryId(): string
+{
+    static $id = null;
+
+    if ($id === null || ! ProjectEarningEntry::whereKey($id)->exists()) {
+        $id = (string) ProjectEarningEntry::query()->create([
+            'project_id' => Project::where('name', 'Buffalo Modular — SEO')->firstOrFail()->id,
+            'kind' => 'received',
+            'amount' => '100.00',
+            'currency' => 'USD',
+            'date' => '2026-09-15',
+            'recorded_by' => User::where('email', 'shahadat@goodtechies.test')->firstOrFail()->id,
         ])->id;
     }
 
@@ -816,6 +842,11 @@ function permissionMatrix(): array
         ['GET', 'admin/projects/{project}/edit', $admin],
         ['PUT', 'admin/projects/{project}', $adminAction],
         ['PUT', 'admin/projects/{project}/finance', $adminAction],
+        // Project earnings entries: body-less writes stop at the validation redirect.
+        ['POST', 'admin/projects/{project}/earnings', $adminAction],
+        ['PUT', 'admin/projects/{project}/earnings/{entry}', $adminAction],
+        // The ADMIN cell deletes the entry, so every cell after it meets a row that is gone: 404.
+        ['DELETE', 'admin/projects/{project}/earnings/{entry}', ['guest' => '302 /login', 'ADMIN' => 302, 'MANAGER' => 404, 'EMPLOYEE' => 404, 'REMOTE_EMPLOYEE' => 404, 'ACCOUNTANT' => 404]],
         ['PUT', 'admin/projects/{project}/members', $adminAction],
         ['POST', 'admin/projects/{project}/status', $adminAction],
         ['POST', 'admin/projects/{project}/archive', $adminAction],
@@ -1281,6 +1312,8 @@ function permissionMatrix(): array
         // directly, with its audit row, in tests/Feature/Finance/.
         ['GET', 'finance', $finance(200)],
         ['GET', 'finance/report', $finance(200)],
+        // D7: the USD→BDT rate, behind `can:finance.manage` (ADMIN and ACCOUNTANT hold it).
+        ['PUT', 'finance/exchange-rate', $finance(302)],
         ['GET', 'finance/income', $finance(200)],
         ['GET', 'finance/income/create', $finance(200)],
         ['GET', 'finance/income/{income}/edit', $finance(200)],
@@ -1295,6 +1328,10 @@ function permissionMatrix(): array
         ['PUT', 'finance/expenses/{expense}', $finance(302)],
         ['POST', 'finance/recurring-expenses', $finance(302)],
         ['PUT', 'finance/recurring-expenses/{recurringExpense}', $finance(302)],
+        // The matrix's template is not due yet, so Record and Skip answer with an error flash
+        // and record nothing — proof they got past the gate.
+        ['POST', 'finance/recurring-expenses/{recurringExpense}/record', $finance(302)],
+        ['POST', 'finance/recurring-expenses/{recurringExpense}/skip', $finance(302)],
         // The two category writes are body-less, so they stop at the validation redirect and
         // the ACCOUNTANT cell reads 302 — **which is not the claim that they may write the
         // list.** `FinanceCategoryPolicy` refuses them and the controller asks it per act; that
@@ -1358,6 +1395,15 @@ function permissionMatrix(): array
         // creation — and putting it here keeps it from making a second period the rows above
         // would then be ambiguous about.
         ['POST', 'payroll', $payroll(302)],
+
+        // Bonuses. The same `payroll.draft` gate: ADMIN and ACCOUNTANT list, create, edit and
+        // cancel (an empty body is a 302 back with errors). Approving is `payroll.approve`,
+        // so the ACCOUNTANT is 403 there; the ADMIN approves the seeded pending bonus.
+        ['GET', 'payroll/bonuses', $payroll(200)],
+        ['POST', 'payroll/bonuses', $payroll(302)],
+        ['PUT', 'payroll/bonuses/{bonus}', $payroll(302)],
+        ['POST', 'payroll/bonuses/{bonus}/approve', $payrollAdmin(302)],
+        ['POST', 'payroll/bonuses/{bonus}/cancel', $payroll(302)],
 
         // Accountant surface
         ['GET', 'accountant/dashboard', $accountant],

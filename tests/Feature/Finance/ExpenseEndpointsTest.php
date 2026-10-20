@@ -73,6 +73,7 @@ function financeLedgerExpenseBody(array $overrides = []): array
     return array_merge([
         'category_id' => financeLedgerExpenseCategory('Office'),
         'amount' => '75.00',
+        'currency' => 'USD',
         'date' => '2026-09-22',
         'notes' => 'A test payment out',
     ], $overrides);
@@ -279,7 +280,8 @@ it('shows only the expenses dated inside the month in the URL', function () {
 })->group('phase8', 'finance');
 
 it('prints the expense totals FinanceService::monthlyRollup computes', function () {
-    $rollup = $this->service->monthlyRollup($this->accountant, 2026, 9);
+    // The seeded September is kept in USD (FinanceSeeder); BDT is the default currency (D7).
+    $rollup = rollupIn($this->service->monthlyRollup($this->accountant, 2026, 9), 'USD');
 
     $props = $this->actingAs($this->accountant)
         ->get('/finance/expenses?month='.FINANCE_LEDGER_EXPENSE_MONTH)
@@ -288,8 +290,12 @@ it('prints the expense totals FinanceService::monthlyRollup computes', function 
 
     // Against the service, not against a literal — there is one sum in this application and the
     // ledger reads it (decision 8-10).
-    expect($props['totals'])->toBe($rollup['expenses'])
-        ->and($props['totals']['total'])->toBe('2110.00');
+    $usd = collect($props['totals_by_currency'])->firstWhere('currency', 'USD');
+
+    expect($props['totals_by_currency'][0]['currency'])->toBe('BDT')
+        ->and($usd)->toBe(['currency' => $rollup['currency']] + $rollup['expenses'])
+        ->and($usd['total'])->toBe('2110.00')
+        ->and($props)->not->toHaveKey('totals');
 })->group('phase8', 'finance');
 
 it('sends no project on an expense row, at any depth', function () {
@@ -302,6 +308,6 @@ it('sends no project on an expense row, at any depth', function () {
 
     foreach ($records as $row) {
         expect(array_keys($row))
-            ->toEqualCanonicalizing(['id', 'date', 'amount', 'category', 'notes', 'permissions']);
+            ->toEqualCanonicalizing(['id', 'date', 'amount', 'currency', 'category', 'notes', 'permissions']);
     }
 })->group('phase8', 'finance');

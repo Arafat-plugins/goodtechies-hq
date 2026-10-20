@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
-import { Undo2 } from '@lucide/vue';
+import { Head, Link, router } from '@inertiajs/vue3';
+import { Gift, Undo2 } from '@lucide/vue';
 import { computed, nextTick, ref } from 'vue';
 import PageShell from '@/Components/PageShell.vue';
 import StatusBadge from '@/Components/StatusBadge.vue';
@@ -19,6 +19,7 @@ import PayrollItemDialog from '@/Components/Payroll/PayrollItemDialog.vue';
 import PayrollItemsTable from '@/Components/Payroll/PayrollItemsTable.vue';
 import PayrollStatusTrail from '@/Components/Payroll/PayrollStatusTrail.vue';
 import ReverseLockDialog from '@/Components/Payroll/ReverseLockDialog.vue';
+import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
@@ -218,6 +219,13 @@ function returnFocus(): void {
     });
 }
 
+/** The Bonuses page, filtered to this month. */
+const bonusesHref = computed(() =>
+    props.period.month
+        ? `${payrollRoutes.bonuses.index()}?month=${props.period.month.slice(0, 7)}`
+        : payrollRoutes.bonuses.index(),
+);
+
 /* ------------------------------------------------------------ the words */
 
 const summary = computed(() => {
@@ -235,9 +243,17 @@ const summary = computed(() => {
 
     <PageShell
         :title="period.label"
-        description="One line per employee: what they are paid, what was added, what came off, and what the database worked the net out to."
+        description="One line per employee: base salary, bonuses, what came off, and the total payable."
         :breadcrumb="[{ label: 'Finance' }, { label: 'Payroll', href: payrollRoutes.index() }, { label: period.label }]"
     >
+        <template #actions>
+            <Button as-child variant="outline" size="sm">
+                <Link :href="bonusesHref">
+                    <Gift aria-hidden="true" />
+                    Bonuses
+                </Link>
+            </Button>
+        </template>
         <div class="flex min-w-0 flex-col gap-4">
             <!--
                 Where the month is, what comes next, and — when nothing comes next for this

@@ -11,6 +11,7 @@ use App\Models\ActivityLog;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Models\Project;
+use App\Models\ProjectEarningEntry;
 use App\Models\TimeEntry;
 use App\Services\ActivityLogger;
 use App\Services\ConversationService;
@@ -18,9 +19,11 @@ use App\Services\ProjectService;
 use App\Services\TaskTimerService;
 use App\Support\BillingFrequency;
 use App\Support\BillingType;
+use App\Support\Currency;
 use App\Support\Permission;
 use App\Support\Priority;
 use App\Support\ProjectClientBoard;
+use App\Support\ProjectEarningKind;
 use App\Support\ProjectRecurrenceFrequency;
 use App\Support\ProjectStatus;
 use App\Support\ProjectTaskList;
@@ -142,6 +145,8 @@ class ProjectController extends Controller
             'clients' => $this->clients(),
             'assignableEmployees' => $this->assignableEmployees(),
             ...$this->optionLists(),
+            'currencies' => Currency::options(),
+            'defaultCurrency' => Currency::default()->value,
         ]);
     }
 
@@ -194,7 +199,74 @@ class ProjectController extends Controller
             ...($request->user()->can('watchLive', TimeEntry::class)
                 ? ['workingNow' => fn (): array => $this->timers->workingNow($request->user(), (int) $project->getKey()) ?? []]
                 : []),
+
+            // Hand-recorded project financials (contract value, earned, received): viewFinance only.
+            ...$this->earnings($project),
         ]);
+    }
+
+    /**
+     * The Finance tab's Project financials card. Empty for anyone without viewFinance.
+     *
+     * @return array<string, mixed>
+     */
+    private function earnings(Project $project): array
+    {
+        $canView = Gate::allows('viewFinance', $project);
+
+        if (! $canView) {
+            return [
+                'earningEntries' => [],
+                'earningTotals' => [],
+                'earningKinds' => ProjectEarningKind::options(),
+                'currencies' => Currency::options(),
+                'defaultCurrency' => Currency::default()->value,
+                'canEditEarnings' => false,
+            ];
+        }
+
+        $entries = $project->earningEntries()->with('recorder')->get();
+
+        /** @var array<string, array<string, int>> $cents */
+        $cents = [];
+
+        foreach ($entries as $entry) {
+            $currency = (string) $entry->currency;
+            $cents[$currency] ??= array_fill_keys(array_map(fn (ProjectEarningKind $kind): string => $kind->value, ProjectEarningKind::cases()), 0);
+            $cents[$currency][$entry->kind->value] += (int) round(((float) $entry->amount) * 100);
+        }
+
+        ksort($cents);
+
+        $totals = [];
+
+        foreach ($cents as $currency => $byKind) {
+            $totals[] = [
+                'currency' => $currency,
+                ...array_map(fn (int $value): string => number_format($value / 100, 2, '.', ''), $byKind),
+            ];
+        }
+
+        $finance = $project->finance()->first();
+
+        return [
+            'earningEntries' => $entries->map(fn (ProjectEarningEntry $entry): array => [
+                'id' => $entry->id,
+                'kind' => $entry->kind->value,
+                'kind_label' => $entry->kind->label(),
+                'amount' => (string) $entry->amount,
+                'currency' => $entry->currency,
+                'date' => $entry->date?->toDateString(),
+                'description' => $entry->description,
+                'recorded_by' => $entry->recorder?->name,
+                'updated_at' => $entry->updated_at?->toIso8601String(),
+            ])->values()->all(),
+            'earningTotals' => $totals,
+            'earningKinds' => ProjectEarningKind::options(),
+            'currencies' => Currency::options(),
+            'defaultCurrency' => $finance !== null ? (string) $finance->currency : Currency::default()->value,
+            'canEditEarnings' => Gate::allows('updateFinance', $project) && ! $project->isArchived(),
+        ];
     }
 
     public function edit(Project $project): Response
@@ -208,6 +280,8 @@ class ProjectController extends Controller
             'clients' => $this->clients(),
             'assignableEmployees' => $this->assignableEmployees(),
             ...$this->optionLists(),
+            'currencies' => Currency::options(),
+            'defaultCurrency' => Currency::default()->value,
         ]);
     }
 
@@ -243,7 +317,8 @@ class ProjectController extends Controller
 
         $finance = array_filter($finance, fn (mixed $value): bool => $value !== null && $value !== '');
 
-        return $finance === [] ? null : $finance;
+        // A currency on its own is the form's default, not finance: it opens no finance row.
+        return array_diff_key($finance, ['currency' => true]) === [] ? null : $finance;
     }
 
     /**

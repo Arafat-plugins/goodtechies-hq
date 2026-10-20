@@ -3,25 +3,31 @@
 namespace App\Support;
 
 use App\Models\TimeEntry;
-use App\Services\SettingsService;
+use App\Services\ExchangeRateService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * What each project SHOULD have earned in a month, what it DID earn, what it cost, and the profit
+ * What each project SHOULD have earned in a month, what it DID earn, and what is still owed
  * (client request: "how much income comes from each project every month, and how").
  *
- * Computed, never stored, like every other money figure here. Four grouped queries whatever the
- * number of projects: income by project, expenses by project, approved hours by project, and the
+ * **Reported in BDT (D7).** Every project is computed in its own pricing currency (the currency
+ * of its `project_finance` row) and every row also carries the BDT figures (`*_bdt`), converted
+ * at the stored USD→BDT rate (`ExchangeRateService`). The original figures stay beside them so
+ * a screen can show "$350.00" under the taka. Totals are BDT only.
+ *
+ * Computed, never stored, like every other money figure here. Three grouped queries whatever the
+ * number of projects: income by project and currency, approved hours by project, and the
  * projects themselves with their `project_finance` row. Every amount is handled in **integer
  * cents** parsed from the exact decimal strings PostgreSQL sends — never a float — and goes out
  * as an exact two-decimal string.
  *
  * ## Which projects appear
  *
- * Every project that has a `project_finance` row, plus every project with income or an expense
- * linked to it and dated in the month. Cancelled and Archived projects never get an *expected*
- * figure, but still show what they received and cost.
+ * Every project with a `project_finance` row, plus every project with income linked to it and
+ * dated in the month. A project with no finance row appears only through that income: expected
+ * null. Cancelled and Archived projects never get an *expected* figure, but still show what
+ * they received.
  *
  * ## The type, from `project_finance`
  *
@@ -47,12 +53,12 @@ use Illuminate\Support\Facades\DB;
  *
  * ## The other columns
  *
- * `received` is income linked to the project dated in the month; `costs` is expenses linked to
- * it dated in the month, and `billable_costs` the part of those flagged billable. `profit` is
- * received − costs. `outstanding` is max(expected − received, 0), and '0.00' when nothing is
- * expected.
+ * `received` is income in the project's own currency linked to it and dated in the month;
+ * `received_bdt` is ALL income linked to it in the month (any currency) converted to BDT.
+ * `outstanding` is max(expected − received, 0), and '0.00' when nothing is expected; the BDT
+ * one is the same sum on the BDT figures.
  *
- * Rows are sorted by expected, largest first (nothing expected last), then by name.
+ * Rows are sorted by expected BDT, largest first (nothing expected last), then by name.
  */
 final class ProjectEarnings
 {
@@ -66,55 +72,65 @@ final class ProjectEarnings
     /**
      * @return array{
      *     month: string,
+     *     currency: string,
      *     rows: list<array{
      *         project: array{id: int, name: string, domain: string|null},
+     *         currency: string,
      *         type: string,
      *         type_label: string,
      *         basis: string,
      *         expected: string|null,
+     *         expected_bdt: string|null,
      *         hours: string|null,
      *         rate: string|null,
      *         received: string,
-     *         costs: string,
-     *         billable_costs: string,
-     *         profit: string,
+     *         received_bdt: string,
      *         outstanding: string,
+     *         outstanding_bdt: string,
      *     }>,
-     *     contracts: list<array{project: array{id: int, name: string, domain: string|null}, price: string, received_to_date: string, balance: string}>,
-     *     totals: array{expected: string, received: string, costs: string, profit: string, outstanding: string},
+     *     contracts: list<array{project: array{id: int, name: string, domain: string|null}, currency: string, price: string, price_bdt: string, received_to_date: string, received_to_date_bdt: string, balance: string, balance_bdt: string}>,
+     *     totals: array{expected: string, received: string, outstanding: string},
      * }
      *
      * `$detailed` false is the view for someone who may not see projects (the Accountant): `hours`
      * is null and `basis` never names the project's status, its start date or its hours — only
-     * the money figures.
+     * the money figures. `$currency` is accepted for backwards compatibility and ignored.
      */
-    public static function forMonth(Carbon $month, bool $detailed = true): array
+    public static function forMonth(Carbon $month, bool $detailed = true, ?string $currency = null): array
     {
+        $rates = app(ExchangeRateService::class);
+
         $start = $month->copy()->startOfMonth()->startOfDay();
         $from = $start->toDateString();
         $to = $start->copy()->endOfMonth()->toDateString();
 
-        // 1. Income per project: this month, and ever (for the one-time contracts).
-        $income = DB::table('income')
+        // 1. Income per project and currency: this month, and ever (for the one-time contracts).
+        $incomeRows = DB::table('income')
             ->whereNotNull('project_id')
-            ->groupBy('project_id')
+            ->groupBy('project_id', 'currency')
             ->selectRaw(
-                'project_id, SUM(CASE WHEN date BETWEEN ? AND ? THEN amount ELSE 0 END) as received, SUM(amount) as to_date',
+                'project_id, currency, SUM(CASE WHEN date BETWEEN ? AND ? THEN amount ELSE 0 END) as received, SUM(amount) as to_date',
                 [$from, $to],
             )
-            ->get()
-            ->keyBy(fn (object $row): int => (int) $row->project_id);
+            ->get();
 
-        // 2. Expenses per project this month, and the billable part.
-        $expenses = DB::table('expenses')
-            ->whereNotNull('project_id')
-            ->whereBetween('date', [$from, $to])
-            ->groupBy('project_id')
-            ->selectRaw('project_id, SUM(amount) as costs, SUM(CASE WHEN billable THEN amount ELSE 0 END) as billable_costs')
-            ->get()
-            ->keyBy(fn (object $row): int => (int) $row->project_id);
+        /** @var array<int, array<string, array{received: int, to_date: int}>> $income */
+        $income = [];
+        $activeInMonth = [];
 
-        // 3. Approved seconds per project this month.
+        foreach ($incomeRows as $row) {
+            $id = (int) $row->project_id;
+            $income[$id][(string) $row->currency] = [
+                'received' => self::cents((string) $row->received),
+                'to_date' => self::cents((string) $row->to_date),
+            ];
+
+            if (self::cents((string) $row->received) !== 0) {
+                $activeInMonth[] = $id;
+            }
+        }
+
+        // 2. Approved seconds per project this month.
         $seconds = TimeEntry::query()
             ->tracked()
             ->whereNotNull('time_entries.project_id')
@@ -126,19 +142,7 @@ final class ProjectEarnings
             ->mapWithKeys(fn (object $row): array => [(int) $row->project_id => (int) $row->seconds])
             ->all();
 
-        $activeInMonth = [];
-
-        foreach ($income as $id => $row) {
-            if (self::cents((string) $row->received) !== 0) {
-                $activeInMonth[] = $id;
-            }
-        }
-
-        foreach ($expenses as $id => $row) {
-            $activeInMonth[] = $id;
-        }
-
-        // 4. The projects: every one with a finance row, and every one with money this month.
+        // 3. The projects: every one with pricing, and every one with income this month.
         $projects = DB::table('projects as project')
             ->leftJoin('project_finance as finance', 'finance.project_id', '=', 'project.id')
             ->where(function ($query) use ($activeInMonth): void {
@@ -152,6 +156,7 @@ final class ProjectEarnings
                 'project.status as status',
                 'project.start_date as start_date',
                 'finance.id as finance_id',
+                'finance.currency as finance_currency',
                 'finance.price as price',
                 'finance.recurring_amount as recurring_amount',
                 'finance.billing_frequency as billing_frequency',
@@ -159,9 +164,20 @@ final class ProjectEarnings
                 'finance.created_at as finance_created_at',
             ]);
 
+        // Sums one project's income buckets in BDT cents.
+        $inBdt = function (array $buckets, string $field) use ($rates): int {
+            $total = 0;
+
+            foreach ($buckets as $code => $bucket) {
+                $total += $rates->toBdtCents(self::fromCents($bucket[$field]), (string) $code);
+            }
+
+            return $total;
+        };
+
         $rows = [];
         $contracts = [];
-        $totals = ['expected' => 0, 'received' => 0, 'costs' => 0, 'profit' => 0, 'outstanding' => 0];
+        $totals = ['expected' => 0, 'received' => 0, 'outstanding' => 0];
 
         foreach ($projects as $project) {
             $id = (int) $project->id;
@@ -171,13 +187,19 @@ final class ProjectEarnings
                 'domain' => $project->domain === null ? null : (string) $project->domain,
             ];
 
+            $code = $project->finance_id === null ? 'BDT' : strtoupper((string) $project->finance_currency);
+            $buckets = $income[$id] ?? [];
+
             $status = (string) $project->status;
             $frequency = $project->billing_frequency === null ? null : (string) $project->billing_frequency;
             $priceCents = self::cents($project->price);
             $recurringCents = self::cents($project->recurring_amount);
             $rateCents = self::cents($project->hourly_rate);
 
+            $priced = $project->finance_id !== null;
+
             $type = match (true) {
+                ! $priced => 'none',
                 $frequency === BillingFrequency::Hourly->value && $rateCents > 0 => 'hourly',
                 $frequency !== null && isset(self::STEPS[$frequency]) && $recurringCents > 0 => 'recurring',
                 $priceCents > 0 => 'one_time',
@@ -198,10 +220,10 @@ final class ProjectEarnings
                     $anchorDate = Carbon::parse($project->start_date ?? $project->finance_created_at)->startOfDay();
                     $anchor = $anchorDate->copy()->startOfMonth();
                     $every = $step === 1 ? 'every month' : "every {$step} months";
-                    $plan = self::label($recurringCents).' '.$every.' from '.$anchorDate->format('j M Y');
+                    $plan = self::label($recurringCents, $code).' '.$every.' from '.$anchorDate->format('j M Y');
                     $diff = ($start->year * 12 + $start->month) - ($anchor->year * 12 + $anchor->month);
 
-                    $money = self::label($recurringCents).' '.$every;
+                    $money = self::label($recurringCents, $code).' '.$every;
 
                     if ($status !== ProjectStatus::Active->value) {
                         $basis = $detailed
@@ -233,8 +255,8 @@ final class ProjectEarnings
                     } else {
                         $expected = intdiv($secs * $rateCents + 1800, 3600);
                         $basis = $detailed
-                            ? "{$hours} approved hours × ".self::label($rateCents).'/hr'
-                            : 'Hourly: approved time × '.self::label($rateCents).'/hr';
+                            ? "{$hours} approved hours × ".self::label($rateCents, $code).'/hr'
+                            : 'Hourly: approved time × '.self::label($rateCents, $code).'/hr';
                     }
 
                     if (! $detailed) {
@@ -245,12 +267,18 @@ final class ProjectEarnings
                 case 'one_time':
                     $typeLabel = 'One-time';
                     $basis = 'One-time price — see contracts';
-                    $toDate = self::cents($income[$id]->to_date ?? null);
+                    $toDate = $buckets[$code]['to_date'] ?? 0;
+                    $toDateBdt = $inBdt($buckets, 'to_date');
+                    $priceBdt = $rates->toBdtCents(self::fromCents($priceCents), $code);
                     $contracts[] = [
                         'project' => $payload,
+                        'currency' => $code,
                         'price' => self::fromCents($priceCents),
+                        'price_bdt' => self::fromCents($priceBdt),
                         'received_to_date' => self::fromCents($toDate),
+                        'received_to_date_bdt' => self::fromCents($toDateBdt),
                         'balance' => self::fromCents($priceCents - $toDate),
+                        'balance_bdt' => self::fromCents($priceBdt - $toDateBdt),
                     ];
                     break;
 
@@ -259,31 +287,31 @@ final class ProjectEarnings
                     $basis = $project->finance_id === null ? 'No billing set for this project' : 'No price, rate or recurring amount set';
             }
 
-            $received = self::cents($income[$id]->received ?? null);
-            $costs = self::cents($expenses[$id]->costs ?? null);
-            $billable = self::cents($expenses[$id]->billable_costs ?? null);
+            $received = $buckets[$code]['received'] ?? 0;
+            $receivedBdt = $inBdt($buckets, 'received');
             $outstanding = $expected === null ? 0 : max($expected - $received, 0);
+            $expectedBdt = $expected === null ? null : $rates->toBdtCents(self::fromCents($expected), $code);
+            $outstandingBdt = $expectedBdt === null ? 0 : max($expectedBdt - $receivedBdt, 0);
 
-            $totals['expected'] += $expected ?? 0;
-            $totals['received'] += $received;
-            $totals['costs'] += $costs;
-            $totals['profit'] += $received - $costs;
-            $totals['outstanding'] += $outstanding;
+            $totals['expected'] += $expectedBdt ?? 0;
+            $totals['received'] += $receivedBdt;
+            $totals['outstanding'] += $outstandingBdt;
 
             $rows[] = [
                 'project' => $payload,
+                'currency' => $code,
                 'type' => $type,
                 'type_label' => $typeLabel,
                 'basis' => $basis,
                 'expected' => $expected === null ? null : self::fromCents($expected),
+                'expected_bdt' => $expectedBdt === null ? null : self::fromCents($expectedBdt),
                 'hours' => $hours,
                 'rate' => $rate,
                 'received' => self::fromCents($received),
-                'costs' => self::fromCents($costs),
-                'billable_costs' => self::fromCents($billable),
-                'profit' => self::fromCents($received - $costs),
+                'received_bdt' => self::fromCents($receivedBdt),
                 'outstanding' => self::fromCents($outstanding),
-                '_sort' => $expected,
+                'outstanding_bdt' => self::fromCents($outstandingBdt),
+                '_sort' => $expectedBdt,
             ];
         }
 
@@ -305,6 +333,7 @@ final class ProjectEarnings
 
         return [
             'month' => $start->format('Y-m'),
+            'currency' => 'BDT',
             'rows' => array_map(function (array $row): array {
                 unset($row['_sort']);
 
@@ -351,17 +380,12 @@ final class ProjectEarnings
     }
 
     /**
-     * Cents as a short money label for the `basis` sentence, e.g. "$1,250.00" — or "BDT 1,250.00"
-     * when `settings.currency` is not USD, so the sentence never names the wrong currency.
+     * Cents as a short money label for the `basis` sentence in the report's currency, e.g.
+     * "$1,250.00" for USD or "BDT 1,250.00" for BDT, so the sentence never names the wrong currency.
      */
-    private static function label(int $cents): string
+    private static function label(int $cents, string $currency): string
     {
-        static $symbol = null;
-        $symbol ??= (static function (): string {
-            $currency = strtoupper((string) app(SettingsService::class)->get('currency'));
-
-            return $currency === '' || $currency === 'USD' ? '$' : $currency.' ';
-        })();
+        $symbol = $currency === 'USD' ? '$' : $currency.' ';
 
         $sign = $cents < 0 ? '-' : '';
         $abs = abs($cents);

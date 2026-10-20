@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\EmployeeBonus;
 use App\Models\PayrollItem;
 use App\Models\User;
 use App\Support\RoleName;
@@ -91,6 +92,9 @@ class PayrollItemResource extends JsonResource
             // Computed by PostgreSQL, not by this class and not by Vue. See the migration.
             'net_salary' => $this->resource->net_salary,
 
+            // The bonus records that make up `bonus`, one line each (approved or paid).
+            'bonuses' => $this->bonuses(),
+
             // Part D §14's "personal notes". The key itself is absent for everybody but an
             // Admin — see the class note.
             ...$this->adminNotes($viewer),
@@ -143,6 +147,32 @@ class PayrollItemResource extends JsonResource
      *
      * @return array<string, mixed>|null
      */
+    /**
+     * Uses the `linkedBonusLines` relation when the controller preloaded it (one query for
+     * the whole month), else one query for this item.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function bonuses(): array
+    {
+        $bonuses = $this->resource->relationLoaded('linkedBonusLines')
+            ? $this->resource->getRelation('linkedBonusLines')
+            : $this->resource->linkedBonuses()->get();
+
+        return $bonuses
+            ->map(fn (EmployeeBonus $bonus): array => [
+                'id' => (int) $bonus->getKey(),
+                'display_name' => $bonus->displayName(),
+                'type_label' => $bonus->type->label(),
+                'amount' => (string) $bonus->amount,
+                'status' => $bonus->status->value,
+                'status_label' => $bonus->status->label(),
+                'payment_date' => $bonus->payment_date->toDateString(),
+            ])
+            ->values()
+            ->all();
+    }
+
     private function employee(): ?array
     {
         $employee = $this->resource->employee;

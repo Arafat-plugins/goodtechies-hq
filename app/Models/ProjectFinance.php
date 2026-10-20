@@ -21,8 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'contract_value',
     'contract_terms',
     'profitability_snapshot',
-    'auto_income',
-    'auto_income_from',
+    'currency',
 ])]
 class ProjectFinance extends Model
 {
@@ -44,8 +43,6 @@ class ProjectFinance extends Model
             'hourly_rate' => 'decimal:2',
             'contract_value' => 'decimal:2',
             'profitability_snapshot' => 'decimal:2',
-            'auto_income' => 'boolean',
-            'auto_income_from' => 'date',
         ];
     }
 

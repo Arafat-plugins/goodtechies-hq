@@ -9,9 +9,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
- * A repeating expense: a cost set up once (a VPS every month, a domain every year) that
- * `FinanceService::generateDueRecurringExpenses()` records as an ordinary `Expense` on each due
- * date — Xero's repeating bills, QuickBooks' recurring transactions.
+ * A repeating expense: a cost set up once (a VPS every month, a domain every year). It is never
+ * recorded on its own: when it falls due the expenses page shows it, and an Admin records it as an
+ * ordinary `Expense` (`FinanceService::recordDueRecurringExpense()`) or skips that occurrence.
  *
  * Due dates are always counted from `start_date` (`dueDateFor()`), never from the previous due
  * date, so a template started on the 31st lands on Feb 28 and then on Mar 31 again rather than
@@ -36,6 +36,7 @@ use Illuminate\Support\Carbon;
     'project_id',
     'billable',
     'amount',
+    'currency',
     'frequency',
     'start_date',
     'ends_on',
@@ -130,6 +131,7 @@ class RecurringExpense extends Model
             'project_name' => $this->project?->name,
             'billable' => (bool) $this->billable,
             'amount' => (string) $this->amount,
+            'currency' => $this->currency,
             'frequency' => $this->frequency,
             'start_date' => $this->start_date?->toDateString(),
             'ends_on' => $this->ends_on?->toDateString(),

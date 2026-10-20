@@ -7,6 +7,7 @@ use App\Models\ProjectFinance;
 use App\Models\Task;
 use App\Models\TimeEntry;
 use App\Models\User;
+use App\Services\SettingsService;
 use App\Support\FinanceCategoryKind;
 use App\Support\ProjectEarnings;
 use App\Support\ProjectStatus;
@@ -53,6 +54,10 @@ beforeEach(function () {
     $this->seed();
 
     $this->accountant = User::where('email', 'accountant@goodtechies.test')->firstOrFail();
+
+    // ProjectEarnings is one currency at a time (the default). The factories' rows carry the
+    // column's default, BDT, so the default currency is BDT here too.
+    app(SettingsService::class)->set('currency', 'BDT', User::where('email', 'shahadat@goodtechies.test')->firstOrFail());
 });
 
 it('expects a monthly amount every month and a quarterly one only in its due months', function () {
@@ -133,10 +138,9 @@ it('reports what a project received, what it cost and its profit', function () {
 
     $row = earnRow('2027-03', $project);
 
+    // Expenses stay in the books but are no longer a column here: no costs, no profit.
     expect($row['received'])->toBe('200.00')
-        ->and($row['costs'])->toBe('50.00')
-        ->and($row['billable_costs'])->toBe('50.00')
-        ->and($row['profit'])->toBe('150.00')
+        ->and($row)->not->toHaveKeys(['costs', 'billable_costs', 'profit'])
         ->and($row['outstanding'])->toBe('100.00');
 })->group('finance');
 
@@ -153,13 +157,20 @@ it('compares a one-time price with everything received to date', function () {
     expect($contract)->not->toBeNull()
         ->and($contract['price'])->toBe('1000.00')
         ->and($contract['received_to_date'])->toBe('700.00')
-        ->and($contract['balance'])->toBe('300.00');
+        ->and($contract['balance'])->toBe('300.00')
+        // D7: a BDT-priced contract's BDT figures are its own.
+        ->and($contract['currency'])->toBe('BDT')
+        ->and($contract['price_bdt'])->toBe('1000.00')
+        ->and($contract['received_to_date_bdt'])->toBe('700.00')
+        ->and($contract['balance_bdt'])->toBe('300.00');
 
     $row = collect($earnings['rows'])->firstWhere('project.id', $project->getKey());
 
     expect($row['type'])->toBe('one_time')
         ->and($row['expected'])->toBeNull()
-        ->and($row['received'])->toBe('300.00');
+        ->and($row['expected_bdt'])->toBeNull()
+        ->and($row['received'])->toBe('300.00')
+        ->and($row['received_bdt'])->toBe('300.00');
 })->group('finance');
 
 it('expects nothing from a cancelled recurring project', function () {

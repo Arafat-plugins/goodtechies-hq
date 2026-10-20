@@ -2,9 +2,11 @@
 
 namespace App\Http\Requests\Finance;
 
+use App\Support\Currency;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\Rule;
 
 /**
  * The window the Finance dashboard and the Monthly financial report are asking for.
@@ -21,6 +23,7 @@ use Illuminate\Support\Carbon;
  *   - **`months`** — how many months the trend covers, **ending with `month`**. Absent, it is
  *     `DEFAULT_TREND_MONTHS`. The dashboard ignores it; it is in the rules here because the
  *     window is one idea and a second Form Request would be a second place to change it.
+ *   - **`currency`** — one of `Currency::values()`. Absent, the default currency.
  *
  * ## Why the trend window is in the URL at all
  *
@@ -68,6 +71,7 @@ class FinanceReportRequest extends FormRequest
         return [
             'month' => ['nullable', 'string', 'date_format:Y-m'],
             'months' => ['nullable', 'integer', 'min:'.self::MIN_TREND_MONTHS, 'max:'.self::MAX_TREND_MONTHS],
+            'currency' => ['nullable', 'string', Rule::in(Currency::values())],
         ];
     }
 
@@ -80,6 +84,7 @@ class FinanceReportRequest extends FormRequest
             'month.date_format' => 'A finance month looks like 2026-09.',
             'months.integer' => 'The trend covers a whole number of months.',
             'months.min' => 'A trend needs at least '.self::MIN_TREND_MONTHS.' months to have a direction.',
+            'currency.in' => 'Choose one of the currencies the books are kept in.',
             'months.max' => 'A trend of more than '.self::MAX_TREND_MONTHS.' months is a date-range report, not a month picker.',
         ];
     }
@@ -100,6 +105,17 @@ class FinanceReportRequest extends FormRequest
         }
 
         return Carbon::createFromFormat('Y-m', $value)->startOfMonth();
+    }
+
+    /**
+     * The currency the screen shows. Absent, the default currency. Amounts in other currencies are
+     * shown beside it, never converted or added to it.
+     */
+    public function currency(): string
+    {
+        $value = $this->validated('currency');
+
+        return is_string($value) && $value !== '' ? $value : Currency::default()->value;
     }
 
     /** How many months the trend covers, this one included. */

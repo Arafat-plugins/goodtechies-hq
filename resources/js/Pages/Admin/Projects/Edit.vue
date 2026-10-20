@@ -23,6 +23,8 @@ const props = defineProps<{
     billingTypes: Option[];
     recurrenceFrequencies: Option[];
     billingFrequencies: Option[];
+    currencies?: Option[];
+    defaultCurrency?: string;
 }>();
 
 const project = computed(() => props.project.data);
@@ -53,6 +55,8 @@ const internalFiles = computed(() => internalFileRoutes(project.value.id));
             :billing-types="billingTypes"
             :recurrence-frequencies="recurrenceFrequencies"
             :billing-frequencies="billingFrequencies"
+            :currencies="currencies"
+            :default-currency="defaultCurrency"
             submit-label="Save changes"
         >
             <!-- Uploads go straight away (FilePanel's own behaviour), separate from Save changes. -->
@@ -71,6 +75,8 @@ const internalFiles = computed(() => internalFileRoutes(project.value.id));
             :project="project"
             :billing-frequencies="billingFrequencies"
             :can-edit="permissions.can_update === true"
+            :currencies="currencies"
+            :default-currency="defaultCurrency"
         />
     </PageShell>
 </template>

@@ -65,6 +65,7 @@ class IncomeResource extends JsonResource
 
             // The exact decimal string. See the class note.
             'amount' => (string) $this->resource->amount,
+            'currency' => (string) $this->resource->currency,
 
             'category' => $this->category(),
             'project' => self::projectPayload($this->resource->project),

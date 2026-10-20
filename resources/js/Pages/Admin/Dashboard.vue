@@ -385,7 +385,7 @@ const financeCards = computed(() => [
     {
         key: 'income',
         label: 'Income',
-        value: formatMoney(props.finance.income ?? '0', props.finance.currency),
+        value: formatMoney(props.finance.income ?? '0', 'BDT'),
         sub: 'Recorded this month',
         icon: TrendingUp,
         href: props.finance.href,
@@ -393,7 +393,7 @@ const financeCards = computed(() => [
     {
         key: 'expense',
         label: 'Expenses',
-        value: formatMoney(props.finance.expense ?? '0', props.finance.currency),
+        value: formatMoney(props.finance.expense ?? '0', 'BDT'),
         sub: 'Recorded this month',
         icon: Receipt,
         href: props.finance.href,
@@ -408,7 +408,7 @@ const financeCards = computed(() => [
         value:
             props.finance.payroll === null || props.finance.payroll === undefined
                 ? undefined
-                : formatMoney(props.finance.payroll, props.finance.currency),
+                : formatMoney(props.finance.payroll, 'BDT'),
         sub: props.finance.payroll_note,
         icon: HandCoins,
         href: props.finance.payroll_href ?? undefined,
@@ -416,7 +416,7 @@ const financeCards = computed(() => [
     {
         key: 'operating_result',
         label: 'Operating result',
-        value: formatMoney(props.finance.operating_result ?? '0', props.finance.currency),
+        value: formatMoney(props.finance.operating_result ?? '0', 'BDT'),
         // `FinanceService::monthlyRollup()` adds the month's net salaries from `payroll_items`
         // as an expense line once the payroll month is locked or paid, so the wage bill on the
         // card to the left is inside this figure from then on — and not while it is a draft.

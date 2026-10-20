@@ -5,11 +5,18 @@ use App\Http\Requests\Finance\FinanceReportRequest;
 use App\Models\Employee;
 use App\Models\Income;
 use App\Models\Project;
+use App\Models\ProjectFinance;
+use App\Models\Task;
+use App\Models\TimeEntry;
 use App\Models\User;
 use App\Services\FinanceService;
+use App\Services\SettingsService;
+use App\Support\Currency;
+use App\Support\ProjectStatus;
 use App\Support\RoleName;
 use Database\Factories\IncomeFactory;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -39,14 +46,24 @@ use Inertia\Testing\AssertableInertia as Assert;
 |
 */
 
-/** Part D §13's acceptance example, verbatim: the income lines and their total. */
+/*
+ * In BDT since D7: the seeded September is USD (Part D §13's $350 / $800 / $1,250) plus two
+ * Maintenance receipts of 260.00 and 250.00 in BDT. At the rate the tests set, 1 USD = 122.00
+ * BDT, the USD lines become 42,700 / 97,600 / 152,500 and Maintenance gains the 510.00 BDT.
+ */
+/** Part D §13's acceptance example: the income lines and their total, in BDT. */
 const FINANCE_REPORT_SEPTEMBER = [
-    'Maintenance' => '860.00',
-    'SEO' => '800.00',
-    'Website' => '1250.00',
+    'Maintenance' => '43210.00',
+    'SEO' => '97600.00',
+    'Website' => '152500.00',
 ];
 
-const FINANCE_REPORT_SEPTEMBER_TOTAL = '2910.00';
+const FINANCE_REPORT_SEPTEMBER_TOTAL = '293310.00';
+
+/** The seeded September's expenses ($2,110.00) and operating result, in BDT at 122.00. */
+const FINANCE_REPORT_SEPTEMBER_EXPENSES = '257420.00';
+
+const FINANCE_REPORT_SEPTEMBER_NET = '35890.00';
 
 /** The seeded month those figures belong to. */
 const FINANCE_REPORT_MONTH = '2026-09';
@@ -61,10 +78,12 @@ const FINANCE_REPORT_MONTH = '2026-09';
  *
  * Plus four since the money became a calculation (decision 8-32): the rollup's check for a
  * hand-entered *Payroll* expense beside a closed payroll month (one), and `ProjectEarnings`'s
- * three grouped reads — income by project, expenses by project, projects with their billing.
- * Still flat in the trend's length: the payroll trend reads `payroll_periods`, not the books.
+ * grouped reads — income by project and projects with their billing (two; the expenses read
+ * left with the Costs and Profit columns). The UNION that listed the currencies went with the
+ * currency switch (D7). Still flat in the trend's length: the payroll trend reads
+ * `payroll_periods`, not the books.
  */
-const FINANCE_REPORT_QUERY_BUDGET = 9;
+const FINANCE_REPORT_QUERY_BUDGET = 8;
 
 /** The tables that count as "the books" when queries are being counted. */
 const FINANCE_REPORT_TABLES = ['income', 'expenses', 'finance_categories', 'projects'];
@@ -154,6 +173,10 @@ beforeEach(function () {
     $this->employee = User::where('email', 'yaseen@goodtechies.test')->firstOrFail();
     $this->remote = User::where('email', 'tapu@goodtechies.test')->firstOrFail();
     $this->manager = Employee::factory()->forRole(RoleName::MANAGER)->create()->user;
+
+    // D7: every USD figure is converted at the stored rate; pin it so no figure depends on it.
+    app(SettingsService::class)->set('usd_bdt_rate_mode', 'manual', $this->admin);
+    app(SettingsService::class)->set('usd_bdt_rate', '122.00', $this->admin);
 });
 
 /*
@@ -203,7 +226,13 @@ it('sends a signed-out visitor to log in rather than refusing them', function (s
 */
 
 it('sends the dashboard exactly what monthlyRollup() computed, not a second opinion', function () {
-    $expected = $this->service->monthlyRollup($this->admin, 2026, 9);
+    $full = $this->service->monthlyRollup($this->admin, 2026, 9);
+    // The month in BDT, with the month, label and payroll beside them.
+    $expected = $full['bdt'] + [
+        'month' => $full['month'],
+        'label' => $full['label'],
+        'payroll' => $full['payroll'],
+    ];
 
     test()->actingAs($this->admin)
         ->get(financeReportDashboardUrl())
@@ -228,8 +257,8 @@ it('puts Part D\'s September sentence on the screen — Maintenance 860, SEO 800
     expect($lines)->toBe(FINANCE_REPORT_SEPTEMBER)
         ->and($props['rollup']['income']['total'])->toBe(FINANCE_REPORT_SEPTEMBER_TOTAL)
         // The other half of Part D §13's month, and the operating result it implies.
-        ->and($props['rollup']['expenses']['total'])->toBe('2110.00')
-        ->and($props['rollup']['net'])->toBe('800.00');
+        ->and($props['rollup']['expenses']['total'])->toBe(FINANCE_REPORT_SEPTEMBER_EXPENSES)
+        ->and($props['rollup']['net'])->toBe(FINANCE_REPORT_SEPTEMBER_NET);
 })->group('phase8', 'finance');
 
 it('defaults to the month we are in when the URL does not name one', function () {
@@ -253,7 +282,7 @@ it('leaves an August row out of September, and finds it in August', function () 
         ->of('9999.00')
         ->on('2026-08-31')
         ->recordedBy($this->accountant)
-        ->create();
+        ->create(['currency' => Currency::default()->value]);
 
     $september = test()->actingAs($this->admin)->get(financeReportDashboardUrl())->inertiaProps();
 
@@ -284,7 +313,7 @@ it('groups income by project and gives income with no project its own row', func
         ->of('77.00')
         ->on('2026-09-20')
         ->recordedBy($this->accountant)
-        ->create();
+        ->create(['currency' => Currency::default()->value]);
 
     expect($unlinked->project_id)->toBeNull();
 
@@ -300,8 +329,8 @@ it('groups income by project and gives income with no project its own row', func
         // Every seeded September income row is linked, so the six of them are five projects
         // (Buffalo Modular appears three times under three different projects) plus this one.
         ->and($rows->where('project_id', '!=', null))->not->toBeEmpty()
-        // The cut adds up to the month's income, this row included.
-        ->and($cut['total'])->toBe('2987.00');
+        // The cut adds up to the month's income in this currency, this row included.
+        ->and($cut['total'])->toBe('293387.00');
 
     // The remainder reads last, rather than being an odd blank in the middle of a ranked list.
     expect($rows->last()['project_id'])->toBeNull();
@@ -384,8 +413,8 @@ it('defaults to a year and gives every month in it a point, empty ones included'
     // The trend's September and the by-category September are the same month, computed twice
     // by two different queries. They have to agree.
     expect($september['income'])->toBe(FINANCE_REPORT_SEPTEMBER_TOTAL)
-        ->and($september['expense'])->toBe('2110.00')
-        ->and($september['net'])->toBe('800.00');
+        ->and($september['expense'])->toBe(FINANCE_REPORT_SEPTEMBER_EXPENSES)
+        ->and($september['net'])->toBe(FINANCE_REPORT_SEPTEMBER_NET);
 })->group('phase8', 'finance');
 
 it('refuses a trend window that is too short to have a direction, or too long to read', function (string $months) {
@@ -400,7 +429,7 @@ it('refuses a trend window that is too short to have a direction, or too long to
 |--------------------------------------------------------------------------
 */
 
-it('builds a twelve-month report in nine queries against the books, not one per month', function () {
+it('builds a twelve-month report in eight queries against the books, not one per month', function () {
     [$response, $queries] = financeReportQueriesFor($this->admin, financeReportUrl(FINANCE_REPORT_MONTH, 12));
 
     $response->assertOk();
@@ -430,7 +459,7 @@ it('costs the same twenty-four months as it does three', function () {
 it('puts this month\'s income, expense and operating result on the Admin dashboard', function () {
     $this->travelTo('2026-09-15');
 
-    $rollup = $this->service->monthlyRollup($this->admin, 2026, 9);
+    $rollup = $this->service->monthlyRollup($this->admin, 2026, 9)['bdt'];
 
     $finance = test()->actingAs($this->admin)->get('/admin/dashboard')->assertOk()->inertiaProps()['finance'];
 
@@ -453,7 +482,7 @@ it('computes the operating result as income less expense, in cents', function ()
 
     expect($cents($finance['operating_result']))
         ->toBe($cents($finance['income']) - $cents($finance['expense']))
-        ->and($finance['operating_result'])->toBe('800.00');
+        ->and($finance['operating_result'])->toBe(FINANCE_REPORT_SEPTEMBER_NET);
 })->group('phase8', 'finance');
 
 it('carries the month payroll total on the dashboard, from the payroll table and not the ledger', function () {
@@ -525,20 +554,20 @@ it('still finds September through the seeded rows, so the demo is not a fixture'
 it('gives the Accountant per-project earnings without a project status, a start date or hours', function () {
     // One of each kind of row that would carry project detail if detailed: recurring from a
     // start date, hourly with approved time, and a cancelled project.
-    $recurring = Project::factory()->create(['status' => \App\Support\ProjectStatus::Active, 'start_date' => '2026-07-14']);
-    \App\Models\ProjectFinance::factory()->for($recurring)->create([
+    $recurring = Project::factory()->create(['status' => ProjectStatus::Active, 'start_date' => '2026-07-14']);
+    ProjectFinance::factory()->for($recurring)->create([
         'price' => null, 'recurring_amount' => '300.00', 'billing_frequency' => 'monthly', 'hourly_rate' => null,
     ]);
 
-    $hourly = Project::factory()->create(['status' => \App\Support\ProjectStatus::Active]);
-    \App\Models\ProjectFinance::factory()->for($hourly)->create([
+    $hourly = Project::factory()->create(['status' => ProjectStatus::Active]);
+    ProjectFinance::factory()->for($hourly)->create([
         'price' => null, 'recurring_amount' => null, 'billing_frequency' => 'hourly', 'hourly_rate' => '25.00',
     ]);
-    $task = \App\Models\Task::factory()->for($hourly)->create();
-    \App\Models\TimeEntry::factory()->onTask($task)->on(\Illuminate\Support\Carbon::parse('2026-09-04'))->create(['duration_seconds' => 36000]);
+    $task = Task::factory()->for($hourly)->create();
+    TimeEntry::factory()->onTask($task)->on(Carbon::parse('2026-09-04'))->create(['duration_seconds' => 36000]);
 
-    $cancelled = Project::factory()->create(['status' => \App\Support\ProjectStatus::Cancelled, 'start_date' => '2026-05-03']);
-    \App\Models\ProjectFinance::factory()->for($cancelled)->create([
+    $cancelled = Project::factory()->create(['status' => ProjectStatus::Cancelled, 'start_date' => '2026-05-03']);
+    ProjectFinance::factory()->for($cancelled)->create([
         'price' => null, 'recurring_amount' => '100.00', 'billing_frequency' => 'monthly', 'hourly_rate' => null,
     ]);
 
@@ -548,7 +577,7 @@ it('gives the Accountant per-project earnings without a project status, a start 
     expect($rows)->not->toBeEmpty();
 
     $startDates = DB::table('projects')->whereNotNull('start_date')->pluck('start_date')
-        ->map(fn ($date): string => \Illuminate\Support\Carbon::parse($date)->format('j M Y'))
+        ->map(fn ($date): string => Carbon::parse($date)->format('j M Y'))
         ->all();
 
     foreach ($rows as $row) {

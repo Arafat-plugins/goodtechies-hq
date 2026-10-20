@@ -113,12 +113,13 @@ class FinanceSeeder extends Seeder
      * instead. **The linked project is where a row says what it was for** — a real relation,
      * policy-checked, carrying a name the Accountant is entitled to.
      *
-     * @var list<array{category: string, amount: string, date: string, notes: string, project: string|null}>
+     * @var list<array{category: string, amount: string, currency: string, date: string, notes: string, project: string|null}>
      */
     private const INCOME = [
         [
             'category' => 'SEO',
             'amount' => '500.00',
+            'currency' => 'USD',
             'date' => '2026-09-03',
             'notes' => 'September SEO retainer',
             'project' => 'Buffalo Modular — SEO',
@@ -126,6 +127,7 @@ class FinanceSeeder extends Seeder
         [
             'category' => 'SEO',
             'amount' => '300.00',
+            'currency' => 'USD',
             'date' => '2026-09-03',
             'notes' => 'September SEO retainer',
             'project' => 'Heat Gap — SEO Retainer',
@@ -133,6 +135,7 @@ class FinanceSeeder extends Seeder
         [
             'category' => 'Maintenance',
             'amount' => '350.00',
+            'currency' => 'USD',
             'date' => '2026-09-05',
             'notes' => 'September maintenance retainer',
             'project' => 'Buffalo Modular — Website Maintenance',
@@ -140,6 +143,7 @@ class FinanceSeeder extends Seeder
         [
             'category' => 'Maintenance',
             'amount' => '260.00',
+            'currency' => 'BDT',
             'date' => '2026-09-05',
             'notes' => 'September maintenance retainer',
             'project' => 'APH — Website Maintenance',
@@ -147,6 +151,7 @@ class FinanceSeeder extends Seeder
         [
             'category' => 'Maintenance',
             'amount' => '250.00',
+            'currency' => 'BDT',
             'date' => '2026-09-08',
             'notes' => 'September maintenance retainer, no project linked',
             'project' => 'abc.com — Monthly Maintenance',
@@ -154,6 +159,7 @@ class FinanceSeeder extends Seeder
         [
             'category' => 'Website',
             'amount' => '1250.00',
+            'currency' => 'USD',
             'date' => '2026-09-18',
             'notes' => 'Website build, second stage',
             'project' => 'Buffalo Modular — Website Development',
@@ -167,16 +173,16 @@ class FinanceSeeder extends Seeder
      * `payroll_periods` and this seeder must not pretend to. It is here because a finance
      * dashboard whose largest outgoing is missing is not a finance dashboard.
      *
-     * @var list<array{category: string, amount: string, date: string, notes: string}>
+     * @var list<array{category: string, amount: string, currency: string, date: string, notes: string}>
      */
     private const EXPENSES = [
-        ['category' => 'Office', 'amount' => '180.00', 'date' => '2026-09-01', 'notes' => 'Office rent share — September'],
-        ['category' => 'Hosting', 'amount' => '95.00', 'date' => '2026-09-02', 'notes' => 'Client hosting — September'],
-        ['category' => 'Software', 'amount' => '120.00', 'date' => '2026-09-04', 'notes' => 'SEO and design tooling subscriptions'],
-        ['category' => 'Utilities', 'amount' => '60.00', 'date' => '2026-09-06', 'notes' => 'Internet and electricity share'],
-        ['category' => 'Marketing', 'amount' => '200.00', 'date' => '2026-09-10', 'notes' => 'Google Ads — goodtechies.com'],
-        ['category' => 'Operations', 'amount' => '55.00', 'date' => '2026-09-12', 'notes' => 'Bank charges and accounting software'],
-        ['category' => 'Payroll', 'amount' => '1400.00', 'date' => '2026-09-28', 'notes' => 'September salaries'],
+        ['category' => 'Office', 'amount' => '180.00', 'currency' => 'USD', 'date' => '2026-09-01', 'notes' => 'Office rent share — September'],
+        ['category' => 'Hosting', 'amount' => '95.00', 'currency' => 'USD', 'date' => '2026-09-02', 'notes' => 'Client hosting — September'],
+        ['category' => 'Software', 'amount' => '120.00', 'currency' => 'USD', 'date' => '2026-09-04', 'notes' => 'SEO and design tooling subscriptions'],
+        ['category' => 'Utilities', 'amount' => '60.00', 'currency' => 'USD', 'date' => '2026-09-06', 'notes' => 'Internet and electricity share'],
+        ['category' => 'Marketing', 'amount' => '200.00', 'currency' => 'USD', 'date' => '2026-09-10', 'notes' => 'Google Ads — goodtechies.com'],
+        ['category' => 'Operations', 'amount' => '55.00', 'currency' => 'USD', 'date' => '2026-09-12', 'notes' => 'Bank charges and accounting software'],
+        ['category' => 'Payroll', 'amount' => '1400.00', 'currency' => 'USD', 'date' => '2026-09-28', 'notes' => 'September salaries'],
     ];
 
     public function run(): void
@@ -235,6 +241,7 @@ class FinanceSeeder extends Seeder
                 'category_id' => $this->categoryId(FinanceCategoryKind::Income, $row['category']),
                 'project_id' => $this->projectId($row['project']),
                 'amount' => $row['amount'],
+                'currency' => $row['currency'],
                 'date' => $row['date'],
                 'notes' => $row['notes'],
                 'recorded_by' => $accountant->getKey(),
@@ -252,6 +259,7 @@ class FinanceSeeder extends Seeder
             Expense::create([
                 'category_id' => $this->categoryId(FinanceCategoryKind::Expense, $row['category']),
                 'amount' => $row['amount'],
+                'currency' => $row['currency'],
                 'date' => $row['date'],
                 'notes' => $row['notes'],
                 'recorded_by' => $accountant->getKey(),

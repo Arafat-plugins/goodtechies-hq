@@ -5,6 +5,7 @@ import DataTable from '@/Components/DataTable/DataTable.vue';
 import type { ColumnDef } from '@/Components/DataTable/types';
 import type { ExpenseRecord, FinanceCategoryKind, IncomeRecord, LedgerRecord } from '@/Components/Finance/finance';
 import { formatLedgerDate, formatMoney, ledgerNoun } from '@/Components/Finance/finance';
+import { Badge } from '@/Components/ui/badge';
 import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
 
 /**
@@ -42,7 +43,8 @@ import { DropdownMenuItem } from '@/Components/ui/dropdown-menu';
 const props = defineProps<{
     kind: FinanceCategoryKind;
     records: LedgerRecord[];
-    currency: string;
+    /** True when list filters are active, so an empty list says the filters found nothing. */
+    filtered?: boolean;
     /** The month's own label, so the table's accessible name says which month this is. */
     monthLabel: string;
 }>();
@@ -98,7 +100,7 @@ const columns = computed<ColumnDef<LedgerRecord>[]>(() => {
 function rowLabel(record: LedgerRecord): string {
     const category = record.category?.name ?? 'Uncategorised';
 
-    return `${category} ${noun.value} of ${formatMoney(record.amount, props.currency)} on ${formatLedgerDate(record.date)}`;
+    return `${category} ${noun.value} of ${formatMoney(record.amount, record.currency)} on ${formatLedgerDate(record.date)}`;
 }
 </script>
 
@@ -110,10 +112,12 @@ function rowLabel(record: LedgerRecord): string {
         :row-label="rowLabel"
         :noun="noun"
         :empty-icon="isIncome ? TrendingUp : Receipt"
-        :empty-title="`Nothing recorded in ${monthLabel}`"
+        :empty-title="filtered ? 'No records match these filters.' : `Nothing recorded in ${monthLabel}`"
         :empty-description="
-            isIncome
-                ? 'Income is recorded automatically from projects — recurring amounts on their due dates, hourly work when the month ends, one-time prices when a project is completed. Use Add extra income for anything else.'
+            filtered
+                ? 'Change or clear the filters to see the rest of the month.'
+                : isIncome
+                ? 'Income is entered by hand — a category, an amount and the date it came in. Nothing is recorded from projects on its own; add each payment when you decide it should be recorded.'
                 : 'Expenses are entered a payment at a time — a category, an amount and the date it went out. The month’s totals are worked out from these rows.'
         "
     >
@@ -143,18 +147,19 @@ function rowLabel(record: LedgerRecord): string {
         <template #cell-category="{ row }">
             <span class="inline-flex items-center gap-2">
                 <span>{{ row.category?.name ?? '—' }}</span>
-                <span
+                <Badge
                     v-if="isAutoIncome(row)"
-                    class="rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
-                    title="Recorded automatically from the project's billing"
+                    variant="outline"
+                    class="text-muted-foreground"
+                    title="Recorded automatically before November 2026. Income is now entered by hand."
                 >
-                    Auto
-                </span>
+                    Auto (old)
+                </Badge>
             </span>
         </template>
 
         <template #cell-amount="{ row }">
-            <span class="tabular-nums">{{ formatMoney(row.amount, currency) }}</span>
+            <span class="tabular-nums">{{ formatMoney(row.amount, row.currency) }}</span>
         </template>
 
         <!--

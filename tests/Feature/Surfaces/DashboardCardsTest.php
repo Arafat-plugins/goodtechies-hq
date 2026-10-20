@@ -169,7 +169,7 @@ it('gives the accountant the same September the Company dashboard and /finance g
     $company = $this->actingAs($admin)->get('/admin/dashboard')->inertiaPage()['props']['finance'];
 
     $asOf = Carbon::today();
-    $rollup = app(FinanceService::class)->monthlyRollup($admin, (int) $asOf->year, (int) $asOf->month);
+    $rollup = rollupIn(app(FinanceService::class)->monthlyRollup($admin, (int) $asOf->year, (int) $asOf->month));
 
     // Three screens, one answer. Nothing on any of them sums anything: the figures are the
     // rollup's and the net is its own, computed in integer cents.

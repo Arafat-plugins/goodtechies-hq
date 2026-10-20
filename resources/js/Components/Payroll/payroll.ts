@@ -124,12 +124,25 @@ export interface PayrollItem {
     leave_impact: string;
     /** Computed by PostgreSQL. Read-only on every screen, and never sent back. */
     net_salary: string;
+    /** The approved/paid bonus records that make up `bonus`, one line each. */
+    bonuses: PayrollBonusLine[];
     /**
      * Part D §14's "personal notes". **The key is absent for everybody but an Admin** — test
      * with `'admin_notes' in item`, never against null. See rule 4 in the module note.
      */
     admin_notes?: string | null;
     permissions: { can_update: boolean; can_annotate: boolean };
+}
+
+/** One bonus record on a payroll line (`PayrollItemResource.bonuses`). */
+export interface PayrollBonusLine {
+    id: number;
+    display_name: string;
+    type_label: string;
+    amount: string;
+    status: string;
+    status_label: string;
+    payment_date: string;
 }
 
 /**
@@ -194,16 +207,47 @@ export type PayrollAdjustableField = (typeof PAYROLL_ADJUSTABLE_ALL)[number];
  * Polish 002: the client removed allowance. It is shown (and typed) only where a line still
  * carries a non-zero one — an older month — so every figure on screen still adds up to the net.
  */
-export const PAYROLL_ADJUSTABLE: readonly PayrollAdjustableField[] = ['base_salary', 'bonus', 'deduction', 'advance'];
+export const PAYROLL_ADJUSTABLE: readonly PayrollAdjustableField[] = ['base_salary', 'deduction', 'advance'];
 
-/** The adjustable figures for these lines: allowance only when one of them still has some. */
-export function payrollAdjustableFor(items: readonly { allowance: string }[]): readonly PayrollAdjustableField[] {
-    return items.some((item) => Number(item.allowance) !== 0) ? PAYROLL_ADJUSTABLE_ALL : PAYROLL_ADJUSTABLE;
+/** Does any of these lines still carry an allowance (an older month)? */
+function carriesAllowance(items: readonly { allowance: string }[]): boolean {
+    return items.some((item) => Number(item.allowance) !== 0);
 }
 
-/** Every money column for these lines, in reading order. */
+/**
+ * The figures typed by hand for these lines: allowance only when one of them still has some.
+ * `bonus` is never typed: it is the sum of the line's approved bonus records.
+ */
+export function payrollAdjustableFor(items: readonly { allowance: string }[]): readonly PayrollAdjustableField[] {
+    return carriesAllowance(items) ? ['base_salary', 'allowance', 'deduction', 'advance'] : PAYROLL_ADJUSTABLE;
+}
+
+/** Every money column for these lines, in reading order (bonus included, read-only). */
 export function payrollMoneyFieldsFor(items: readonly { allowance: string }[]): PayrollMoneyField[] {
-    return [...payrollAdjustableFor(items), 'leave_impact', 'net_salary'];
+    const withAllowance = carriesAllowance(items);
+
+    return [
+        ...PAYROLL_ADJUSTABLE_ALL.filter((field) => field !== 'allowance' || withAllowance),
+        'leave_impact',
+        'net_salary',
+    ];
+}
+
+/**
+ * Add exact decimal strings in whole cents, for a display total of figures already on screen
+ * (base and bonus columns). Returns a decimal string for `formatMoney`.
+ */
+export function sumAmounts(values: readonly (string | null | undefined)[]): string {
+    let cents = 0;
+    for (const value of values) {
+        const [whole = '0', fraction = ''] = String(value ?? '0').replace('-', '').split('.');
+        const sign = String(value ?? '').startsWith('-') ? -1 : 1;
+        cents += sign * (Number(whole) * 100 + Number((fraction + '00').slice(0, 2)));
+    }
+    const sign = cents < 0 ? '-' : '';
+    const abs = Math.abs(cents);
+
+    return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
 }
 
 /** Every money column on a payroll line, read-only ones included, in reading order. */
@@ -254,6 +298,15 @@ export const payrollRoutes = {
     lock: (period: number) => `/payroll/${period}/lock`,
     reverseLock: (period: number) => `/payroll/${period}/reverse-lock`,
     paid: (period: number) => `/payroll/${period}/paid`,
+
+    /** Bonuses: history, create (many employees), edit, approve, cancel. */
+    bonuses: {
+        index: () => '/payroll/bonuses',
+        store: () => '/payroll/bonuses',
+        update: (id: number) => `/payroll/bonuses/${id}`,
+        approve: (id: number) => `/payroll/bonuses/${id}/approve`,
+        cancel: (id: number) => `/payroll/bonuses/${id}/cancel`,
+    },
 
     /** My Payslip — one person's own periods. Not behind `payroll.draft`. */
     payslip: () => '/payslip',

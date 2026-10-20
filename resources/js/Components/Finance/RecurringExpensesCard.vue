@@ -2,7 +2,7 @@
 import { router, useForm } from '@inertiajs/vue3';
 import { Pencil, Plus, Repeat, Trash2 } from '@lucide/vue';
 import { computed, ref, useId } from 'vue';
-import type { FinanceCategory, FinanceProject, RecurringExpense } from '@/Components/Finance/finance';
+import type { CurrencyOption, FinanceCategory, FinanceProject, RecurringExpense } from '@/Components/Finance/finance';
 import { financeRoutes, formatLedgerDate, formatMoney } from '@/Components/Finance/finance';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
@@ -23,8 +23,8 @@ import { Textarea } from '@/Components/ui/textarea';
 
 /**
  * Repeating expenses (a VPS every month, a domain every year): the list, and the form that sets
- * one up. The server records an ordinary expense from each on every due date
- * (`hq:generate-recurring-expenses`), so nothing here adds a row to the ledger itself.
+ * one up. Nothing is recorded on its own: a template that is due (`is_due`) shows "Record now",
+ * and only that click turns it into an ordinary expense. "Skip" moves it on without recording.
  *
  * Money is rendered only through `formatMoney()` and dates only through `formatLedgerDate()`,
  * like every other finance screen.
@@ -33,7 +33,10 @@ const props = defineProps<{
     items: RecurringExpense[];
     categories: FinanceCategory[];
     projects: FinanceProject[];
-    currency: string;
+    /** The currencies a template may be kept in (`Currency::options()`). */
+    currencies: CurrencyOption[];
+    /** The currency a new template starts in. */
+    defaultCurrency: string;
     /** Today in the agency's timezone, from the server — the default start date. */
     today: string;
     canManage: boolean;
@@ -50,6 +53,7 @@ const FREQUENCY_OPTIONS: { value: RecurringExpense['frequency']; label: string }
 
 const categoryId = useId();
 const projectId = useId();
+const currencyId = useId();
 const amountId = useId();
 const frequencyId = useId();
 const startId = useId();
@@ -67,6 +71,7 @@ const form = useForm<{
     category_id: string;
     project_id: string;
     amount: string;
+    currency: string;
     frequency: RecurringExpense['frequency'];
     start_date: string;
     ends_on: string;
@@ -77,6 +82,7 @@ const form = useForm<{
     category_id: '',
     project_id: NO_PROJECT,
     amount: '',
+    currency: '',
     frequency: 'monthly',
     start_date: '',
     ends_on: '',
@@ -90,12 +96,18 @@ const title = computed(() => (editing.value ? 'Edit repeating expense' : 'Add re
 const preview = computed(() => {
     const value = Number.parseFloat(form.amount);
 
-    return Number.isFinite(value) && value > 0 ? formatMoney(value, props.currency) : null;
+    return Number.isFinite(value) && value > 0 ? formatMoney(value, form.currency) : null;
 });
 
 function projectLabel(project: FinanceProject): string {
     return project.domain ? `${project.name} · ${project.domain}` : project.name;
 }
+
+/**
+ * D7: new templates are BDT only. The currency picker shows only when EDITING a template kept in
+ * another currency, so a legacy USD one can still be corrected.
+ */
+const showCurrency = computed(() => editing.value !== null && editing.value.currency !== 'BDT');
 
 function openCreate(): void {
     editing.value = null;
@@ -103,6 +115,7 @@ function openCreate(): void {
     form.category_id = '';
     form.project_id = NO_PROJECT;
     form.amount = '';
+    form.currency = 'BDT';
     form.frequency = 'monthly';
     form.start_date = props.today;
     form.ends_on = '';
@@ -118,6 +131,7 @@ function openEdit(item: RecurringExpense): void {
     form.category_id = item.category ? String(item.category.id) : '';
     form.project_id = item.project ? String(item.project.id) : NO_PROJECT;
     form.amount = item.amount;
+    form.currency = item.currency;
     form.frequency = item.frequency;
     form.start_date = item.start_date;
     form.ends_on = item.ends_on ?? '';
@@ -137,6 +151,7 @@ function submit(): void {
         category_id: data.category_id,
         project_id: data.project_id === NO_PROJECT ? null : data.project_id,
         amount: data.amount,
+        currency: showCurrency.value ? data.currency : 'BDT',
         frequency: data.frequency,
         start_date: data.start_date,
         ends_on: data.ends_on === '' ? null : data.ends_on,
@@ -188,6 +203,70 @@ function confirmRemove(): void {
         },
     });
 }
+
+/* ------------------------------------------------------- recording and skipping */
+
+/** Ids of the rows with a record or skip request in flight: their buttons stay disabled. */
+const busy = ref<Set<number>>(new Set());
+
+function isBusy(item: RecurringExpense): boolean {
+    return busy.value.has(item.id);
+}
+
+function setBusy(id: number, value: boolean): void {
+    const next = new Set(busy.value);
+
+    if (value) {
+        next.add(id);
+    } else {
+        next.delete(id);
+    }
+
+    busy.value = next;
+}
+
+function recordNow(item: RecurringExpense): void {
+    if (isBusy(item)) {
+        return;
+    }
+
+    router.post(financeRoutes.recurringExpenses.record(item.id), {}, {
+        preserveScroll: true,
+        onStart: () => setBusy(item.id, true),
+        onFinish: () => setBusy(item.id, false),
+    });
+}
+
+const skipping = ref<RecurringExpense | null>(null);
+
+function askSkip(item: RecurringExpense): void {
+    skipping.value = item;
+}
+
+function cancelSkip(): void {
+    const item = skipping.value;
+
+    if (!item || !isBusy(item)) {
+        skipping.value = null;
+    }
+}
+
+function confirmSkip(): void {
+    const item = skipping.value;
+
+    if (!item || isBusy(item)) {
+        return;
+    }
+
+    router.post(financeRoutes.recurringExpenses.skip(item.id), {}, {
+        preserveScroll: true,
+        onStart: () => setBusy(item.id, true),
+        onFinish: () => {
+            setBusy(item.id, false);
+            skipping.value = null;
+        },
+    });
+}
 </script>
 
 <template>
@@ -197,7 +276,10 @@ function confirmRemove(): void {
                 <Repeat class="size-4 text-muted-foreground" aria-hidden="true" />
                 Repeating expenses
             </CardTitle>
-            <CardDescription>Set a cost once — it is recorded by itself on every due date.</CardDescription>
+            <CardDescription>
+                Expenses that come back on a schedule — VPS, domain, hosting. They are never recorded on their own:
+                when one is due it shows here, and it becomes an expense only when you record it.
+            </CardDescription>
             <CardAction v-if="canManage">
                 <Button size="sm" variant="outline" @click="openCreate">
                     <Plus aria-hidden="true" />
@@ -221,6 +303,7 @@ function confirmRemove(): void {
                         <div class="flex min-w-0 flex-wrap items-center gap-2">
                             <span class="truncate font-medium">{{ item.category?.name ?? 'Uncategorised' }}</span>
                             <Badge v-if="!item.active" variant="secondary">Paused</Badge>
+                            <Badge v-if="item.is_due" variant="secondary">Due {{ formatLedgerDate(item.next_due_date) }}</Badge>
                             <Badge v-if="item.billable" variant="outline">Billable</Badge>
                         </div>
                         <p class="truncate text-xs text-muted-foreground">
@@ -229,11 +312,15 @@ function confirmRemove(): void {
                     </div>
 
                     <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 sm:justify-end">
-                        <span class="font-medium tabular-nums">{{ formatMoney(item.amount, currency) }}</span>
+                        <span class="font-medium tabular-nums">{{ formatMoney(item.amount, item.currency) }}</span>
                         <span class="text-sm text-muted-foreground">{{ item.frequency_label }}</span>
-                        <span class="text-sm tabular-nums text-muted-foreground">
+                        <span v-if="!item.is_due" class="text-sm tabular-nums text-muted-foreground">
                             Next: {{ formatLedgerDate(item.next_due_date) }}
                         </span>
+                        <div v-if="canManage && item.is_due" class="flex items-center gap-1">
+                            <Button size="sm" :disabled="isBusy(item)" @click="recordNow(item)">Record now</Button>
+                            <Button size="sm" variant="ghost" :disabled="isBusy(item)" @click="askSkip(item)">Skip</Button>
+                        </div>
                         <div v-if="canManage" class="flex items-center gap-1">
                             <Button
                                 size="icon"
@@ -263,8 +350,8 @@ function confirmRemove(): void {
             <DialogHeader>
                 <DialogTitle>{{ title }}</DialogTitle>
                 <DialogDescription>
-                    An expense is recorded with these details on the start date and on every
-                    date it repeats after that, until the end date if there is one.
+                    It falls due on the start date and on every date it repeats after that, until the
+                    end date if there is one. Each time it is due, record it from this list.
                 </DialogDescription>
             </DialogHeader>
 
@@ -301,6 +388,21 @@ function confirmRemove(): void {
                 </div>
 
                 <div class="flex min-w-0 flex-col gap-4 sm:flex-row">
+                    <div v-if="showCurrency" class="flex min-w-0 flex-col gap-2 sm:w-40">
+                        <Label :for="currencyId">Currency</Label>
+                        <Select v-model="form.currency">
+                            <SelectTrigger :id="currencyId" class="w-full">
+                                <SelectValue placeholder="Choose a currency" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem v-for="option in currencies" :key="option.value" :value="option.value">
+                                    {{ option.label }}
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <p v-if="form.errors.currency" class="text-xs text-destructive">{{ form.errors.currency }}</p>
+                    </div>
+
                     <div class="flex min-w-0 flex-1 flex-col gap-2">
                         <Label :for="amountId">Amount</Label>
                         <Input
@@ -386,15 +488,35 @@ function confirmRemove(): void {
                 <DialogTitle>Delete this repeating expense?</DialogTitle>
                 <DialogDescription>
                     <template v-if="pending">
-                        {{ pending.category?.name ?? 'This expense' }} of {{ formatMoney(pending.amount, currency) }},
-                        {{ pending.frequency_label.toLowerCase() }}, will stop being recorded. Expenses it already
-                        recorded stay in the ledger.
+                        {{ pending.category?.name ?? 'This expense' }} of {{ formatMoney(pending.amount, pending.currency) }},
+                        {{ pending.frequency_label.toLowerCase() }}, will stop coming due. Expenses already
+                        recorded from it stay in the ledger.
                     </template>
                 </DialogDescription>
             </DialogHeader>
             <DialogFooter>
                 <Button type="button" variant="outline" :disabled="deleting" @click="cancelRemove">Cancel</Button>
                 <Button type="button" variant="destructive" :disabled="deleting" @click="confirmRemove">Delete</Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
+
+    <Dialog :open="skipping !== null" @update:open="(value: boolean) => { if (!value) { cancelSkip(); } }">
+        <DialogContent class="sm:max-w-md">
+            <DialogHeader>
+                <DialogTitle>Skip this repeating expense?</DialogTitle>
+                <DialogDescription>
+                    <template v-if="skipping">
+                        Skip {{ skipping.category?.name ?? 'this expense' }} this time? No expense is recorded, and it
+                        will next be due after {{ formatLedgerDate(skipping.next_due_date) }}.
+                    </template>
+                </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+                <Button type="button" variant="outline" :disabled="skipping !== null && isBusy(skipping)" @click="cancelSkip">
+                    Cancel
+                </Button>
+                <Button type="button" :disabled="skipping !== null && isBusy(skipping)" @click="confirmSkip">Skip</Button>
             </DialogFooter>
         </DialogContent>
     </Dialog>

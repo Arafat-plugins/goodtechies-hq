@@ -1,4 +1,4 @@
-import { CalendarOff, ChartPie, FileText, HandCoins, LayoutDashboard, Receipt, TrendingUp } from '@lucide/vue';
+import { CalendarOff, ChartPie, FileText, Gift, HandCoins, LayoutDashboard, Receipt, TrendingUp } from '@lucide/vue';
 import type { NavGroup } from './types';
 
 export const accountantNav: NavGroup[] = [
@@ -53,6 +53,7 @@ export const accountantNav: NavGroup[] = [
             // Admin screen ("Admin → Payroll: … salary settings per employee") and the
             // Accountant may not set a salary, so the row exists on the Admin shell alone.
             { label: 'Payroll', href: '/payroll', activePrefix: '/payroll', icon: HandCoins },
+            { label: 'Bonuses', href: '/payroll/bonuses', activePrefix: '/payroll/bonuses', icon: Gift },
             { label: 'Financial Reports', href: '/finance/report', icon: ChartPie },
         ],
     },

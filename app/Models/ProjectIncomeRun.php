@@ -8,12 +8,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * One billed period of a project's automatic income: what came of it (recorded, skipped because
- * the month was locked, skipped because the amount was zero) and the income it recorded, if any.
+ * Historic record of income that was generated automatically from projects before 2026-11: one
+ * billed period, what came of it (recorded, skipped because the month was locked, skipped because
+ * the amount was zero) and the income it recorded, if any.
  *
- * (project, kind, period) is unique, so a period is billed once. The row outlives its income
- * (`income_id` goes NULL on delete), which is what stops a deleted auto income being recreated.
- * See `ProjectIncomeService`.
+ * Income is now entered by hand only. Nothing writes to this table any more; the model and its
+ * rows are kept so that existing financial data is preserved and can still be read.
  *
  * @property int $id
  * @property int $project_id

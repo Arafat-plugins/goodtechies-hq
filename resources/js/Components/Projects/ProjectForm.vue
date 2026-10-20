@@ -34,10 +34,7 @@ export interface ProjectFinance {
     contract_value?: string | number | null;
     contract_terms?: string | null;
     profitability_snapshot?: string | number | null;
-    /** Income recorded automatically from these billing settings (on by default). */
-    auto_income?: boolean;
-    /** `YYYY-MM-DD`: nothing before this day is billed automatically. */
-    auto_income_from?: string | null;
+    currency?: string | null;
 }
 
 export interface ProjectPermissions {
@@ -127,6 +124,9 @@ const props = defineProps<{
     /** Polish 026: the built-in type names, and whether this person may rename them. */
     projectTypeDefaults?: Record<string, string>;
     canRenameProjectTypes?: boolean;
+    /** BDT / USD, for the finance card's Currency select (Create only). */
+    currencies?: Option[];
+    defaultCurrency?: string;
 }>();
 
 const renamingTypes = ref(false);
@@ -160,8 +160,18 @@ const form = useForm({
         contract_value: '',
         contract_terms: '',
         profitability_snapshot: '',
+        currency: props.defaultCurrency ?? 'BDT',
     },
 });
+
+const currencyOptions = computed<Option[]>(() =>
+    props.currencies && props.currencies.length > 0
+        ? props.currencies
+        : [
+              { value: 'BDT', label: 'Bangladeshi taka (BDT)' },
+              { value: 'USD', label: 'US dollar (USD)' },
+          ],
+);
 
 const isRecurring = computed(() => form.billing_type === RECURRING);
 
@@ -253,6 +263,7 @@ function submit(): void {
                 contract_value: blankToNull(data.finance.contract_value),
                 contract_terms: blankToNull(data.finance.contract_terms),
                 profitability_snapshot: blankToNull(data.finance.profitability_snapshot),
+                currency: data.finance.currency,
             },
         };
     });
@@ -281,6 +292,7 @@ const FIELD_IDS: Record<string, string> = {
     internal_notes: 'project-internal-notes',
     employee_notes: 'project-employee-notes',
     members: 'project-members',
+    'finance.currency': 'project-currency',
     'finance.price': 'project-price',
     'finance.recurring_amount': 'project-recurring-amount',
     'finance.billing_frequency': 'project-billing-frequency',
@@ -654,6 +666,27 @@ const projectHref = computed(() => (props.project ? `/admin/projects/${props.pro
                 <CardDescription>All optional, and visible to Admins only.</CardDescription>
             </CardHeader>
             <CardContent class="grid gap-4 md:grid-cols-2">
+                <div class="flex min-w-0 flex-col gap-2 md:col-span-2">
+                    <Label for="project-currency">Currency</Label>
+                    <Select v-model="form.finance.currency" :disabled="form.processing">
+                        <SelectTrigger
+                            id="project-currency"
+                            class="w-full md:w-64"
+                            :aria-invalid="errors['finance.currency'] ? true : undefined"
+                        >
+                            <SelectValue placeholder="Choose a currency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem v-for="option in currencyOptions" :key="option.value" :value="option.value">
+                                {{ option.label }}
+                            </SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <p v-if="errors['finance.currency']" class="text-xs text-destructive">
+                        {{ errors['finance.currency'] }}
+                    </p>
+                </div>
+
                 <div class="flex min-w-0 flex-col gap-2">
                     <Label for="project-price">Price</Label>
                     <Input

@@ -246,7 +246,7 @@ it('keeps another employee\'s tracked time out of the Time report', function () 
 
 it('keeps another employee\'s payroll line out of the Payroll report', function () {
     // `PayrollItem::visibleTo()` is the scope. Tapu holds `payroll.view_own` only, so the
-    // aggregate is his own line — 1200, not the agency's 7400. The route refuses him; this is
+    // aggregate is his own line — 1200, not the agency's 7900 (with the seeded Eid bonus). The route refuses him; this is
     // the scope underneath, which is what makes the refusal belt-and-braces rather than sole.
     $result = scopeBuild(ReportKey::Payroll, $this->tapu, ['from' => '2026-09-01', 'to' => '2026-09-30']);
 
@@ -254,7 +254,7 @@ it('keeps another employee\'s payroll line out of the Payroll report', function 
         ->and($result->rows[0]['net'])->toBe('1200.00');
 
     expect(scopeBuild(ReportKey::Payroll, $this->admin, ['from' => '2026-09-01', 'to' => '2026-09-30'])->rows[0]['net'])
-        ->toBe('7400.00');
+        ->toBe('7900.00');
 })->group('phase10', 'reports');
 
 /*
