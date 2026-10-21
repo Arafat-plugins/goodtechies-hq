@@ -133,6 +133,7 @@ class PayrollStateException extends RuntimeException
             $month,
         ));
     }
+
     /** A bonus was asked for somebody who is not an active employee. */
     public static function bonusEmployeeNotActive(string $employee): self
     {
@@ -162,6 +163,12 @@ class PayrollStateException extends RuntimeException
     public static function bonusNotPending(string $status): self
     {
         return new self(sprintf('This bonus is %s. Only a pending bonus can be approved.', strtolower($status)));
+    }
+
+    /** Only an approved bonus paid separately can be marked paid by hand. */
+    public static function bonusNotPayableSeparately(): self
+    {
+        return new self('Only an approved bonus paid separately can be marked paid here. Bonuses paid with salary are paid when the payroll month is marked paid.');
     }
 
     /** Cancelling a bonus needs a reason. */

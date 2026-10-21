@@ -675,6 +675,9 @@ Route::middleware(['auth', 'active', 'two-factor', 'throttle:authenticated'])->g
             Route::post('/bonuses/{bonus}/approve', [BonusController::class, 'approve'])
                 ->whereNumber('bonus')
                 ->name('bonuses.approve');
+            Route::post('/bonuses/{bonus}/paid', [BonusController::class, 'markPaid'])
+                ->whereNumber('bonus')
+                ->name('bonuses.paid');
             Route::post('/bonuses/{bonus}/cancel', [BonusController::class, 'cancel'])
                 ->whereNumber('bonus')
                 ->name('bonuses.cancel');

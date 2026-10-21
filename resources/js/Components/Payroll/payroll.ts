@@ -299,12 +299,13 @@ export const payrollRoutes = {
     reverseLock: (period: number) => `/payroll/${period}/reverse-lock`,
     paid: (period: number) => `/payroll/${period}/paid`,
 
-    /** Bonuses: history, create (many employees), edit, approve, cancel. */
+    /** Bonuses: history, create (many employees), edit, approve, mark paid (paid separately), cancel. */
     bonuses: {
         index: () => '/payroll/bonuses',
         store: () => '/payroll/bonuses',
         update: (id: number) => `/payroll/bonuses/${id}`,
         approve: (id: number) => `/payroll/bonuses/${id}/approve`,
+        paid: (id: number) => `/payroll/bonuses/${id}/paid`,
         cancel: (id: number) => `/payroll/bonuses/${id}/cancel`,
     },
 

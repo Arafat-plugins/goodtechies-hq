@@ -201,9 +201,10 @@ it('sums in the database rather than in PHP', function () {
     $sums = collect(DB::getQueryLog())
         ->filter(fn (array $q): bool => stripos($q['query'], 'sum(') !== false);
 
-    // Four: one GROUP BY per ledger, the closed-payroll total and the hand-entered Payroll
-    // expense check (decision 8-32) — still constant, never one per row.
-    expect($sums)->toHaveCount(4);
+    // Five: one GROUP BY per ledger, the closed-payroll total, the hand-entered Payroll
+    // expense check (decision 8-32) and the bonuses paid separately — still constant, never
+    // one per row.
+    expect($sums)->toHaveCount(5);
 
     DB::disableQueryLog();
 })->group('phase8', 'finance');

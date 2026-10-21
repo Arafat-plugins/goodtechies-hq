@@ -148,8 +148,8 @@ export interface RollupLine {
     name: string;
     /** An exact decimal string, like every other amount here. */
     total: string;
-    /** `ledger` for a category's rows; `payroll` for the closed month's salaries line (`category_id` 0). */
-    source?: 'ledger' | 'payroll';
+    /** `ledger` for a category's rows; `payroll` for the closed month's salaries line and `bonus` for bonuses paid separately (both `category_id` 0). */
+    source?: 'ledger' | 'payroll' | 'bonus';
 }
 
 /** The month's payroll as the rollup sees it. Counted as an expense only once locked or paid. */

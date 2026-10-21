@@ -10,6 +10,8 @@ use App\Models\PayrollPeriod;
 use App\Models\RecurringExpense;
 use App\Models\User;
 use App\Support\AuditEvent;
+use App\Support\BonusPayout;
+use App\Support\BonusStatus;
 use App\Support\Currency;
 use App\Support\FinanceCategoryKind;
 use App\Support\PayrollStatus;
@@ -776,6 +778,13 @@ class FinanceService
      * If an expense filed under a category named *Payroll* exists in a month whose payroll is
      * counted, `payroll.double_count_warning` is true: the same salaries may be in the month twice.
      *
+     * ## Bonuses paid separately
+     *
+     * A bonus paid separately (`payout` `separate`) never reaches a payroll item, so it is not in
+     * the payroll line. Its paid amount is added once, in the month of its payment date, as one
+     * more default-currency expense line, *Bonuses (paid separately)*, `category_id` 0 and
+     * `source` `bonus` — only when that month's sum is above zero.
+     *
      * ## Per currency: `by_currency`
      *
      * Every record carries its own currency (`App\Support\Currency`), and amounts in different
@@ -813,6 +822,7 @@ class FinanceService
         $payroll = $this->payrollForMonth($year, $month);
 
         $default = Currency::default()->value;
+        $separateBonuses = $this->separateBonusesForMonth($year, $month, $default);
 
         $currencies = array_values(array_unique(array_merge(
             array_keys($incomeByCurrency),
@@ -834,6 +844,15 @@ class FinanceService
                     'name' => 'Salaries (payroll)',
                     'total' => $payroll['total'],
                     'source' => 'payroll',
+                ];
+            }
+
+            if ($currency === $default && $separateBonuses > 0) {
+                $currencyExpenses[] = [
+                    'category_id' => 0,
+                    'name' => 'Bonuses (paid separately)',
+                    'total' => $this->fromCents($separateBonuses),
+                    'source' => 'bonus',
                 ];
             }
 
@@ -954,6 +973,24 @@ class FinanceService
             'expenses' => ['categories' => [], 'total' => '0.00'],
             'net' => '0.00',
         ];
+    }
+
+    /**
+     * SUM(amount) in cents of the bonuses paid separately whose payment date falls in the month,
+     * in the given currency. Bonuses paid with salary are in the payroll line instead.
+     */
+    private function separateBonusesForMonth(int $year, int $month, string $currency): int
+    {
+        $start = Carbon::create($year, $month, 1)->startOfDay();
+
+        $total = DB::table('employee_bonuses')
+            ->where('payout', BonusPayout::Separate->value)
+            ->where('status', BonusStatus::Paid->value)
+            ->where('currency', $currency)
+            ->whereBetween('payment_date', [$start->toDateString(), $start->copy()->endOfMonth()->toDateString()])
+            ->value(DB::raw('COALESCE(SUM(amount), 0)'));
+
+        return $this->toCents((string) ($total ?? '0'));
     }
 
     /**

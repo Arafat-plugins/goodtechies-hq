@@ -20,6 +20,7 @@ import {
 import { Input } from '@/Components/ui/input';
 import { Label } from '@/Components/ui/label';
 import { NativeSelect } from '@/Components/ui/native-select';
+import { RadioGroup, RadioGroupItem } from '@/Components/ui/radio-group';
 import { Textarea } from '@/Components/ui/textarea';
 import AccountantLayout from '@/Layouts/AccountantLayout.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
@@ -31,7 +32,8 @@ import type { SharedProps } from '@/types';
  *
  * An approved bonus is paid with the payroll of the month its payment date falls in:
  * `BonusService::syncPeriodFor()` writes the sum of a line's approved bonuses into its `bonus`.
- * Which controls exist is the server's answer (`permissions`), never worked out here.
+ * A bonus paid separately (`payout` `separate`) is paid now, outside payroll, and never reaches a
+ * payroll line. Which controls exist is the server's answer (`permissions`), never worked out here.
  */
 defineOptions({
     layout: (props: SharedProps) => {
@@ -63,13 +65,19 @@ interface BonusRow {
     reason: string | null;
     status: 'pending' | 'approved' | 'paid' | 'cancelled';
     status_label: string;
+    payout: Payout;
+    payout_label: string;
+    paid_at: string | null;
     period: { id: number; month: string } | null;
     created_by: string | null;
     approved_by: string | null;
     cancelled_by: string | null;
     cancellation_reason: string | null;
-    permissions: { can_update: boolean; can_approve: boolean; can_cancel: boolean };
+    permissions: { can_update: boolean; can_approve: boolean; can_cancel: boolean; can_mark_paid: boolean };
 }
+
+type Payout = 'with_payroll' | 'separate';
+type SeparateStatus = 'pending' | 'approved' | 'paid';
 
 interface Paginator<T> {
     data: T[];
@@ -153,6 +161,7 @@ function pageLabel(label: string): string {
 const addOpen = ref(false);
 const employeeSearch = ref('');
 const approveNow = ref(false);
+const separateStatus = ref<SeparateStatus>('pending');
 const ids = useId();
 
 const addForm = useForm<{
@@ -163,7 +172,8 @@ const addForm = useForm<{
     currency: string;
     payment_date: string;
     reason: string;
-    status: 'pending' | 'approved';
+    payout: Payout;
+    status: SeparateStatus;
 }>({
     employee_ids: [],
     type: 'eid',
@@ -172,6 +182,7 @@ const addForm = useForm<{
     currency: props.currency,
     payment_date: props.today,
     reason: '',
+    payout: 'with_payroll',
     status: 'pending',
 });
 
@@ -210,6 +221,7 @@ function openAdd(): void {
     addForm.payment_date = props.today;
     employeeSearch.value = '';
     approveNow.value = false;
+    separateStatus.value = 'pending';
     addOpen.value = true;
 }
 
@@ -218,7 +230,13 @@ function submitAdd(): void {
         .transform((data) => ({
             ...data,
             title: data.type === 'custom' ? data.title : null,
-            status: props.permissions.can_approve && approveNow.value ? 'approved' : 'pending',
+            status: !props.permissions.can_approve
+                ? 'pending'
+                : data.payout === 'separate'
+                  ? separateStatus.value
+                  : approveNow.value
+                    ? 'approved'
+                    : 'pending',
         }))
         .post(payrollRoutes.bonuses.store(), {
             preserveScroll: true,
@@ -232,13 +250,22 @@ function submitAdd(): void {
 
 const editing = ref<BonusRow | null>(null);
 
-const editForm = useForm({
+const editForm = useForm<{
+    type: string;
+    title: string;
+    amount: string;
+    currency: string;
+    payment_date: string;
+    reason: string;
+    payout: Payout;
+}>({
     type: 'eid',
     title: '',
     amount: '',
     currency: props.currency,
     payment_date: props.today,
     reason: '',
+    payout: 'with_payroll',
 });
 
 function openEdit(bonus: BonusRow): void {
@@ -249,6 +276,7 @@ function openEdit(bonus: BonusRow): void {
     editForm.currency = bonus.currency;
     editForm.payment_date = bonus.payment_date;
     editForm.reason = bonus.reason ?? '';
+    editForm.payout = bonus.payout;
     editing.value = bonus;
 }
 
@@ -289,6 +317,29 @@ function submitCancel(): void {
         preserveScroll: true,
         onSuccess: () => {
             cancelling.value = null;
+        },
+    });
+}
+
+/* ------------------------------------------------------------ mark paid (paid separately) */
+
+const markingPaid = ref<BonusRow | null>(null);
+const markPaidProcessing = ref(false);
+
+function submitMarkPaid(): void {
+    const bonus = markingPaid.value;
+    if (!bonus) {
+        return;
+    }
+
+    router.post(payrollRoutes.bonuses.paid(bonus.id), {}, {
+        preserveScroll: true,
+        onStart: () => {
+            markPaidProcessing.value = true;
+        },
+        onFinish: () => {
+            markPaidProcessing.value = false;
+            markingPaid.value = null;
         },
     });
 }
@@ -395,7 +446,10 @@ function submitApprove(): void {
                             <tr v-for="bonus in bonuses.data" :key="bonus.id" class="border-b border-border/60 last:border-0">
                                 <th scope="row" class="px-4 py-3 text-left font-normal">{{ bonus.employee.name }}</th>
                                 <td class="px-3 py-3">
-                                    <span class="block">{{ bonus.display_name }}</span>
+                                    <span class="flex flex-wrap items-center gap-2">
+                                        <span>{{ bonus.display_name }}</span>
+                                        <Badge v-if="bonus.payout === 'separate'" variant="outline">Paid separately</Badge>
+                                    </span>
                                     <span v-if="bonus.reason" class="block max-w-64 truncate text-xs text-muted-foreground" :title="bonus.reason">
                                         {{ bonus.reason }}
                                     </span>
@@ -407,7 +461,8 @@ function submitApprove(): void {
                                 <td class="px-3 py-3 tabular-nums">{{ bonus.payment_date }}</td>
                                 <td class="px-3 py-3"><Badge :variant="badgeVariant(bonus.status)">{{ bonus.status_label }}</Badge></td>
                                 <td class="px-3 py-3">
-                                    <Link v-if="bonus.period" :href="payrollRoutes.show(bonus.period.id)" class="text-primary underline-offset-4 hover:underline">
+                                    <span v-if="bonus.payout === 'separate'">Separate</span>
+                                    <Link v-else-if="bonus.period" :href="payrollRoutes.show(bonus.period.id)" class="text-primary underline-offset-4 hover:underline">
                                         {{ bonus.period.month }}
                                     </Link>
                                     <span v-else class="text-muted-foreground">—</span>
@@ -416,6 +471,7 @@ function submitApprove(): void {
                                     <div class="flex justify-end gap-1">
                                         <Button v-if="bonus.permissions.can_update" type="button" variant="ghost" size="sm" @click="openEdit(bonus)">Edit</Button>
                                         <Button v-if="bonus.permissions.can_approve" type="button" variant="ghost" size="sm" @click="approving = bonus">Approve</Button>
+                                        <Button v-if="bonus.permissions.can_mark_paid" type="button" variant="ghost" size="sm" @click="markingPaid = bonus">Mark paid</Button>
                                         <Button v-if="bonus.permissions.can_cancel" type="button" variant="ghost" size="sm" @click="openCancel(bonus)">Cancel</Button>
                                     </div>
                                 </td>
@@ -431,6 +487,7 @@ function submitApprove(): void {
                             <div class="min-w-0">
                                 <p class="truncate text-sm font-medium">{{ bonus.employee.name }}</p>
                                 <p class="text-sm">{{ bonus.display_name }}</p>
+                                <Badge v-if="bonus.payout === 'separate'" variant="outline" class="mt-1">Paid separately</Badge>
                             </div>
                             <Badge :variant="badgeVariant(bonus.status)">{{ bonus.status_label }}</Badge>
                         </div>
@@ -441,7 +498,8 @@ function submitApprove(): void {
                             <dd class="text-right tabular-nums">{{ bonus.payment_date }}</dd>
                             <dt class="text-muted-foreground">Payroll month</dt>
                             <dd class="text-right">
-                                <Link v-if="bonus.period" :href="payrollRoutes.show(bonus.period.id)" class="text-primary underline-offset-4 hover:underline">
+                                <span v-if="bonus.payout === 'separate'">Separate</span>
+                                <Link v-else-if="bonus.period" :href="payrollRoutes.show(bonus.period.id)" class="text-primary underline-offset-4 hover:underline">
                                     {{ bonus.period.month }}
                                 </Link>
                                 <span v-else class="text-muted-foreground">—</span>
@@ -449,11 +507,12 @@ function submitApprove(): void {
                         </dl>
                         <p v-if="bonus.reason" class="mt-2 text-xs text-muted-foreground">{{ bonus.reason }}</p>
                         <div
-                            v-if="bonus.permissions.can_update || bonus.permissions.can_approve || bonus.permissions.can_cancel"
+                            v-if="bonus.permissions.can_update || bonus.permissions.can_approve || bonus.permissions.can_mark_paid || bonus.permissions.can_cancel"
                             class="mt-3 flex flex-wrap gap-2"
                         >
                             <Button v-if="bonus.permissions.can_update" type="button" variant="outline" size="sm" @click="openEdit(bonus)">Edit</Button>
                             <Button v-if="bonus.permissions.can_approve" type="button" variant="outline" size="sm" @click="approving = bonus">Approve</Button>
+                            <Button v-if="bonus.permissions.can_mark_paid" type="button" variant="outline" size="sm" @click="markingPaid = bonus">Mark paid</Button>
                             <Button v-if="bonus.permissions.can_cancel" type="button" variant="outline" size="sm" @click="openCancel(bonus)">Cancel</Button>
                         </div>
                     </li>
@@ -521,7 +580,7 @@ function submitApprove(): void {
                     <div class="flex min-w-0 flex-col gap-2">
                         <Label :for="`${ids}-amount`">Amount</Label>
                         <Input :id="`${ids}-amount`" v-model="addForm.amount" type="number" inputmode="decimal" step="0.01" min="0.01" required class="tabular-nums" />
-                        <p class="text-xs text-muted-foreground">Paid in {{ currency }} with payroll</p>
+                        <p class="text-xs text-muted-foreground">Paid in {{ currency }}<template v-if="addForm.payout === 'with_payroll'"> with payroll</template></p>
                         <p v-if="addForm.errors.amount" class="text-xs text-destructive">{{ addForm.errors.amount }}</p>
                         <p v-if="addForm.errors.currency" class="text-xs text-destructive">{{ addForm.errors.currency }}</p>
                     </div>
@@ -538,10 +597,48 @@ function submitApprove(): void {
                     <p v-if="addForm.errors.reason" class="text-xs text-destructive">{{ addForm.errors.reason }}</p>
                 </div>
 
-                <div v-if="permissions.can_approve" class="flex items-center gap-2">
+                <fieldset class="flex min-w-0 flex-col gap-2">
+                    <legend class="mb-2 text-sm font-medium">When is it paid?</legend>
+                    <RadioGroup v-model="addForm.payout" class="gap-2" required>
+                        <div class="flex items-center gap-2">
+                            <RadioGroupItem :id="`${ids}-payout-payroll`" value="with_payroll" />
+                            <Label :for="`${ids}-payout-payroll`" class="font-normal">With the salary for {{ monthLabelOf(addForm.payment_date) }}</Label>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <div class="flex items-center gap-2">
+                                <RadioGroupItem :id="`${ids}-payout-separate`" value="separate" :aria-describedby="`${ids}-payout-separate-help`" />
+                                <Label :for="`${ids}-payout-separate`" class="font-normal">Separately, now — not with the salary</Label>
+                            </div>
+                            <p :id="`${ids}-payout-separate-help`" class="pl-6 text-xs text-muted-foreground">
+                                For an urgent payment such as a wedding gift. It is not added to any payroll month, so it is never counted twice.
+                            </p>
+                        </div>
+                    </RadioGroup>
+                    <p v-if="addForm.errors.payout" class="text-xs text-destructive">{{ addForm.errors.payout }}</p>
+                </fieldset>
+
+                <fieldset v-if="permissions.can_approve && addForm.payout === 'separate'" class="flex min-w-0 flex-col gap-2">
+                    <legend class="mb-2 text-sm font-medium">Status</legend>
+                    <RadioGroup v-model="separateStatus" class="gap-2">
+                        <div class="flex items-center gap-2">
+                            <RadioGroupItem :id="`${ids}-s-pending`" value="pending" />
+                            <Label :for="`${ids}-s-pending`" class="font-normal">Pending</Label>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <RadioGroupItem :id="`${ids}-s-approved`" value="approved" />
+                            <Label :for="`${ids}-s-approved`" class="font-normal">Approved</Label>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <RadioGroupItem :id="`${ids}-s-paid`" value="paid" />
+                            <Label :for="`${ids}-s-paid`" class="font-normal">Paid today</Label>
+                        </div>
+                    </RadioGroup>
+                </fieldset>
+                <div v-else-if="permissions.can_approve" class="flex items-center gap-2">
                     <Checkbox :id="`${ids}-approve`" :model-value="approveNow" @update:model-value="approveNow = $event === true" />
                     <Label :for="`${ids}-approve`" class="text-sm font-normal">Approve now</Label>
                 </div>
+                <p v-if="addForm.errors.status" class="text-xs text-destructive">{{ addForm.errors.status }}</p>
 
                 <DialogFooter>
                     <Button type="button" variant="outline" :disabled="addForm.processing" @click="addOpen = false">Cancel</Button>
@@ -575,7 +672,7 @@ function submitApprove(): void {
                     <div class="flex min-w-0 flex-col gap-2">
                         <Label :for="`${ids}-e-amount`">Amount</Label>
                         <Input :id="`${ids}-e-amount`" v-model="editForm.amount" type="number" inputmode="decimal" step="0.01" min="0.01" required class="tabular-nums" />
-                        <p class="text-xs text-muted-foreground">Paid in {{ currency }} with payroll</p>
+                        <p class="text-xs text-muted-foreground">Paid in {{ currency }}<template v-if="editForm.payout === 'with_payroll'"> with payroll</template></p>
                         <p v-if="editForm.errors.amount" class="text-xs text-destructive">{{ editForm.errors.amount }}</p>
                         <p v-if="editForm.errors.currency" class="text-xs text-destructive">{{ editForm.errors.currency }}</p>
                     </div>
@@ -590,6 +687,25 @@ function submitApprove(): void {
                     <Textarea :id="`${ids}-e-reason`" v-model="editForm.reason" rows="3" maxlength="1000" />
                     <p v-if="editForm.errors.reason" class="text-xs text-destructive">{{ editForm.errors.reason }}</p>
                 </div>
+                <fieldset v-if="editing && (editing.status === 'pending' || editing.status === 'approved')" class="flex min-w-0 flex-col gap-2">
+                    <legend class="mb-2 text-sm font-medium">When is it paid?</legend>
+                    <RadioGroup v-model="editForm.payout" class="gap-2" required>
+                        <div class="flex items-center gap-2">
+                            <RadioGroupItem :id="`${ids}-e-payout-payroll`" value="with_payroll" />
+                            <Label :for="`${ids}-e-payout-payroll`" class="font-normal">With the salary for {{ monthLabelOf(editForm.payment_date) }}</Label>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <div class="flex items-center gap-2">
+                                <RadioGroupItem :id="`${ids}-e-payout-separate`" value="separate" :aria-describedby="`${ids}-e-payout-separate-help`" />
+                                <Label :for="`${ids}-e-payout-separate`" class="font-normal">Separately, now — not with the salary</Label>
+                            </div>
+                            <p :id="`${ids}-e-payout-separate-help`" class="pl-6 text-xs text-muted-foreground">
+                                For an urgent payment such as a wedding gift. It is not added to any payroll month, so it is never counted twice.
+                            </p>
+                        </div>
+                    </RadioGroup>
+                    <p v-if="editForm.errors.payout" class="text-xs text-destructive">{{ editForm.errors.payout }}</p>
+                </fieldset>
                 <DialogFooter>
                     <Button type="button" variant="outline" :disabled="editForm.processing" @click="editing = null">Cancel</Button>
                     <Button type="submit" :disabled="editForm.processing">{{ editForm.processing ? 'Saving…' : 'Save' }}</Button>
@@ -622,6 +738,23 @@ function submitApprove(): void {
         </DialogContent>
     </Dialog>
 
+    <!-- Mark paid (paid separately) -->
+    <Dialog :open="markingPaid !== null" @update:open="(open: boolean) => { if (!open) markingPaid = null; }">
+        <DialogContent class="sm:max-w-md">
+            <DialogHeader>
+                <DialogTitle>Mark bonus paid</DialogTitle>
+                <DialogDescription v-if="markingPaid">
+                    Mark {{ markingPaid.display_name }} of {{ formatMoney(markingPaid.amount, markingPaid.currency) }} for
+                    {{ markingPaid.employee.name }} as paid today?
+                </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+                <Button type="button" variant="outline" :disabled="markPaidProcessing" @click="markingPaid = null">Not now</Button>
+                <Button type="button" :disabled="markPaidProcessing" @click="submitMarkPaid">Mark paid</Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
+
     <!-- Approve -->
     <Dialog :open="approving !== null" @update:open="(open: boolean) => { if (!open) approving = null; }">
         <DialogContent class="sm:max-w-md">
@@ -629,7 +762,9 @@ function submitApprove(): void {
                 <DialogTitle>Approve bonus</DialogTitle>
                 <DialogDescription v-if="approving">
                     Approve {{ approving.display_name }} of {{ formatMoney(approving.amount, approving.currency) }} for
-                    {{ approving.employee.name }}? It will be added to the payroll for {{ monthLabelOf(approving.payment_date) }}.
+                    {{ approving.employee.name }}?
+                    <template v-if="approving.payout === 'separate'">It is paid separately, not with any payroll month.</template>
+                    <template v-else>It will be added to the payroll for {{ monthLabelOf(approving.payment_date) }}.</template>
                 </DialogDescription>
             </DialogHeader>
             <DialogFooter>

@@ -130,10 +130,11 @@ enum AuditEvent: string
     // Polish 005: a draft moved to the month it actually pays for (old and new month).
     case PayrollMonthChanged = 'payroll.month_changed';
     case PayrollLockReversed = 'payroll.lock_reversed';
-    // Bonuses (Eid, annual, performance, custom) created, edited, approved or cancelled.
+    // Bonuses (Eid, annual, performance, custom) created, edited, approved, paid or cancelled.
     case BonusCreated = 'bonus.created';
     case BonusEdited = 'bonus.edited';
     case BonusApproved = 'bonus.approved';
+    case BonusPaid = 'bonus.paid';
     case BonusCancelled = 'bonus.cancelled';
     case ExpenseCreated = 'expense.created';
     case ExpenseEdited = 'expense.edited';
@@ -321,6 +322,7 @@ enum AuditEvent: string
             self::BonusCreated => 'Bonus created',
             self::BonusEdited => 'Bonus edited',
             self::BonusApproved => 'Bonus approved',
+            self::BonusPaid => 'Bonus paid',
             self::BonusCancelled => 'Bonus cancelled',
             self::ExpenseCreated => 'Expense recorded',
             self::ExpenseEdited => 'Expense edited',
@@ -407,6 +409,7 @@ enum AuditEvent: string
             self::BonusCreated,
             self::BonusEdited,
             self::BonusApproved,
+            self::BonusPaid,
             self::BonusCancelled,
             self::ExpenseCreated,
             self::ExpenseEdited,

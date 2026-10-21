@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\BonusPayout;
 use App\Support\BonusStatus;
 use App\Support\BonusType;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -32,6 +33,8 @@ use Illuminate\Support\Carbon;
  * @property int|null $cancelled_by
  * @property Carbon|null $cancelled_at
  * @property string|null $cancellation_reason
+ * @property BonusPayout $payout
+ * @property Carbon|null $paid_at
  */
 #[Fillable([
     'employee_id',
@@ -49,6 +52,8 @@ use Illuminate\Support\Carbon;
     'cancelled_by',
     'cancelled_at',
     'cancellation_reason',
+    'payout',
+    'paid_at',
 ])]
 class EmployeeBonus extends Model
 {
@@ -66,6 +71,8 @@ class EmployeeBonus extends Model
             'payment_date' => 'date',
             'approved_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'payout' => BonusPayout::class,
+            'paid_at' => 'datetime',
         ];
     }
 
@@ -138,6 +145,8 @@ class EmployeeBonus extends Model
             'reason' => $this->reason,
             'status' => $this->status->value,
             'cancellation_reason' => $this->cancellation_reason,
+            'payout' => ($this->payout ?? BonusPayout::WithPayroll)->value,
+            'paid_at' => $this->paid_at?->toIso8601String(),
         ];
     }
 }

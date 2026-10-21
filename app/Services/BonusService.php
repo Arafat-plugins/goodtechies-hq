@@ -9,6 +9,7 @@ use App\Models\PayrollItem;
 use App\Models\PayrollPeriod;
 use App\Models\User;
 use App\Support\AuditEvent;
+use App\Support\BonusPayout;
 use App\Support\BonusStatus;
 use App\Support\BonusType;
 use App\Support\Currency;
@@ -69,15 +70,27 @@ class BonusService
         }
 
         $paymentDate = Carbon::parse((string) $attributes['payment_date'])->startOfDay();
-        $this->assertMonthIsOpen($paymentDate, $actor);
+        $payout = BonusPayout::tryFrom((string) ($attributes['payout'] ?? '')) ?? BonusPayout::WithPayroll;
+
+        // A bonus paid separately never touches a payroll month, so a closed month does not stop it.
+        if ($payout === BonusPayout::WithPayroll) {
+            $this->assertMonthIsOpen($paymentDate, $actor);
+        }
 
         $type = BonusType::from((string) $attributes['type']);
         $title = $type === BonusType::Custom ? $this->cleanTitle($attributes['title'] ?? null) : null;
         $amount = (string) $attributes['amount'];
-        $approveNow = ($attributes['status'] ?? null) === BonusStatus::Approved->value
-            && Gate::forUser($actor)->allows('approve', EmployeeBonus::class);
+        $mayApprove = Gate::forUser($actor)->allows('approve', EmployeeBonus::class);
+        $asked = $attributes['status'] ?? null;
 
-        return DB::transaction(function () use ($actor, $ids, $employees, $attributes, $paymentDate, $type, $title, $amount, $approveNow): array {
+        $status = match (true) {
+            $payout === BonusPayout::Separate && $asked === BonusStatus::Paid->value && $mayApprove => BonusStatus::Paid,
+            $asked === BonusStatus::Approved->value && $mayApprove => BonusStatus::Approved,
+            default => BonusStatus::Pending,
+        };
+        $approveNow = $status !== BonusStatus::Pending;
+
+        return DB::transaction(function () use ($actor, $ids, $employees, $attributes, $paymentDate, $type, $title, $amount, $payout, $status, $approveNow): array {
             $created = new Collection;
             $skipped = [];
 
@@ -91,6 +104,7 @@ class BonusService
                     ->where(fn ($query) => $title === null ? $query->whereNull('title') : $query->where('title', $title))
                     ->where('amount', $amount)
                     ->whereDate('payment_date', $paymentDate->toDateString())
+                    ->where('payout', $payout->value)
                     ->where('status', '!=', BonusStatus::Cancelled->value)
                     ->exists();
 
@@ -108,10 +122,12 @@ class BonusService
                     'currency' => strtoupper((string) $attributes['currency']),
                     'payment_date' => $paymentDate->toDateString(),
                     'reason' => $this->cleanText($attributes['reason'] ?? null),
-                    'status' => $approveNow ? BonusStatus::Approved : BonusStatus::Pending,
+                    'payout' => $payout,
+                    'status' => $status,
                     'created_by' => $actor->getKey(),
                     'approved_by' => $approveNow ? $actor->getKey() : null,
                     'approved_at' => $approveNow ? now() : null,
+                    'paid_at' => $status === BonusStatus::Paid ? now() : null,
                 ]);
 
                 $this->audit->record(AuditEvent::BonusCreated, $bonus, null, $bonus->auditValues(), $actor);
@@ -119,7 +135,9 @@ class BonusService
                 $created->push($bonus);
             }
 
-            $this->syncPeriodFor($paymentDate);
+            if ($payout === BonusPayout::WithPayroll) {
+                $this->syncPeriodFor($paymentDate);
+            }
 
             return [
                 'created' => $created->map(fn (EmployeeBonus $bonus): EmployeeBonus => $bonus->refresh()),
@@ -143,12 +161,22 @@ class BonusService
         $oldDate = Carbon::parse($bonus->payment_date)->startOfDay();
         $newDate = Carbon::parse((string) $attributes['payment_date'])->startOfDay();
 
-        $this->assertMonthIsOpen($oldDate, $actor);
-        $this->assertMonthIsOpen($newDate, $actor);
+        $oldPayout = $bonus->payout ?? BonusPayout::WithPayroll;
+        $newPayout = BonusPayout::tryFrom((string) ($attributes['payout'] ?? '')) ?? $oldPayout;
+        $oldOnPayroll = $oldPayout === BonusPayout::WithPayroll;
+        $newOnPayroll = $newPayout === BonusPayout::WithPayroll;
+
+        if ($oldOnPayroll) {
+            $this->assertMonthIsOpen($oldDate, $actor);
+        }
+
+        if ($newOnPayroll) {
+            $this->assertMonthIsOpen($newDate, $actor);
+        }
 
         $type = BonusType::from((string) $attributes['type']);
 
-        return DB::transaction(function () use ($actor, $bonus, $attributes, $oldDate, $newDate, $type): EmployeeBonus {
+        return DB::transaction(function () use ($actor, $bonus, $attributes, $oldDate, $newDate, $type, $newPayout, $oldOnPayroll, $newOnPayroll): EmployeeBonus {
             Employee::query()->whereKey($bonus->employee_id)->lockForUpdate()->get(['id']);
 
             $old = $bonus->auditValues();
@@ -160,13 +188,22 @@ class BonusService
                 'currency' => strtoupper((string) $attributes['currency']),
                 'payment_date' => $newDate->toDateString(),
                 'reason' => $this->cleanText($attributes['reason'] ?? null),
-            ])->save();
+                'payout' => $newPayout,
+            ]);
+
+            if (! $newOnPayroll) {
+                $bonus->payroll_period_id = null;
+            }
+
+            $bonus->save();
 
             $this->audit->record(AuditEvent::BonusEdited, $bonus, $old, $bonus->auditValues(), $actor);
 
-            $this->syncPeriodFor($oldDate);
+            if ($oldOnPayroll) {
+                $this->syncPeriodFor($oldDate);
+            }
 
-            if (! PayrollPeriod::monthKey($oldDate)->equalTo(PayrollPeriod::monthKey($newDate))) {
+            if ($newOnPayroll && (! $oldOnPayroll || ! PayrollPeriod::monthKey($oldDate)->equalTo(PayrollPeriod::monthKey($newDate)))) {
                 $this->syncPeriodFor($newDate);
             }
 
@@ -189,9 +226,13 @@ class BonusService
         }
 
         $date = Carbon::parse($bonus->payment_date)->startOfDay();
-        $this->assertMonthIsOpen($date, $actor);
+        $onPayroll = $bonus->payout !== BonusPayout::Separate;
 
-        return DB::transaction(function () use ($actor, $bonus, $date): EmployeeBonus {
+        if ($onPayroll) {
+            $this->assertMonthIsOpen($date, $actor);
+        }
+
+        return DB::transaction(function () use ($actor, $bonus, $date, $onPayroll): EmployeeBonus {
             $old = $bonus->auditValues();
 
             $bonus->fill([
@@ -202,7 +243,9 @@ class BonusService
 
             $this->audit->record(AuditEvent::BonusApproved, $bonus, $old, $bonus->auditValues(), $actor);
 
-            $this->syncPeriodFor($date);
+            if ($onPayroll) {
+                $this->syncPeriodFor($date);
+            }
 
             return $bonus->refresh();
         });
@@ -225,9 +268,13 @@ class BonusService
         }
 
         $date = Carbon::parse($bonus->payment_date)->startOfDay();
-        $this->assertMonthIsOpen($date, $actor);
+        $onPayroll = $bonus->payout !== BonusPayout::Separate;
 
-        return DB::transaction(function () use ($actor, $bonus, $clean, $date): EmployeeBonus {
+        if ($onPayroll) {
+            $this->assertMonthIsOpen($date, $actor);
+        }
+
+        return DB::transaction(function () use ($actor, $bonus, $clean, $date, $onPayroll): EmployeeBonus {
             $old = $bonus->auditValues();
 
             $bonus->fill([
@@ -240,7 +287,39 @@ class BonusService
 
             $this->audit->record(AuditEvent::BonusCancelled, $bonus, $old, $bonus->auditValues(), $actor);
 
-            $this->syncPeriodFor($date);
+            if ($onPayroll) {
+                $this->syncPeriodFor($date);
+            }
+
+            return $bonus->refresh();
+        });
+    }
+
+    /**
+     * Pay an approved bonus that is paid separately, today. It never touches a payroll month.
+     *
+     * @throws AuthorizationException
+     * @throws PayrollStateException
+     */
+    public function markPaid(User $actor, EmployeeBonus $bonus): EmployeeBonus
+    {
+        if ($bonus->payout !== BonusPayout::Separate || $bonus->status !== BonusStatus::Approved) {
+            throw PayrollStateException::bonusNotPayableSeparately();
+        }
+
+        if (! Gate::forUser($actor)->allows('markPaid', $bonus)) {
+            throw new AuthorizationException('You are not allowed to mark this bonus paid.');
+        }
+
+        return DB::transaction(function () use ($actor, $bonus): EmployeeBonus {
+            $old = $bonus->auditValues();
+
+            $bonus->fill([
+                'status' => BonusStatus::Paid,
+                'paid_at' => now(),
+            ])->save();
+
+            $this->audit->record(AuditEvent::BonusPaid, $bonus, $old, $bonus->auditValues(), $actor);
 
             return $bonus->refresh();
         });
@@ -275,37 +354,40 @@ class BonusService
             // Link every approved bonus in this month, in the payroll currency, for an employee
             // with a line on this period.
             DB::update(
-                'UPDATE employee_bonuses b
+                "UPDATE employee_bonuses b
                     SET payroll_period_id = ?, updated_at = now()
                   WHERE b.status = ?
+                    AND b.payout = 'with_payroll'
                     AND b.payment_date BETWEEN ? AND ?
                     AND b.currency = ?
                     AND b.payroll_period_id IS DISTINCT FROM ?
-                    AND EXISTS (SELECT 1 FROM payroll_items i WHERE i.payroll_period_id = ? AND i.employee_id = b.employee_id)',
+                    AND EXISTS (SELECT 1 FROM payroll_items i WHERE i.payroll_period_id = ? AND i.employee_id = b.employee_id)",
                 [$periodId, BonusStatus::Approved->value, $start, $end, $currency, $periodId, $periodId],
             );
 
             // Unlink approved bonuses linked here that no longer belong.
             DB::update(
-                'UPDATE employee_bonuses b
+                "UPDATE employee_bonuses b
                     SET payroll_period_id = NULL, updated_at = now()
                   WHERE b.payroll_period_id = ?
                     AND b.status = ?
                     AND (b.payment_date NOT BETWEEN ? AND ?
-                         OR NOT EXISTS (SELECT 1 FROM payroll_items i WHERE i.payroll_period_id = ? AND i.employee_id = b.employee_id))',
+                         OR b.payout <> 'with_payroll'
+                         OR NOT EXISTS (SELECT 1 FROM payroll_items i WHERE i.payroll_period_id = ? AND i.employee_id = b.employee_id))",
                 [$periodId, BonusStatus::Approved->value, $start, $end, $periodId],
             );
 
             DB::update(
-                'UPDATE payroll_items i
+                "UPDATE payroll_items i
                     SET bonus = COALESCE((
                         SELECT SUM(b.amount) FROM employee_bonuses b
                          WHERE b.payroll_period_id = i.payroll_period_id
                            AND b.employee_id = i.employee_id
                            AND b.status IN (?, ?)
+                           AND b.payout = 'with_payroll'
                     ), 0),
                         updated_at = now()
-                  WHERE i.payroll_period_id = ?',
+                  WHERE i.payroll_period_id = ?",
                 [BonusStatus::Approved->value, BonusStatus::Paid->value, $periodId],
             );
         });
@@ -315,7 +397,7 @@ class BonusService
     public function markPaidForPeriod(PayrollPeriod $period): void
     {
         DB::update(
-            'UPDATE employee_bonuses SET status = ?, updated_at = now() WHERE payroll_period_id = ? AND status = ?',
+            "UPDATE employee_bonuses SET status = ?, paid_at = now(), updated_at = now() WHERE payroll_period_id = ? AND status = ? AND payout = 'with_payroll'",
             [BonusStatus::Paid->value, $period->getKey(), BonusStatus::Approved->value],
         );
     }

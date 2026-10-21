@@ -23,8 +23,8 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * The Bonuses page: history with filters, and create (one or many employees), edit, approve
- * and cancel. Every write goes through `BonusService`, which re-checks the policy and keeps
+ * The Bonuses page: history with filters, and create (one or many employees), edit, approve,
+ * mark paid (a bonus paid separately) and cancel. Every write goes through `BonusService`, which re-checks the policy and keeps
  * `payroll_items.bonus` in step.
  */
 class BonusController extends Controller
@@ -79,6 +79,9 @@ class BonusController extends Controller
                 'reason' => $bonus->reason,
                 'status' => $bonus->status->value,
                 'status_label' => $bonus->status->label(),
+                'payout' => $bonus->payout->value,
+                'payout_label' => $bonus->payout->label(),
+                'paid_at' => $bonus->paid_at?->toIso8601String(),
                 'period' => $bonus->period === null ? null : [
                     'id' => (int) $bonus->period->getKey(),
                     'month' => $bonus->period->label(),
@@ -91,6 +94,7 @@ class BonusController extends Controller
                     'can_update' => Gate::forUser($user)->allows('update', $bonus),
                     'can_approve' => $bonus->status === BonusStatus::Pending && Gate::forUser($user)->allows('approve', $bonus),
                     'can_cancel' => Gate::forUser($user)->allows('cancel', $bonus),
+                    'can_mark_paid' => Gate::forUser($user)->allows('markPaid', $bonus),
                 ],
             ]);
 
@@ -165,6 +169,24 @@ class BonusController extends Controller
         }
 
         return back()->with('success', 'Bonus approved.');
+    }
+
+    /**
+     * Pay an approved bonus that is paid separately, today. Only holders of `payroll.approve`
+     * get this far; whether this bonus can be paid here is the service's check, so a bonus paid
+     * with salary is refused with a message rather than a 403.
+     */
+    public function markPaid(Request $request, EmployeeBonus $bonus): RedirectResponse
+    {
+        Gate::authorize('approve', EmployeeBonus::class);
+
+        try {
+            $this->bonuses->markPaid($request->user(), $bonus);
+        } catch (PayrollStateException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        return back()->with('success', 'Bonus marked paid.');
     }
 
     public function cancel(CancelBonusRequest $request, EmployeeBonus $bonus): RedirectResponse

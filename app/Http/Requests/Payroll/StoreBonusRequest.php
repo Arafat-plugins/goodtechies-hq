@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests\Payroll;
 
+use App\Support\BonusPayout;
 use App\Support\BonusType;
 use App\Support\Currency;
+use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -22,7 +24,15 @@ class StoreBonusRequest extends FormRequest
             'employee_ids' => ['required', 'array', 'min:1', 'max:100'],
             'employee_ids.*' => ['integer', 'distinct', 'exists:employees,id'],
             ...self::bonusRules(),
-            'status' => ['sometimes', 'in:pending,approved'],
+            'status' => [
+                'sometimes',
+                'in:pending,approved,paid',
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    if ($value === 'paid' && $this->input('payout') !== BonusPayout::Separate->value) {
+                        $fail('Only a bonus paid separately can be marked paid when it is created.');
+                    }
+                },
+            ],
         ];
     }
 
@@ -40,6 +50,7 @@ class StoreBonusRequest extends FormRequest
             'currency' => ['required', Rule::in([Currency::default()->value])],
             'payment_date' => ['required', 'date_format:Y-m-d'],
             'reason' => ['nullable', 'string', 'max:1000'],
+            'payout' => ['sometimes', 'in:with_payroll,separate'],
         ];
     }
 

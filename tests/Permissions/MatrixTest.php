@@ -1403,6 +1403,7 @@ function permissionMatrix(): array
         ['POST', 'payroll/bonuses', $payroll(302)],
         ['PUT', 'payroll/bonuses/{bonus}', $payroll(302)],
         ['POST', 'payroll/bonuses/{bonus}/approve', $payrollAdmin(302)],
+        ['POST', 'payroll/bonuses/{bonus}/paid', $payrollAdmin(302)],
         ['POST', 'payroll/bonuses/{bonus}/cancel', $payroll(302)],
 
         // Accountant surface

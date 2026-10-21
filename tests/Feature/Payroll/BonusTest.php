@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\PayrollStateException;
 use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\EmployeeBonus;
@@ -7,9 +8,11 @@ use App\Models\PayrollItem;
 use App\Models\PayrollPeriod;
 use App\Models\User;
 use App\Services\BonusService;
+use App\Services\FinanceService;
 use App\Services\PayrollService;
 use App\Services\SettingsService;
 use App\Support\AuditEvent;
+use App\Support\BonusPayout;
 use App\Support\BonusStatus;
 use App\Support\Currency;
 use App\Support\PayrollStatus;
@@ -159,7 +162,7 @@ test('a pending bonus is not counted until approved, and cancelling removes it w
     expect(fn () => $this->bonuses->cancel($this->admin, EmployeeBonus::create([
         'employee_id' => $id, 'type' => 'annual', 'amount' => '10', 'currency' => Currency::default()->value,
         'payment_date' => '2026-09-10', 'status' => 'approved',
-    ]), '   '))->toThrow(App\Exceptions\PayrollStateException::class);
+    ]), '   '))->toThrow(PayrollStateException::class);
 });
 
 test('two bonuses in one month sum, and a bonus dated next month is not in this month', function () {
@@ -395,4 +398,134 @@ test('changing the currency setting never unlinks a bonus that is already linked
 
     expect($bonus->refresh()->payroll_period_id)->toBe($periodId)
         ->and(bonusTestRow($this->yaseenItem->getKey())->bonus)->toBe('400.00');
+});
+
+/*
+| Bonuses paid separately — paid now, outside payroll, never on a payroll item.
+*/
+
+test('with the month paid, the admin pays a separate bonus today and no payroll item changes', function () {
+    bonusTestWalkTo(PayrollStatus::Paid);
+    $period = PayrollPeriod::query()->forMonth(BONUS_TEST_MONTH)->firstOrFail();
+    $before = DB::table('payroll_items')->where('payroll_period_id', $period->getKey())->orderBy('id')->pluck('bonus', 'id')->all();
+    $id = (int) $this->yaseenItem->employee_id;
+
+    $this->actingAs($this->admin)
+        ->post('/payroll/bonuses', bonusTestBody([$id], ['type' => 'custom', 'title' => 'Wedding gift', 'amount' => '20000', 'payout' => 'separate', 'status' => 'paid']))
+        ->assertRedirect()
+        ->assertSessionHas('success', 'Bonus saved for 1 employee(s).');
+
+    $bonus = EmployeeBonus::query()->where('employee_id', $id)->where('title', 'Wedding gift')->firstOrFail();
+
+    expect($bonus->status)->toBe(BonusStatus::Paid)
+        ->and($bonus->payout)->toBe(BonusPayout::Separate)
+        ->and($bonus->paid_at)->not->toBeNull()
+        ->and($bonus->payroll_period_id)->toBeNull()
+        ->and(DB::table('payroll_items')->where('payroll_period_id', $period->getKey())->orderBy('id')->pluck('bonus', 'id')->all())->toBe($before);
+});
+
+test('an approved separate bonus is marked paid; a bonus paid with salary is refused, and the accountant gets 403', function () {
+    $id = (int) $this->yaseenItem->employee_id;
+    $this->actingAs($this->admin)->post('/payroll/bonuses', bonusTestBody([$id], ['amount' => '700', 'payout' => 'separate', 'status' => 'approved']));
+    $this->actingAs($this->admin)->post('/payroll/bonuses', bonusTestBody([$id], ['amount' => '400']));
+    $separate = EmployeeBonus::query()->where('employee_id', $id)->where('payout', 'separate')->firstOrFail();
+    $withSalary = EmployeeBonus::query()->where('employee_id', $id)->where('payout', 'with_payroll')->firstOrFail();
+
+    expect($separate->status)->toBe(BonusStatus::Approved)
+        ->and($separate->payroll_period_id)->toBeNull()
+        ->and(bonusTestRow($this->yaseenItem->getKey())->bonus)->toBe('400.00');
+
+    $this->actingAs($this->accountant)->post("/payroll/bonuses/{$separate->id}/paid")->assertForbidden();
+    expect($separate->refresh()->status)->toBe(BonusStatus::Approved);
+
+    $this->actingAs($this->admin)
+        ->post("/payroll/bonuses/{$separate->id}/paid")
+        ->assertRedirect()
+        ->assertSessionHas('success', 'Bonus marked paid.');
+
+    expect($separate->refresh()->status)->toBe(BonusStatus::Paid)
+        ->and($separate->paid_at)->not->toBeNull()
+        ->and(AuditLog::query()->where('event', AuditEvent::BonusPaid->value)->count())->toBe(1);
+
+    $this->actingAs($this->admin)
+        ->post("/payroll/bonuses/{$withSalary->id}/paid")
+        ->assertSessionHas('error', 'Only an approved bonus paid separately can be marked paid here. Bonuses paid with salary are paid when the payroll month is marked paid.');
+
+    expect($withSalary->refresh()->status)->toBe(BonusStatus::Approved)
+        ->and(bonusTestRow($this->yaseenItem->getKey())->bonus)->toBe('400.00');
+});
+
+test('the accountant creates a separate bonus only as pending, even in a closed month', function () {
+    bonusTestWalkTo(PayrollStatus::Locked);
+    $id = (int) $this->yaseenItem->employee_id;
+
+    $this->actingAs($this->accountant)
+        ->post('/payroll/bonuses', bonusTestBody([$id], ['amount' => '111', 'payout' => 'separate', 'status' => 'paid']))
+        ->assertSessionHas('success');
+    $this->actingAs($this->accountant)
+        ->post('/payroll/bonuses', bonusTestBody([$id], ['amount' => '222', 'payout' => 'separate', 'status' => 'approved']))
+        ->assertSessionHas('success');
+
+    $created = EmployeeBonus::query()->where('employee_id', $id)->where('payout', 'separate')->get();
+
+    expect($created)->toHaveCount(2)
+        ->and($created->every(fn (EmployeeBonus $bonus): bool => $bonus->status === BonusStatus::Pending
+            && $bonus->paid_at === null
+            && $bonus->payroll_period_id === null))->toBeTrue();
+});
+
+test('syncing never links a separate bonus, and switching an approved bonus to separate takes it off the item', function () {
+    $id = (int) $this->yaseenItem->employee_id;
+    $this->actingAs($this->admin)->post('/payroll/bonuses', bonusTestBody([$id], ['amount' => '900', 'payout' => 'separate']));
+    $separate = EmployeeBonus::query()->where('employee_id', $id)->where('payout', 'separate')->firstOrFail();
+
+    $this->bonuses->syncPeriodFor(Carbon::parse(BONUS_TEST_MONTH));
+    $this->bonuses->syncPeriodFor(Carbon::parse(BONUS_TEST_MONTH));
+
+    expect($separate->refresh()->status)->toBe(BonusStatus::Approved)
+        ->and($separate->payroll_period_id)->toBeNull()
+        ->and(bonusTestRow($this->yaseenItem->getKey())->bonus)->toBe('0.00');
+
+    $this->actingAs($this->admin)->post('/payroll/bonuses', bonusTestBody([$id], ['amount' => '400']));
+    $bonus = EmployeeBonus::query()->where('employee_id', $id)->where('payout', 'with_payroll')->firstOrFail();
+    expect($bonus->payroll_period_id)->not->toBeNull()
+        ->and(bonusTestRow($this->yaseenItem->getKey())->bonus)->toBe('400.00');
+
+    $this->actingAs($this->admin)
+        ->put("/payroll/bonuses/{$bonus->id}", ['type' => 'eid', 'amount' => '400', 'currency' => Currency::default()->value, 'payment_date' => '2026-09-15', 'payout' => 'separate'])
+        ->assertSessionHas('success', 'Bonus updated.');
+
+    expect($bonus->refresh()->payout)->toBe(BonusPayout::Separate)
+        ->and($bonus->payroll_period_id)->toBeNull()
+        ->and(bonusTestRow($this->yaseenItem->getKey())->bonus)->toBe('0.00');
+});
+
+test('the finance rollup counts paid separate bonuses once as their own expense line', function () {
+    $finance = app(FinanceService::class);
+    $before = $finance->monthlyRollup($this->admin, 2026, 9);
+    $id = (int) $this->yaseenItem->employee_id;
+    $other = (int) $this->accountantItem->employee_id;
+
+    $this->actingAs($this->admin)->post('/payroll/bonuses', bonusTestBody([$id, $other], ['amount' => '1000', 'payout' => 'separate', 'status' => 'paid']));
+    $this->actingAs($this->admin)->post('/payroll/bonuses', bonusTestBody([$id], ['amount' => '70', 'payout' => 'separate', 'status' => 'approved']));
+    $this->actingAs($this->admin)->post('/payroll/bonuses', bonusTestBody([$id], ['amount' => '30', 'payout' => 'separate', 'status' => 'pending']));
+
+    $after = $finance->monthlyRollup($this->admin, 2026, 9);
+    $default = collect($after['by_currency'])->firstWhere('currency', Currency::default()->value);
+    $lines = collect($default['expenses']['categories'])->where('source', 'bonus')->values();
+
+    expect($lines)->toHaveCount(1)
+        ->and($lines[0]['name'])->toBe('Bonuses (paid separately)')
+        ->and($lines[0]['total'])->toBe('2000.00')
+        ->and($after['payroll'])->toBe($before['payroll'])
+        ->and(collect($after['bdt']['expenses']['categories'])->where('source', 'bonus')->sum(fn (array $line): float => (float) $line['total']))->toBe(2000.0)
+        ->and(collect($before['by_currency'])->flatMap(fn (array $entry) => $entry['expenses']['categories'])->where('source', 'bonus'))->toHaveCount(0);
+});
+
+test('a bonus paid with salary cannot be created as paid', function () {
+    $this->actingAs($this->admin)
+        ->post('/payroll/bonuses', bonusTestBody([(int) $this->yaseenItem->employee_id], ['status' => 'paid']))
+        ->assertSessionHasErrors(['status' => 'Only a bonus paid separately can be marked paid when it is created.']);
+
+    expect(EmployeeBonus::query()->where('employee_id', $this->yaseenItem->employee_id)->count())->toBe(0);
 });

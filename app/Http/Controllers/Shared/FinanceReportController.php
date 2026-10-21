@@ -7,6 +7,9 @@ use App\Http\Requests\Finance\FinanceReportRequest;
 use App\Http\Requests\Finance\UpdateExchangeRateRequest;
 use App\Services\ExchangeRateService;
 use App\Services\FinanceService;
+use App\Support\BonusPayout;
+use App\Support\BonusStatus;
+use App\Support\Currency;
 use App\Support\PayrollStatus;
 use App\Support\Permission;
 use App\Support\ProjectEarnings;
@@ -307,6 +310,8 @@ class FinanceReportController extends Controller
         $expenses = $this->monthlyTotals('expenses', $window);
         // Payroll is paid in BDT.
         $payroll = $this->monthlyPayrollTotals($window);
+        // Bonuses paid separately are outside payroll: one more expense, in the default currency.
+        $separateBonuses = $this->monthlySeparateBonusTotals($window);
 
         $points = [];
 
@@ -315,7 +320,7 @@ class FinanceReportController extends Controller
             $key = $point->format('Y-m');
 
             $in = $income[$key] ?? 0;
-            $out = ($expenses[$key] ?? 0) + ($payroll[$key] ?? 0);
+            $out = ($expenses[$key] ?? 0) + ($payroll[$key] ?? 0) + ($separateBonuses[$key] ?? 0);
 
             $points[] = [
                 'month' => $key,
@@ -390,6 +395,32 @@ class FinanceReportController extends Controller
             ->get([
                 DB::raw("to_char(period.month, 'YYYY-MM') as bucket"),
                 DB::raw('SUM(item.net_salary) as total'),
+            ])
+            ->mapWithKeys(fn (object $row): array => [
+                (string) $row->bucket => $this->cents((string) $row->total),
+            ])
+            ->all();
+    }
+
+    /**
+     * Paid bonuses paid separately per month over one window, as `YYYY-MM => cents`, by payment
+     * date and in the default currency. The same figure `FinanceService::monthlyRollup()` counts
+     * as its *Bonuses (paid separately)* expense line.
+     *
+     * @param  array{string, string}  $window
+     * @return array<string, int>
+     */
+    private function monthlySeparateBonusTotals(array $window): array
+    {
+        return DB::table('employee_bonuses')
+            ->where('payout', BonusPayout::Separate->value)
+            ->where('status', BonusStatus::Paid->value)
+            ->where('currency', Currency::default()->value)
+            ->whereBetween('payment_date', $window)
+            ->groupByRaw("to_char(payment_date, 'YYYY-MM')")
+            ->get([
+                DB::raw("to_char(payment_date, 'YYYY-MM') as bucket"),
+                DB::raw('SUM(amount) as total'),
             ])
             ->mapWithKeys(fn (object $row): array => [
                 (string) $row->bucket => $this->cents((string) $row->total),
